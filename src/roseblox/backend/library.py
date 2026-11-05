@@ -77,11 +77,11 @@ class LibraryStore:
         self.path = Path(path) if path is not None else default_library_path()
 
     def load(self) -> list[InstallationRecord]:
-        if not self.path.exists():
-            return []
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as error:
+        except FileNotFoundError:
+            return []
+        except (OSError, UnicodeError, json.JSONDecodeError) as error:
             raise LibraryDataError(f"Could not read the installation library: {error}") from error
         if not isinstance(data, dict) or not isinstance(data.get("installations"), list):
             raise LibraryDataError("The installation library has an invalid format.")

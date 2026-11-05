@@ -45,3 +45,11 @@ window {
   color: alpha(@window_fg_color, 0.58);
   font-size: 0.9em;
 }
+
+.management-page {
+  background-color: @view_bg_color;
+}
+
+.status-notice {
+  color: @accent_color;
+}

@@ -12,4 +12,6 @@ PYTHONPATH=src python3 -m roseblox
 
 On Arch Linux or CachyOS, the relevant packages are `gtk4`, `libadwaita`, and `python-gobject`.
 
-Milestone 1 provides the native application shell and navigation. Player, Studio, Library, and Settings are currently placeholder pages.
+Player and Studio pages can register existing `RobloxPlayer.app` and `RobloxStudio.app` bundles, launch them through Rosemary, and remove their library registrations without deleting the bundles. The Library page lists registrations, and Settings shows Rosemary's detected executable. Roseblox does not copy, download, extract, or modify Roblox bundles or Rosemary.
+
+The JSON library is stored at `$XDG_DATA_HOME/roseblox/library.json` (normally `~/.local/share/roseblox/library.json`). Rosemary settings are read from `$XDG_CONFIG_HOME/roseblox/settings.json` (normally `~/.config/roseblox/settings.json`); a `rosemary_executable` setting can override PATH detection. The settings page currently displays status only.

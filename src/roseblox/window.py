@@ -6,6 +6,8 @@ gi.require_version("Adw", "1")
 gi.require_version("Gtk", "4.0")
 from gi.repository import Adw, Gtk
 
+from .backend.library import LibraryDataError, LibraryStore
+from .backend.rosemary import detect_rosemary
 from .pages import PAGE_DEFINITIONS, create_page
 
 
@@ -17,6 +19,18 @@ class RosebloxWindow(Adw.ApplicationWindow):
         self.set_title("Roseblox")
         self.set_default_size(960, 640)
         self.set_size_request(680, 480)
+        self.library = LibraryStore()
+        self.rosemary_status = detect_rosemary()
+        self.process_sessions = {}
+        self.launching_installations = set()
+        self.stopping_installations = set()
+        try:
+            self.library.load()
+            self.library_error = None
+        except LibraryDataError as error:
+            self.library_error = (
+                f"{error} The library is read-only until the file is repaired; its contents were not changed."
+            )
 
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.set_content(root)
@@ -38,7 +52,18 @@ class RosebloxWindow(Adw.ApplicationWindow):
 
         for page_id, title, icon_name, description in PAGE_DEFINITIONS:
             self._stack.add_titled(
-                create_page(page_id, title, icon_name, description), page_id, title
+                create_page(
+                    page_id,
+                    title,
+                    icon_name,
+                    description,
+                    window=self,
+                    store=self.library,
+                    rosemary_status=self.rosemary_status,
+                    library_error=self.library_error,
+                ),
+                page_id,
+                title,
             )
 
         sidebar = Gtk.StackSidebar()
@@ -47,3 +72,10 @@ class RosebloxWindow(Adw.ApplicationWindow):
         sidebar.add_css_class("navigation-sidebar")
         content.append(sidebar)
         content.append(self._stack)
+
+    def refresh_pages(self) -> None:
+        child = self._stack.get_first_child()
+        while child is not None:
+            if hasattr(child, "refresh"):
+                child.refresh()
+            child = child.get_next_sibling()
