@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "roseblox"
+version = "0.1.0"
+description = "A native Linux launcher and installation manager for Roblox through Rosemary"
+readme = "README.md"
+requires-python = ">=3.10"
+
+[project.scripts]
+roseblox = "roseblox.__main__:main"
+
+[tool.setuptools.package-data]
+roseblox = ["resources/*.css"]
+
+[tool.setuptools.packages.find]
+where = ["src"]

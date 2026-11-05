@@ -1,0 +1,47 @@
+@define-color accent_color #e968a6;
+@define-color accent_bg_color #b93f7c;
+@define-color accent_fg_color #ffffff;
+@define-color window_bg_color #17151a;
+@define-color window_fg_color #f4eff3;
+@define-color view_bg_color #1d1a20;
+@define-color view_fg_color #f4eff3;
+@define-color headerbar_bg_color #201c23;
+@define-color headerbar_fg_color #f4eff3;
+@define-color sidebar_bg_color #201c23;
+@define-color sidebar_fg_color #e8dfe6;
+
+window {
+  background-color: @window_bg_color;
+  color: @window_fg_color;
+}
+
+.main-header {
+  border-bottom: 1px solid alpha(@accent_color, 0.16);
+}
+
+.window-content {
+  background-color: @view_bg_color;
+}
+
+.navigation-sidebar {
+  background-color: @sidebar_bg_color;
+  border-right: 1px solid alpha(@accent_color, 0.14);
+}
+
+.navigation-sidebar row:selected {
+  background-color: alpha(@accent_color, 0.20);
+}
+
+.navigation-sidebar row:selected label,
+.page-icon {
+  color: @accent_color;
+}
+
+.page-content {
+  padding: 16px;
+}
+
+.placeholder-note {
+  color: alpha(@window_fg_color, 0.58);
+  font-size: 0.9em;
+}
