@@ -5,6 +5,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gtk
 
+from .home import HomePage
 from .manager_page import InstallationPage, SettingsPage
 
 PAGE_DEFINITIONS = (
@@ -24,10 +25,14 @@ def create_page(
     *,
     window: Gtk.Window,
     store,
+    installer,
     rosemary_status,
     library_error: str | None,
+    version_settings,
 ) -> Gtk.Widget:
     """Build a page, retaining the original Home landing view."""
+    if page_id == "home":
+        return HomePage(window)
     if page_id in ("player", "studio", "library"):
         app_type = page_id if page_id in ("player", "studio") else None
         return InstallationPage(
@@ -36,11 +41,23 @@ def create_page(
             app_type,
             window=window,
             store=store,
+            installer=installer,
             rosemary_status=rosemary_status,
             library_error=library_error,
         )
     if page_id == "settings":
-        return SettingsPage(rosemary_status)
+        settings_page = SettingsPage(
+            rosemary_status,
+            window=window,
+            version_settings=version_settings,
+            version_client=installer.version_client,
+        )
+        scroller = Gtk.ScrolledWindow()
+        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroller.set_child(settings_page)
+        scroller.set_hexpand(True)
+        scroller.set_vexpand(True)
+        return scroller
 
     page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
     page.set_halign(Gtk.Align.CENTER)

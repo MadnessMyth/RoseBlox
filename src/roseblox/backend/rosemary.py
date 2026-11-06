@@ -52,6 +52,34 @@ class LaunchSession:
     output_done: threading.Event | None = None
 
 
+_MAX_CAPTURED_OUTPUT = 64 * 1024
+
+
+def _drain_output(stream) -> bytes:
+    """Drain a pipe without allowing a noisy child to consume unbounded memory."""
+    half_limit = _MAX_CAPTURED_OUTPUT // 2
+    beginning = bytearray()
+    ending = bytearray()
+    truncated = False
+    read = getattr(stream, "read1", stream.read)
+    while True:
+        chunk = read(8192)
+        if not chunk:
+            break
+        prefix_space = half_limit - len(beginning)
+        if prefix_space > 0:
+            beginning.extend(chunk[:prefix_space])
+        remainder = chunk[max(prefix_space, 0) :]
+        if remainder:
+            ending.extend(remainder)
+            if len(ending) > half_limit:
+                del ending[: len(ending) - half_limit]
+            truncated = True
+    if truncated:
+        return bytes(beginning) + b"\n[Roseblox omitted middle process output.]\n" + bytes(ending)
+    return bytes(beginning + ending)
+
+
 @dataclass(frozen=True)
 class ProcessSnapshot:
     executable: str
@@ -101,10 +129,25 @@ def _matches_session(session: LaunchSession) -> bool:
 
 
 def _collect_output(session: LaunchSession) -> None:
+    readers: list[threading.Thread] = []
     try:
-        session.stdout, session.stderr = session.process.communicate()
-    except (OSError, ValueError):
-        pass
+        def read_into(stream, attribute: str) -> None:
+            if stream is None:
+                return
+            try:
+                setattr(session, attribute, _drain_output(stream))
+            except Exception:
+                setattr(session, attribute, b"")
+
+        for stream, attribute in (
+            (session.process.stdout, "stdout"),
+            (session.process.stderr, "stderr"),
+        ):
+            reader = threading.Thread(target=read_into, args=(stream, attribute), daemon=True)
+            readers.append(reader)
+            reader.start()
+        for reader in readers:
+            reader.join()
     finally:
         if session.output_done is not None:
             session.output_done.set()

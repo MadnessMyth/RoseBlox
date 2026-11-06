@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000">
+  <defs>
+    <linearGradient id="base" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#241522"/>
+      <stop offset="0.52" stop-color="#17151d"/>
+      <stop offset="1" stop-color="#211427"/>
+    </linearGradient>
+    <radialGradient id="rose-glow" cx="0.15" cy="0.12" r="0.82">
+      <stop offset="0" stop-color="#b93f7c" stop-opacity="0.42"/>
+      <stop offset="1" stop-color="#b93f7c" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="violet-glow" cx="0.9" cy="0.82" r="0.72">
+      <stop offset="0" stop-color="#584078" stop-opacity="0.34"/>
+      <stop offset="1" stop-color="#584078" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="ribbon" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f07cb4" stop-opacity="0.17"/>
+      <stop offset="1" stop-color="#8f4d9b" stop-opacity="0.025"/>
+    </linearGradient>
+  </defs>
+  <rect width="1600" height="1000" fill="url(#base)"/>
+  <rect width="1600" height="1000" fill="url(#rose-glow)"/>
+  <rect width="1600" height="1000" fill="url(#violet-glow)"/>
+  <path d="M-120 690 C230 410 500 470 760 250 C960 80 1220 40 1720 210 L1720 420 C1310 240 1110 290 900 510 C640 780 360 760 -120 960Z" fill="url(#ribbon)"/>
+  <path d="M-100 825 C250 600 540 640 830 440 C1090 260 1290 250 1700 390" fill="none" stroke="#e968a6" stroke-opacity="0.13" stroke-width="2"/>
+  <path d="M220 1080 C450 820 760 820 980 650 C1200 480 1420 490 1660 590" fill="none" stroke="#b68bd2" stroke-opacity="0.12" stroke-width="2"/>
+  <circle cx="1310" cy="180" r="170" fill="none" stroke="#f09ac3" stroke-opacity="0.08" stroke-width="2"/>
+  <circle cx="1310" cy="180" r="125" fill="none" stroke="#f09ac3" stroke-opacity="0.055" stroke-width="1"/>
+</svg>

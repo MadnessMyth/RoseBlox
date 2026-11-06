@@ -53,3 +53,38 @@ window {
 .status-notice {
   color: @accent_color;
 }
+
+.home-dashboard {
+  background-color: #19151d;
+  background-image: radial-gradient(ellipse at 12% 0%, alpha(@accent_bg_color, 0.42), transparent 58%),
+                    radial-gradient(ellipse at 100% 100%, alpha(#62477a, 0.30), transparent 62%);
+}
+
+.home-background-art {
+  opacity: 0.62;
+}
+
+.home-artwork-scrim {
+  background-image: linear-gradient(180deg, alpha(#17151a, 0.20), alpha(#17151a, 0.66));
+}
+
+.home-content-scroller,
+.home-content-scroller > viewport {
+  background-color: transparent;
+}
+
+.home-content {
+  background-color: transparent;
+}
+
+.home-launch-card {
+  min-width: 280px;
+  padding: 20px;
+  border: 1px solid alpha(@accent_color, 0.22);
+  border-radius: 16px;
+  background-color: alpha(#211c25, 0.94);
+}
+
+.home-card-status {
+  font-weight: 600;
+}

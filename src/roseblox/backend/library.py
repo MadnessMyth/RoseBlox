@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import tempfile
 import uuid
 from dataclasses import asdict, dataclass
@@ -34,11 +35,23 @@ class InstallationRecord:
     bundle_path: str
     registered_at: str
     validation_state: str
+    version: str | None = None
+    managed: bool = False
+    source: str = "existing_bundle"
+    archive_path: str | None = None
+
+
+def default_data_directory() -> Path:
+    data_home = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share")
+    return data_home / "roseblox"
+
+
+def managed_install_root() -> Path:
+    return default_data_directory() / "installations"
 
 
 def default_library_path() -> Path:
-    data_home = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
-    return data_home / "roseblox" / "library.json"
+    return default_data_directory() / "library.json"
 
 
 def validate_bundle(bundle_path: str | Path, app_type: str) -> Path:
@@ -67,7 +80,26 @@ def _record_from_json(value: Any) -> InstallationRecord:
         raise ValueError("installation record has an unsupported application type")
     if not Path(value["bundle_path"]).is_absolute():
         raise ValueError("installation bundle path must be absolute")
-    return InstallationRecord(**{key: value[key] for key in required})
+    version = value.get("version")
+    if version is not None and (not isinstance(version, str) or not version):
+        raise ValueError("installation version must be a non-empty string or null")
+    managed = value.get("managed", False)
+    if not isinstance(managed, bool):
+        raise ValueError("installation managed flag must be a boolean")
+    source = value.get("source", "existing_bundle")
+    if not isinstance(source, str) or not source:
+        raise ValueError("installation source must be a non-empty string")
+    archive_path = value.get("archive_path")
+    if archive_path is not None:
+        if not isinstance(archive_path, str) or not Path(archive_path).is_absolute():
+            raise ValueError("installation archive path must be absolute or null")
+    return InstallationRecord(
+        **{key: value[key] for key in required},
+        version=version,
+        managed=managed,
+        source=source,
+        archive_path=archive_path,
+    )
 
 
 class LibraryStore:
@@ -90,11 +122,28 @@ class LibraryStore:
         except (TypeError, ValueError, KeyError) as error:
             raise LibraryDataError(f"The installation library contains an invalid record: {error}") from error
 
-    def add(self, app_type: str, bundle_path: str | Path, display_name: str) -> InstallationRecord:
+    def add(
+        self,
+        app_type: str,
+        bundle_path: str | Path,
+        display_name: str,
+        *,
+        version: str | None = None,
+        managed: bool = False,
+        source: str = "existing_bundle",
+        archive_path: str | Path | None = None,
+    ) -> InstallationRecord:
         bundle = validate_bundle(bundle_path, app_type)
         display_name = display_name.strip()
         if not display_name:
             raise ValueError("Enter a name for this installation.")
+        if version is not None and (not isinstance(version, str) or not version):
+            raise ValueError("Version must be a non-empty string or unknown.")
+        if not isinstance(managed, bool):
+            raise ValueError("Managed flag must be a boolean.")
+        if not isinstance(source, str) or not source:
+            raise ValueError("Installation source must be provided.")
+        stored_archive_path = None if archive_path is None else str(Path(archive_path).absolute())
 
         records = self.load()
         if any(record.app_type == app_type and record.bundle_path == str(bundle) for record in records):
@@ -106,17 +155,67 @@ class LibraryStore:
             bundle_path=str(bundle),
             registered_at=datetime.now(timezone.utc).isoformat(),
             validation_state="valid",
+            version=version,
+            managed=managed,
+            source=source,
+            archive_path=stored_archive_path,
         )
         self._save([*records, record])
         return record
 
-    def remove(self, installation_id: str) -> bool:
+    def remove(self, installation_id: str, *, delete_managed_files: bool = False) -> bool:
         records = self.load()
-        remaining = [record for record in records if record.id != installation_id]
-        if len(remaining) == len(records):
+        record = next((item for item in records if item.id == installation_id), None)
+        if record is None:
             return False
-        self._save(remaining)
+        if delete_managed_files and not record.managed:
+            raise LibraryDataError("External application bundles can never be deleted by Roseblox.")
+
+        tombstone: Path | None = None
+        if delete_managed_files:
+            bundle = self._validated_managed_bundle(record)
+            tombstone = bundle.with_name(f".roseblox-delete-{uuid.uuid4().hex}")
+            try:
+                os.replace(bundle, tombstone)
+            except OSError as error:
+                raise LibraryDataError(f"Could not prepare managed bundle deletion: {error}") from error
+
+        remaining = [item for item in records if item.id != installation_id]
+        try:
+            self._save(remaining)
+        except LibraryDataError:
+            if tombstone is not None:
+                try:
+                    os.replace(tombstone, record.bundle_path)
+                except OSError as restore_error:
+                    raise LibraryDataError(
+                        f"Library save failed and bundle restoration also failed at {tombstone}: {restore_error}"
+                    ) from restore_error
+            raise
+        if tombstone is not None:
+            try:
+                shutil.rmtree(tombstone)
+            except OSError as error:
+                raise LibraryDataError(
+                    f"Registration was removed, but managed bundle cleanup failed at {tombstone}: {error}"
+                ) from error
         return True
+
+    @staticmethod
+    def _validated_managed_bundle(record: InstallationRecord) -> Path:
+        if not record.managed:
+            raise LibraryDataError("Only managed installations can be deleted.")
+        bundle = Path(record.bundle_path)
+        expected = APP_BUNDLE_NAMES.get(record.app_type)
+        if expected is None or bundle.name != expected or bundle.is_symlink() or not bundle.is_dir():
+            raise LibraryDataError("Managed application path is missing or unsafe; files were not deleted.")
+        try:
+            root = managed_install_root().resolve(strict=True)
+            resolved = bundle.resolve(strict=True)
+            resolved.relative_to(root)
+        except (OSError, ValueError) as error:
+            raise LibraryDataError("Managed application path is outside Roseblox's installation directory.") from error
+        return bundle
 
     def _save(self, records: list[InstallationRecord]) -> None:
         try:

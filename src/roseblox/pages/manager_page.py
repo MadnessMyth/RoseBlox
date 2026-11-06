@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import threading
 import subprocess
+import threading
 from pathlib import Path
 
 import gi
@@ -12,7 +12,15 @@ gi.require_version("Adw", "1")
 gi.require_version("Gtk", "4.0")
 from gi.repository import Adw, Gio, GLib, Gtk
 
-from ..backend.library import APP_BUNDLE_NAMES, InstallationRecord, LibraryDataError
+from ..backend.archive import ArchiveTypeUndetermined, inspect_archive
+from ..backend.downloader import DownloadCancelled
+from ..backend.download_state import DownloadJob, DownloadStateError
+from ..backend.installer import InstallProgress, InstallResult, InstallerService
+from ..backend.library import (
+    APP_BUNDLE_NAMES,
+    InstallationRecord,
+    LibraryDataError,
+)
 from ..backend.rosemary import (
     LaunchSession,
     ProcessIdentityError,
@@ -20,6 +28,13 @@ from ..backend.rosemary import (
     launch_application,
     stop_application,
     wait_for_running,
+)
+from ..backend.versions import VersionCacheError, VersionInfo, VersionTestResult
+from ..backend.version_settings import (
+    VersionSettingsError,
+    VersionSettingsStore,
+    VersionSource,
+    default_version_source,
 )
 
 
@@ -32,12 +47,14 @@ class InstallationPage(Gtk.Box):
         *,
         window: Gtk.Window,
         store,
+        installer: InstallerService,
         rosemary_status: RosemaryStatus,
         library_error: str | None,
     ) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=16)
         self.window = window
         self.store = store
+        self.installer = installer
         self.app_type = app_type
         self.rosemary_status = rosemary_status
         self.library_error = library_error
@@ -46,6 +63,16 @@ class InstallationPage(Gtk.Box):
         self._sessions: dict[str, LaunchSession] = window.process_sessions
         self._launch_buttons: dict[str, Gtk.Button] = {}
         self._remove_buttons: dict[str, Gtk.Button] = {}
+        self._validation_by_id: dict[str, str] = {}
+        self._busy = False
+        self._library_loading = True
+        self._cancel_event: threading.Event | None = None
+        self._checking_version = False
+        self._version_info: VersionInfo | None = None
+        self._version_error: str | None = None
+        self._action_buttons: list[Gtk.Button] = []
+        self._recovery_buttons: list[Gtk.Button] = []
+        self._add_button: Gtk.Button | None = None
         self.set_hexpand(True)
         self.set_vexpand(True)
         self.set_margin_top(28)
@@ -67,10 +94,29 @@ class InstallationPage(Gtk.Box):
         if app_type:
             add_button = Gtk.Button.new_with_label("Add Existing…")
             add_button.add_css_class("suggested-action")
-            add_button.set_sensitive(library_error is None)
+            add_button.set_sensitive(False)
             add_button.connect("clicked", self._on_add_clicked)
             heading_row.append(add_button)
+            self._add_button = add_button
         self.append(heading_row)
+
+        if app_type:
+            self._build_version_controls()
+        else:
+            import_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            import_app = Gtk.Button.new_with_label("Import Existing App…")
+            import_app.add_css_class("suggested-action")
+            import_app.set_sensitive(False)
+            import_app.connect("clicked", self._on_import_app_clicked)
+            import_row.append(import_app)
+            self._action_buttons.append(import_app)
+            import_archive = Gtk.Button.new_with_label("Import ZIP Archive…")
+            import_archive.set_sensitive(False)
+            import_archive.connect("clicked", self._on_import_archive_clicked)
+            import_row.append(import_archive)
+            self._action_buttons.append(import_archive)
+            import_row.set_halign(Gtk.Align.START)
+            self.append(import_row)
 
         self.notice = Gtk.Label()
         self.notice.set_xalign(0)
@@ -78,6 +124,24 @@ class InstallationPage(Gtk.Box):
         self.notice.add_css_class("status-notice")
         self.notice.set_visible(False)
         self.append(self.notice)
+
+        self.workflow_status = Gtk.Label()
+        self.workflow_status.set_xalign(0)
+        self.workflow_status.set_wrap(True)
+        self.workflow_status.set_visible(False)
+        self.workflow_status.add_css_class("dim-label")
+        self.append(self.workflow_status)
+
+        self.progress_bar = Gtk.ProgressBar()
+        self.progress_bar.set_show_text(True)
+        self.progress_bar.set_visible(False)
+        self.append(self.progress_bar)
+
+        self.cancel_button = Gtk.Button.new_with_label("Cancel Download")
+        self.cancel_button.set_halign(Gtk.Align.START)
+        self.cancel_button.set_visible(False)
+        self.cancel_button.connect("clicked", self._on_cancel_clicked)
+        self.append(self.cancel_button)
 
         self.list_box = Gtk.ListBox()
         self.list_box.set_selection_mode(Gtk.SelectionMode.NONE)
@@ -87,32 +151,100 @@ class InstallationPage(Gtk.Box):
         scroller.set_child(self.list_box)
         scroller.set_vexpand(True)
         self.append(scroller)
-        self.refresh()
+        self.apply_library_snapshot([], {}, None, loading=True)
+        if app_type:
+            self._load_cached_version()
+
+    def _build_version_controls(self) -> None:
+        controls = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        controls.add_css_class("version-controls")
+        top_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        self.latest_label = Gtk.Label(label="Latest available version: not checked")
+        self.latest_label.set_xalign(0)
+        self.latest_label.set_hexpand(True)
+        top_row.append(self.latest_label)
+        self.refresh_version_button = Gtk.Button.new_with_label("Refresh Version")
+        self.refresh_version_button.connect("clicked", self._on_refresh_version_clicked)
+        top_row.append(self.refresh_version_button)
+        controls.append(top_row)
+        self.last_checked_label = Gtk.Label(label="No successful version check yet.")
+        self.last_checked_label.set_xalign(0)
+        self.last_checked_label.add_css_class("dim-label")
+        controls.append(self.last_checked_label)
+        self.installed_versions_label = Gtk.Label(label="Installed versions: checking library…")
+        self.installed_versions_label.set_xalign(0)
+        self.installed_versions_label.set_wrap(True)
+        self.installed_versions_label.add_css_class("dim-label")
+        controls.append(self.installed_versions_label)
+        action_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        self.download_button = Gtk.Button.new_with_label("Download and Install Latest")
+        self.download_button.add_css_class("suggested-action")
+        self.download_button.set_sensitive(False)
+        self.download_button.connect("clicked", self._on_download_clicked)
+        action_row.append(self.download_button)
+        controls.append(action_row)
+        self.recovery_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self.recovery_box.set_visible(False)
+        controls.append(self.recovery_box)
+        self.append(controls)
 
     def refresh(self) -> None:
-        self._launch_buttons = {}
-        self._remove_buttons = {}
+        if hasattr(self.window, "refresh_pages"):
+            self.window.refresh_pages()
+        else:
+            self.apply_library_snapshot([], {}, "Library refresh is unavailable.", loading=False)
+
+    def apply_library_snapshot(
+        self,
+        records: list[InstallationRecord],
+        validation_by_id: dict[str, str],
+        error: str | None,
+        *,
+        loading: bool,
+    ) -> None:
+        self._library_loading = loading
+        self.library_error = error
+        self._validation_by_id = dict(validation_by_id)
+        if loading:
+            self._clear_rows()
+            self.notice.set_label("Loading registered installations…")
+            self.notice.set_visible(True)
+            return
+        if error:
+            self._launch_buttons = {}
+            self._remove_buttons = {}
+            self._clear_rows()
+            self.notice.set_label(f"{error} No changes will be saved until the library file is repaired.")
+            self.notice.set_visible(True)
+            self._set_library_actions(False)
+            return
+        self.notice.set_visible(False)
+        if self.app_type:
+            records = [record for record in records if record.app_type == self.app_type]
+        self._render_records(records)
+        self._refresh_version_summary(records)
+        self._set_library_actions(True)
+
+    def _set_library_actions(self, enabled: bool) -> None:
+        enabled = enabled and not self._busy
+        if self._add_button is not None:
+            self._add_button.set_sensitive(enabled)
+        if self.app_type:
+            self.download_button.set_sensitive(enabled)
+        for button in self._action_buttons:
+            button.set_sensitive(enabled)
+
+    def _clear_rows(self) -> None:
         child = self.list_box.get_first_child()
         while child is not None:
             following = child.get_next_sibling()
             self.list_box.remove(child)
             child = following
 
-        if self.library_error:
-            self.notice.set_label(self.library_error)
-            self.notice.set_visible(True)
-            return
-        self.notice.set_visible(False)
-        try:
-            records = self.store.load()
-        except LibraryDataError as error:
-            self.library_error = str(error)
-            self.notice.set_label(f"{error} No changes will be saved until the library file is repaired.")
-            self.notice.set_visible(True)
-            return
-
-        if self.app_type:
-            records = [record for record in records if record.app_type == self.app_type]
+    def _render_records(self, records: list[InstallationRecord]) -> None:
+        self._launch_buttons = {}
+        self._remove_buttons = {}
+        self._clear_rows()
         if not records:
             empty = Gtk.Label(
                 label=(
@@ -145,9 +277,14 @@ class InstallationPage(Gtk.Box):
         name.add_css_class("heading")
         details.append(name)
         kind = "Player" if record.app_type == "player" else "Studio"
-        path = Path(record.bundle_path)
-        state = "Available" if path.is_dir() and (path / "Contents").is_dir() else "Missing or invalid"
-        meta = Gtk.Label(label=f"{kind} · {state}")
+        state = self._validation_by_id.get(record.id, record.validation_state.title())
+        version_text = record.version or "Unknown version"
+        source_text = "Managed" if record.managed else "External"
+        details_text = f"{kind} · {version_text} · {source_text} · {state}"
+        if self.app_type == record.app_type and record.version and self._version_info:
+            version_state = "Latest" if record.version == self._version_info.version else "Update available"
+            details_text += f" · {version_state}"
+        meta = Gtk.Label(label=details_text)
         meta.set_xalign(0)
         meta.add_css_class("dim-label")
         details.append(meta)
@@ -182,7 +319,8 @@ class InstallationPage(Gtk.Box):
 
     def _on_add_clicked(self, _button: Gtk.Button) -> None:
         picker = Gtk.FileDialog.new()
-        picker.set_title(f"Select {APP_BUNDLE_NAMES[self.app_type]}")
+        title = f"Select {APP_BUNDLE_NAMES[self.app_type]}" if self.app_type else "Select Roblox application bundle"
+        picker.set_title(title)
         picker.set_accept_label("Select Bundle")
         picker.select_folder(self.window, None, self._on_folder_selected, None)
 
@@ -199,6 +337,24 @@ class InstallationPage(Gtk.Box):
             return
 
         bundle = Path(selected.get_path())
+        if self.app_type is not None:
+            self._prompt_bundle_name(bundle, self.app_type)
+            return
+        app_type = next(
+            (kind for kind, bundle_name in APP_BUNDLE_NAMES.items() if bundle.name == bundle_name),
+            None,
+        )
+        if app_type:
+            self._prompt_bundle_name(bundle, app_type)
+        else:
+            self._prompt_type(
+                "Choose application type",
+                "Roseblox could not identify this bundle by its folder name.",
+                self._prompt_bundle_name,
+                bundle,
+            )
+
+    def _prompt_bundle_name(self, bundle: Path, app_type: str) -> None:
         default_name = bundle.name.removesuffix(".app")
         prompt = Adw.MessageDialog.new(
             self.window,
@@ -214,7 +370,7 @@ class InstallationPage(Gtk.Box):
         name_entry.set_text(default_name)
         name_entry.set_activates_default(True)
         prompt.set_extra_child(name_entry)
-        prompt.connect("response", self._on_name_response, bundle, name_entry)
+        prompt.connect("response", self._on_name_response, bundle, app_type, name_entry)
         prompt.present()
 
     def _on_name_response(
@@ -222,22 +378,494 @@ class InstallationPage(Gtk.Box):
         dialog: Adw.MessageDialog,
         response: str,
         bundle: Path,
+        app_type: str,
         name_entry: Gtk.Entry,
     ) -> None:
         dialog.destroy()
         if response != "add":
             return
+        display_name = name_entry.get_text()
+        threading.Thread(
+            target=self._register_bundle_worker,
+            args=(bundle, app_type, display_name),
+            daemon=True,
+        ).start()
+
+    def _register_bundle_worker(self, bundle: Path, app_type: str, display_name: str) -> None:
         try:
-            self.store.add(self.app_type, bundle, name_entry.get_text())
-            self._refresh_all()
+            self.store.add(app_type, bundle, display_name)
         except (ValueError, LibraryDataError, OSError) as error:
-            self._show_error("Could not add installation", str(error))
+            GLib.idle_add(self._registration_failed, str(error))
+            return
+        GLib.idle_add(self._registration_succeeded)
+
+    def _registration_failed(self, message: str) -> bool:
+        self._show_error("Could not add installation", message)
+        return GLib.SOURCE_REMOVE
+
+    def _registration_succeeded(self) -> bool:
+        self._refresh_all()
+        return GLib.SOURCE_REMOVE
+
+    def _prompt_type(self, heading, body, continuation, *args) -> None:
+        dialog = Adw.MessageDialog.new(self.window, heading, body)
+        dialog.set_close_response("cancel")
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("player", "Player")
+        dialog.add_response("studio", "Studio")
+        dialog.set_default_response("cancel")
+        dialog.connect("response", self._on_type_response, continuation, args)
+        dialog.present()
+
+    def _on_type_response(self, dialog, response, continuation, args) -> None:
+        dialog.destroy()
+        if response in APP_BUNDLE_NAMES:
+            continuation(*args, response)
+
+    def _on_import_app_clicked(self, _button: Gtk.Button) -> None:
+        self._on_add_clicked(_button)
+
+    def _on_import_archive_clicked(self, _button: Gtk.Button) -> None:
+        picker = Gtk.FileDialog.new()
+        picker.set_title("Select Roblox ZIP archive")
+        picker.set_accept_label("Inspect Archive")
+        file_filter = Gtk.FileFilter()
+        file_filter.set_name("ZIP archives")
+        file_filter.add_pattern("*.zip")
+        picker.set_default_filter(file_filter)
+        picker.open(self.window, None, self._on_archive_selected, None)
+
+    def _on_archive_selected(self, picker: Gtk.FileDialog, result: Gio.AsyncResult, _data) -> None:
+        try:
+            selected = picker.open_finish(result)
+        except GLib.Error as error:
+            if error.matches(Gio.io_error_quark(), Gio.IOErrorEnum.CANCELLED):
+                return
+            self._show_error("Could not select archive", str(error))
+            return
+        if selected is None or selected.get_path() is None:
+            self._show_error("Could not select archive", "The selected archive is not a local file.")
+            return
+        archive_path = Path(selected.get_path())
+        threading.Thread(
+            target=self._inspect_archive_worker,
+            args=(archive_path,),
+            daemon=True,
+        ).start()
+
+    def _inspect_archive_worker(self, archive_path: Path) -> None:
+        try:
+            inspection = inspect_archive(archive_path)
+        except Exception as error:
+            GLib.idle_add(self._archive_inspection_failed, str(error))
+            return
+        GLib.idle_add(self._archive_inspected, archive_path, inspection)
+
+    def _archive_inspection_failed(self, message: str) -> bool:
+        self._show_error("Could not inspect archive", message)
+        return GLib.SOURCE_REMOVE
+
+    def _archive_inspected(self, archive_path: Path, inspection) -> bool:
+        if inspection.detected_type:
+            self._prompt_archive_name(archive_path, inspection.detected_type)
+        else:
+            self._prompt_type(
+                "Choose archive type",
+                "The archive contents do not identify one Roblox application type reliably.",
+                self._prompt_archive_name,
+                archive_path,
+            )
+        return GLib.SOURCE_REMOVE
+
+    def _prompt_archive_name(self, archive_path: Path, app_type: str) -> None:
+        default_name = archive_path.stem
+        for suffix in ("-RobloxPlayer", "-RobloxStudioApp"):
+            if default_name.endswith(suffix):
+                default_name = default_name[: -len(suffix)]
+        if default_name.startswith("version-"):
+            default_name = f"Roblox {app_type.title()} {default_name}"
+        prompt = Adw.MessageDialog.new(
+            self.window,
+            "Name this installation",
+            "Choose a recognizable name for the imported archive.",
+        )
+        prompt.set_close_response("cancel")
+        prompt.add_response("cancel", "Cancel")
+        prompt.add_response("import", "Import Archive")
+        prompt.set_default_response("import")
+        prompt.set_response_appearance("import", Adw.ResponseAppearance.SUGGESTED)
+        name_entry = Gtk.Entry()
+        name_entry.set_text(default_name)
+        name_entry.set_activates_default(True)
+        prompt.set_extra_child(name_entry)
+        prompt.connect("response", self._on_archive_name_response, archive_path, app_type, name_entry)
+        prompt.present()
+
+    def _on_archive_name_response(self, dialog, response, archive_path, app_type, name_entry) -> None:
+        dialog.destroy()
+        if response != "import":
+            return
+        self._begin_operation("Preparing archive import…", cancellable=False)
+        threading.Thread(
+            target=self._import_archive_worker,
+            args=(archive_path, app_type, name_entry.get_text()),
+            daemon=True,
+        ).start()
+
+    def _import_archive_worker(self, archive_path, app_type, display_name) -> None:
+        try:
+            result = self.installer.import_archive(
+                archive_path,
+                app_type=app_type,
+                display_name=display_name,
+                progress_callback=self._post_progress,
+            )
+        except Exception as error:
+            GLib.idle_add(self._operation_finished, None, error)
+            return
+        GLib.idle_add(self._operation_finished, result, None)
+
+    def _load_cached_version(self) -> None:
+        threading.Thread(target=self._load_cached_version_worker, daemon=True).start()
+
+    def _load_cached_version_worker(self) -> None:
+        version_info = None
+        version_error = None
+        try:
+            version_info = self.installer.version_cache.load().get(self.app_type)
+        except VersionCacheError as error:
+            version_error = str(error)
+        GLib.idle_add(self._cached_version_loaded, version_info, version_error)
+
+    def _current_records(self) -> list[InstallationRecord]:
+        records = getattr(self.window, "library_records", [])
+        return [record for record in records if self.app_type is None or record.app_type == self.app_type]
+
+    def _cached_version_loaded(self, version_info, version_error) -> bool:
+        self._version_info = version_info
+        self._version_error = version_error
+        self._render_version_labels()
+        records = self._current_records()
+        self._refresh_version_summary(records)
+        self._render_records(records)
+        return GLib.SOURCE_REMOVE
+
+    def _start_version_check(self) -> None:
+        if not self.app_type or self._checking_version:
+            return
+        self._checking_version = True
+        self.refresh_version_button.set_sensitive(False)
+        if self._version_info is None:
+            self.latest_label.set_text("Latest available version: checking…")
+        threading.Thread(target=self._version_check_worker, daemon=True).start()
+
+    def _version_check_worker(self) -> None:
+        info = None
+        error = None
+        cache_error = None
+        try:
+            source = self.installer.version_settings.load_for(self.app_type)
+            info = self.installer.version_client.fetch(self.app_type, source)
+            try:
+                self.installer.version_cache.update(self.app_type, info)
+            except VersionCacheError as write_error:
+                cache_error = str(write_error)
+        except Exception as fetch_error:
+            error = str(fetch_error)
+        GLib.idle_add(self._version_check_complete, info, error, cache_error)
+
+    def _version_check_complete(self, info, error, cache_error) -> bool:
+        self._checking_version = False
+        self.refresh_version_button.set_sensitive(True)
+        if info is not None:
+            self._version_info = info
+            self._version_error = (
+                f"Version found, but could not update the cache: {cache_error}" if cache_error else None
+            )
+        elif error:
+            self._version_error = error
+        self._render_version_labels()
+        records = self._current_records()
+        self._refresh_version_summary(records)
+        self._render_records(records)
+        return GLib.SOURCE_REMOVE
+
+    def _render_version_labels(self) -> None:
+        if self._version_info:
+            self.latest_label.set_text(f"Latest available version: {self._version_info.version}")
+            checked = self._version_info.checked_at
+            suffix = f" · Refresh failed: {self._version_error}" if self._version_error else ""
+            self.last_checked_label.set_text(f"Last successful check: {checked}{suffix}")
+        elif self._version_error:
+            self.latest_label.set_text("Latest available version: unavailable")
+            self.last_checked_label.set_text(f"Version check failed: {self._version_error}")
+        else:
+            self.latest_label.set_text("Latest available version: not checked")
+            self.last_checked_label.set_text("No successful version check yet.")
+
+    def _refresh_version_summary(self, records: list[InstallationRecord]) -> None:
+        if not self.app_type:
+            return
+        versions = []
+        for record in records:
+            if record.version:
+                if self._version_info is None:
+                    state = "installed"
+                elif record.version == self._version_info.version:
+                    state = "latest"
+                else:
+                    state = "update available"
+                versions.append(f"{record.display_name}: {record.version} ({state})")
+            else:
+                versions.append(f"{record.display_name}: version unknown")
+        self.installed_versions_label.set_text(
+            "Installed versions: " + ("; ".join(versions) if versions else "none registered")
+        )
+
+    def _on_refresh_version_clicked(self, _button: Gtk.Button) -> None:
+        self._start_version_check()
+
+    def _on_download_clicked(self, _button: Gtk.Button) -> None:
+        if self._busy or self.library_error:
+            return
+        self._cancel_event = threading.Event()
+        self._begin_operation("Checking the latest version…", cancellable=True)
+        threading.Thread(target=self._download_worker, daemon=True).start()
+
+    def _load_recovery_jobs(self) -> None:
+        if not self.app_type:
+            return
+        if hasattr(self.window, "refresh_pages"):
+            self.window.refresh_pages(reload_library=False, reload_recovery=True)
+            return
+        threading.Thread(target=self._recovery_jobs_worker, daemon=True).start()
+
+    def _recovery_jobs_worker(self) -> None:
+        try:
+            jobs = self.installer.recoverable_downloads(self.app_type)
+            error = None
+        except (DownloadStateError, OSError) as failure:
+            jobs = []
+            error = str(failure)
+        GLib.idle_add(self._render_recovery_jobs, jobs, error)
+
+    def _render_recovery_jobs(self, jobs: list[DownloadJob], error: str | None) -> bool:
+        if self.app_type:
+            jobs = [job for job in jobs if job.app_type == self.app_type]
+        child = self.recovery_box.get_first_child()
+        while child is not None:
+            following = child.get_next_sibling()
+            self.recovery_box.remove(child)
+            child = following
+        self._recovery_buttons = []
+        if error:
+            label = Gtk.Label(label=f"Saved download recovery is unavailable: {error}")
+            label.set_xalign(0)
+            label.set_wrap(True)
+            self.recovery_box.append(label)
+            self.recovery_box.set_visible(True)
+            return GLib.SOURCE_REMOVE
+        for job in jobs:
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            label_text = f"Saved {job.version} download · {self._format_size(job.downloaded)}"
+            if job.total:
+                label_text += f" of {self._format_size(job.total)}"
+            if job.state == "downloaded":
+                label_text += " · ready to install"
+            elif job.state == "invalid":
+                label_text += " · unavailable"
+            label = Gtk.Label(label=label_text)
+            label.set_xalign(0)
+            details = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
+            details.set_hexpand(True)
+            details.append(label)
+            progress = Gtk.ProgressBar()
+            progress.set_show_text(True)
+            if job.total:
+                fraction = min(job.downloaded / job.total, 1.0)
+                progress.set_fraction(fraction)
+                progress.set_text(f"{fraction:.0%}")
+            else:
+                progress.set_text("Progress unknown")
+            details.append(progress)
+            row.append(details)
+            retry = Gtk.Button.new_with_label(
+                "Install Download" if job.state == "downloaded" else "Resume / Retry"
+            )
+            retry.set_sensitive(job.state in {"interrupted", "downloaded"} and not self._busy)
+            retry.connect("clicked", self._on_recovery_retry_clicked, job.id)
+            row.append(retry)
+            self._recovery_buttons.append(retry)
+            if job.state != "downloaded":
+                discard = Gtk.Button.new_with_label("Discard")
+                discard.set_sensitive(not self._busy)
+                discard.connect("clicked", self._on_recovery_discard_clicked, job.id)
+                row.append(discard)
+                self._recovery_buttons.append(discard)
+            self.recovery_box.append(row)
+        self.recovery_box.set_visible(bool(jobs))
+        return GLib.SOURCE_REMOVE
+
+    def set_recovery_jobs(self, jobs: list[DownloadJob], error: str | None) -> None:
+        """Apply the window's shared recovery snapshot to this app page."""
+        if self.app_type is not None:
+            self._render_recovery_jobs(jobs, error)
+
+    def _on_recovery_retry_clicked(self, _button: Gtk.Button, job_id: str) -> None:
+        if self._busy:
+            return
+        self._cancel_event = threading.Event()
+        self._begin_operation("Restoring saved download…", cancellable=True)
+        threading.Thread(target=self._retry_download_worker, args=(job_id,), daemon=True).start()
+
+    def _retry_download_worker(self, job_id: str) -> None:
+        try:
+            result = self.installer.retry_download(
+                job_id,
+                self._cancel_event,
+                self._post_progress,
+            )
+        except Exception as error:
+            GLib.idle_add(self._operation_finished, None, error)
+            return
+        GLib.idle_add(self._operation_finished, result, None)
+
+    def _on_recovery_discard_clicked(self, _button: Gtk.Button, job_id: str) -> None:
+        if self._busy:
+            return
+        threading.Thread(target=self._discard_download_worker, args=(job_id,), daemon=True).start()
+
+    def _discard_download_worker(self, job_id: str) -> None:
+        try:
+            self.installer.discard_download(job_id)
+        except (DownloadStateError, OSError) as error:
+            GLib.idle_add(self._show_error, "Could not discard saved download", str(error))
+            return
+        self._load_recovery_jobs()
+
+    def _download_worker(self) -> None:
+        try:
+            result = self.installer.download_latest(
+                self.app_type,
+                self._cancel_event,
+                self._post_progress,
+            )
+        except Exception as error:
+            GLib.idle_add(self._operation_finished, None, error)
+            return
+        GLib.idle_add(self._operation_finished, result, None)
+
+    def _begin_operation(self, message: str, *, cancellable: bool) -> None:
+        self._busy = True
+        self.workflow_status.set_text(message)
+        self.workflow_status.set_visible(True)
+        self.progress_bar.set_fraction(0.0)
+        self.progress_bar.set_text("")
+        self.progress_bar.set_visible(True)
+        self.cancel_button.set_visible(False)
+        self.cancel_button.set_label("Cancel Download")
+        if self.app_type:
+            self.download_button.set_sensitive(False)
+        for button in self._action_buttons:
+            button.set_sensitive(False)
+        for button in self._recovery_buttons:
+            button.set_sensitive(False)
+
+    def _post_progress(self, progress: InstallProgress) -> None:
+        GLib.idle_add(self._show_progress, progress)
+
+    def _show_progress(self, progress: InstallProgress) -> bool:
+        if progress.phase == "checking-version":
+            message = "Checking the latest Roblox version…"
+        elif progress.phase == "downloading":
+            message = f"Downloaded {self._format_size(progress.downloaded)}"
+            if progress.total is not None:
+                message += f" of {self._format_size(progress.total)}"
+                fraction = progress.downloaded / progress.total if progress.total else 0.0
+                self.progress_bar.set_fraction(min(max(fraction, 0.0), 1.0))
+                self.progress_bar.set_text(f"{fraction:.0%}")
+            else:
+                self.progress_bar.pulse()
+                self.progress_bar.set_text(self._format_size(progress.downloaded))
+            self.cancel_button.set_visible(self._cancel_event is not None)
+            self.cancel_button.set_sensitive(True)
+        elif progress.phase == "extracting":
+            message = "Extracting and validating application bundle with bsdtar…"
+            self.cancel_button.set_visible(False)
+            self.progress_bar.pulse()
+        elif progress.phase == "registering":
+            message = "Registering installation in the Library…"
+            self.cancel_button.set_visible(False)
+            self.progress_bar.pulse()
+        elif progress.phase == "finalizing-archive":
+            message = "Preserving the completed archive…"
+            self.cancel_button.set_visible(False)
+            self.progress_bar.pulse()
+        elif progress.phase == "downloaded":
+            message = "Download complete. Preparing installation…"
+            self.cancel_button.set_visible(False)
+            self.progress_bar.set_fraction(1.0)
+        elif progress.phase == "complete":
+            message = "Installation complete."
+            self.progress_bar.set_fraction(1.0)
+            self.cancel_button.set_visible(False)
+        else:
+            message = progress.phase.replace("-", " ").capitalize() + "…"
+        self.workflow_status.set_text(message)
+        return GLib.SOURCE_REMOVE
+
+    def _on_cancel_clicked(self, _button: Gtk.Button) -> None:
+        if self._cancel_event is not None:
+            self._cancel_event.set()
+            self.cancel_button.set_label("Canceling…")
+            self.cancel_button.set_sensitive(False)
+
+    def _operation_finished(self, result: InstallResult | None, error: Exception | None) -> bool:
+        self._busy = False
+        self._cancel_event = None
+        self.cancel_button.set_visible(False)
+        self.progress_bar.set_visible(False)
+        self._set_library_actions(not self._library_loading and self.library_error is None)
+        if error is not None:
+            self._refresh_all(reload_library=False, reload_recovery=True)
+            if isinstance(error, DownloadCancelled):
+                self.workflow_status.set_text(str(error))
+                self.workflow_status.set_visible(True)
+            else:
+                self.workflow_status.set_visible(False)
+                self._show_error("Installation failed", str(error))
+            return GLib.SOURCE_REMOVE
+        if result is not None:
+            message = (
+                f"{result.record.display_name} is already registered at {result.record.bundle_path}."
+                if result.already_installed
+                else f"Installed {result.record.display_name}. Archive preserved at {result.archive_path}."
+            )
+            self.workflow_status.set_text(message)
+            self.workflow_status.set_visible(True)
+            self._refresh_all(reload_library=True, reload_recovery=True)
+        else:
+            self._refresh_all(reload_library=False, reload_recovery=True)
+        return GLib.SOURCE_REMOVE
+
+    @staticmethod
+    def _format_size(size: int) -> str:
+        units = ("B", "KiB", "MiB", "GiB")
+        value = float(size)
+        for unit in units:
+            if value < 1024 or unit == units[-1]:
+                return f"{value:.1f} {unit}"
+            value /= 1024
+        return f"{size} B"
 
     def _on_launch_clicked(self, _button: Gtk.Button, record: InstallationRecord) -> None:
+        self.request_launch_toggle(record)
+
+    def request_launch_toggle(self, record: InstallationRecord) -> None:
         session = self._sessions.get(record.id)
         if session is not None:
             self._stopping_ids.add(record.id)
-            self._refresh_all()
+            self._refresh_all(reload_library=False)
             threading.Thread(
                 target=self._stop_worker,
                 args=(record.id, session),
@@ -248,7 +876,7 @@ class InstallationPage(Gtk.Box):
             return
 
         self._launching_ids.add(record.id)
-        self._refresh_all()
+        self._refresh_all(reload_library=False)
         threading.Thread(
             target=self._launch_worker,
             args=(record.id, record),
@@ -259,7 +887,7 @@ class InstallationPage(Gtk.Box):
         try:
             session = launch_application(record, self.rosemary_status)
             wait_for_running(session)
-        except (OSError, ValueError, RuntimeError) as error:
+        except Exception as error:
             GLib.idle_add(self._launch_failed, installation_id, str(error))
             return
         GLib.idle_add(self._launch_ready, installation_id, session)
@@ -267,14 +895,14 @@ class InstallationPage(Gtk.Box):
     def _launch_ready(self, installation_id: str, session: LaunchSession) -> bool:
         self._launching_ids.discard(installation_id)
         if session.process.poll() is not None:
-            self._refresh_all()
+            self._refresh_all(reload_library=False)
             self._show_error(
                 "Roblox stopped during launch",
                 "The verified application process exited before Roseblox could mark it running.",
             )
             return GLib.SOURCE_REMOVE
         self._sessions[installation_id] = session
-        self._refresh_all()
+        self._refresh_all(reload_library=False)
         threading.Thread(
             target=self._watch_worker,
             args=(installation_id, session),
@@ -284,7 +912,7 @@ class InstallationPage(Gtk.Box):
 
     def _launch_failed(self, installation_id: str, message: str) -> bool:
         self._launching_ids.discard(installation_id)
-        self._refresh_all()
+        self._refresh_all(reload_library=False)
         self._show_error("Could not launch Roblox", message)
         return GLib.SOURCE_REMOVE
 
@@ -307,7 +935,7 @@ class InstallationPage(Gtk.Box):
         was_stopping = installation_id in self._stopping_ids
         del self._sessions[installation_id]
         self._stopping_ids.discard(installation_id)
-        self._refresh_all()
+        self._refresh_all(reload_library=False)
         if not was_stopping and return_code != 0:
             self._show_error(
                 "Roblox exited unexpectedly",
@@ -327,14 +955,14 @@ class InstallationPage(Gtk.Box):
         if self._sessions.get(installation_id) is session and session.process.poll() is not None:
             del self._sessions[installation_id]
         self._stopping_ids.discard(installation_id)
-        self._refresh_all()
+        self._refresh_all(reload_library=False)
         return GLib.SOURCE_REMOVE
 
     def _stop_failed(self, installation_id: str, session: LaunchSession, message: str) -> bool:
         self._stopping_ids.discard(installation_id)
         if session.process.poll() is not None and self._sessions.get(installation_id) is session:
             del self._sessions[installation_id]
-        self._refresh_all()
+        self._refresh_all(reload_library=False)
         self._show_error("Could not stop Roblox", message)
         return GLib.SOURCE_REMOVE
 
@@ -342,18 +970,9 @@ class InstallationPage(Gtk.Box):
         button = self._launch_buttons.get(installation_id)
         if button is None:
             return
-        if installation_id in self._launching_ids:
-            button.set_label("Launching...")
-            button.set_sensitive(False)
-        elif installation_id in self._stopping_ids:
-            button.set_label("Stopping…")
-            button.set_sensitive(False)
-        elif installation_id in self._sessions:
-            button.set_label("Stop")
-            button.set_sensitive(True)
-        else:
-            button.set_label("Launch")
-            button.set_sensitive(True)
+        label, sensitive = self.launch_button_state(installation_id)
+        button.set_label(label)
+        button.set_sensitive(sensitive)
         remove_button = self._remove_buttons.get(installation_id)
         if remove_button is not None:
             remove_button.set_sensitive(
@@ -362,20 +981,70 @@ class InstallationPage(Gtk.Box):
                 and installation_id not in self._stopping_ids
             )
 
-    def _on_remove_clicked(self, _button: Gtk.Button, record: InstallationRecord) -> None:
-        try:
-            if self.store.remove(record.id):
-                self._refresh_all()
-        except LibraryDataError as error:
-            self._show_error("Could not remove registration", str(error))
+    def launch_button_state(self, installation_id: str) -> tuple[str, bool]:
+        if installation_id in self._launching_ids:
+            return "Launching...", False
+        if installation_id in self._stopping_ids:
+            return "Stopping…", False
+        if installation_id in self._sessions:
+            return "Stop", True
+        return "Launch", True
 
-    def _refresh_all(self) -> None:
+    def _on_remove_clicked(self, _button: Gtk.Button, record: InstallationRecord) -> None:
+        if record.managed:
+            dialog = Adw.MessageDialog.new(
+                self.window,
+                "Remove managed installation?",
+                "You can remove only the Library registration, or explicitly delete the managed application bundle. Any downloaded archive will be kept.",
+            )
+            dialog.set_close_response("cancel")
+            dialog.add_response("cancel", "Cancel")
+            dialog.add_response("registration", "Remove Registration")
+            dialog.add_response("delete", "Delete Managed Bundle")
+            dialog.set_default_response("cancel")
+            dialog.set_response_appearance("delete", Adw.ResponseAppearance.DESTRUCTIVE)
+            dialog.connect("response", self._on_managed_remove_response, record)
+            dialog.present()
+            return
+        self._remove_registration_async(record, False)
+
+    def _on_managed_remove_response(self, dialog, response, record: InstallationRecord) -> None:
+        dialog.destroy()
+        if response == "registration":
+            self._remove_registration_async(record, False)
+        elif response == "delete":
+            self._remove_registration_async(record, True)
+
+    def _remove_registration_async(self, record: InstallationRecord, delete_managed_files: bool) -> None:
+        threading.Thread(
+            target=self._remove_worker,
+            args=(record, delete_managed_files),
+            daemon=True,
+        ).start()
+
+    def _remove_worker(self, record: InstallationRecord, delete_managed_files: bool) -> None:
+        try:
+            removed = self.store.remove(record.id, delete_managed_files=delete_managed_files)
+        except (LibraryDataError, OSError) as error:
+            GLib.idle_add(self._remove_failed, str(error))
+            return
+        if removed:
+            GLib.idle_add(self._refresh_all)
+
+    def _remove_failed(self, message: str) -> bool:
+        self._show_error("Could not remove registration", message)
+        return GLib.SOURCE_REMOVE
+
+    def _refresh_all(self, *, reload_library: bool = True, reload_recovery: bool = False) -> bool:
         if hasattr(self.window, "refresh_pages"):
-            self.window.refresh_pages()
+            self.window.refresh_pages(reload_library=reload_library, reload_recovery=reload_recovery)
         else:
             self.refresh()
+        return GLib.SOURCE_REMOVE
 
     def _show_error(self, heading: str, message: str) -> None:
+        if len(message) > 8192:
+            message = message[:8192] + "\n\n[Additional error output was truncated.]"
         dialog = Adw.MessageDialog.new(self.window, heading, message)
         dialog.add_response("ok", "OK")
         dialog.set_default_response("ok")
@@ -383,24 +1052,28 @@ class InstallationPage(Gtk.Box):
 
 
 class SettingsPage(Gtk.Box):
-    def __init__(self, status: RosemaryStatus) -> None:
+    def __init__(
+        self,
+        status: RosemaryStatus,
+        *,
+        window: Gtk.Window,
+        version_settings: VersionSettingsStore,
+        version_client,
+    ) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=14)
-        self.set_halign(Gtk.Align.CENTER)
-        self.set_valign(Gtk.Align.CENTER)
         self.set_hexpand(True)
         self.set_vexpand(True)
-        self.set_margin_top(40)
-        self.set_margin_bottom(40)
-        self.set_margin_start(40)
-        self.set_margin_end(40)
-        self.add_css_class("page-content")
+        self.set_margin_top(28)
+        self.set_margin_bottom(28)
+        self.set_margin_start(28)
+        self.set_margin_end(28)
+        self.window = window
+        self.version_settings = version_settings
+        self.version_client = version_client
 
-        icon = Gtk.Image.new_from_icon_name("emblem-system-symbolic")
-        icon.set_pixel_size(44)
-        icon.add_css_class("page-icon")
-        self.append(icon)
         heading = Gtk.Label(label="Settings")
         heading.add_css_class("title-1")
+        heading.set_halign(Gtk.Align.START)
         self.append(heading)
 
         status_label = Gtk.Label()
@@ -412,11 +1085,11 @@ class SettingsPage(Gtk.Box):
             path_label.set_selectable(True)
             path_label.set_wrap(True)
             path_label.add_css_class("dim-label")
-            self.append(status_label)
-            self.append(path_label)
+            rosemary_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
+            rosemary_box.append(status_label)
+            rosemary_box.append(path_label)
         else:
             status_label.set_markup("<b>Rosemary not found</b>")
-            self.append(status_label)
             message = "Rosemary is required to launch Roblox. Install it separately or configure its executable in a future settings update."
             if status.error:
                 message += f"\n{status.error}"
@@ -425,4 +1098,190 @@ class SettingsPage(Gtk.Box):
             detail.set_justify(Gtk.Justification.CENTER)
             detail.set_max_width_chars(60)
             detail.add_css_class("dim-label")
-            self.append(detail)
+            rosemary_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
+            rosemary_box.append(status_label)
+            rosemary_box.append(detail)
+        rosemary_heading = Gtk.Label(label="Rosemary")
+        rosemary_heading.set_xalign(0)
+        rosemary_heading.add_css_class("title-3")
+        self.append(rosemary_heading)
+        self.append(rosemary_box)
+
+        settings = {app: default_version_source(app) for app in ("player", "studio")}
+        self._source_widgets = {}
+        for app_type, title in (("player", "Roblox Player"), ("studio", "Roblox Studio")):
+            group = Adw.PreferencesGroup.new()
+            group.set_title(f"{title} Version Source")
+            group.set_description("Configure the HTTPS JSON endpoint used to discover the latest version.")
+            endpoint = Gtk.Entry()
+            endpoint.set_text(settings[app_type].endpoint)
+            endpoint.set_hexpand(True)
+            endpoint.set_placeholder_text("https://example.org/version.json")
+            endpoint.set_tooltip_text("HTTPS endpoint returning a JSON response")
+            pointer = Gtk.Entry()
+            pointer.set_text(settings[app_type].json_pointer)
+            pointer.set_hexpand(True)
+            endpoint.set_width_chars(36)
+            pointer.set_width_chars(36)
+            pointer.set_placeholder_text("/clientVersionUpload")
+            pointer.set_tooltip_text("RFC 6901 JSON Pointer, for example /data/0/version")
+            group.add(self._entry_row("Endpoint URL", endpoint))
+            group.add(self._entry_row("JSON field path", pointer))
+
+            result_label = Gtk.Label(label="Loading saved configuration…")
+            result_label.set_xalign(0)
+            result_label.set_wrap(True)
+            result_label.set_selectable(True)
+            result_label.add_css_class("dim-label")
+            result_row = Adw.ActionRow.new()
+            result_row.set_title("Configuration status")
+            result_row.add_suffix(result_label)
+            group.add(result_row)
+
+            actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            test_button = Gtk.Button.new_with_label("Test Configuration")
+            test_button.connect("clicked", self._test_source_clicked, app_type, endpoint, pointer, result_label)
+            actions.append(test_button)
+            save_button = Gtk.Button.new_with_label("Save")
+            save_button.add_css_class("suggested-action")
+            save_button.connect("clicked", self._save_source_clicked, app_type, endpoint, pointer, result_label)
+            actions.append(save_button)
+            reset_button = Gtk.Button.new_with_label("Restore Defaults")
+            reset_button.connect("clicked", self._reset_source_clicked, app_type, endpoint, pointer, result_label)
+            actions.append(reset_button)
+            actions_row = Adw.ActionRow.new()
+            actions_row.set_title("Actions")
+            actions_row.add_suffix(actions)
+            group.add(actions_row)
+            self._source_widgets[app_type] = (endpoint, pointer, result_label, test_button, save_button, reset_button)
+            self.append(group)
+            for action in (test_button, save_button, reset_button):
+                action.set_sensitive(False)
+        threading.Thread(target=self._load_sources_worker, daemon=True).start()
+
+    @staticmethod
+    def _entry_row(title: str, entry: Gtk.Entry) -> Adw.ActionRow:
+        row = Adw.ActionRow.new()
+        row.set_title(title)
+        row.add_suffix(entry)
+        return row
+
+    def _load_sources_worker(self) -> None:
+        try:
+            settings, errors = self.version_settings.load_independent()
+            error = None
+        except VersionSettingsError as failure:
+            settings = None
+            errors = {}
+            error = str(failure)
+        GLib.idle_add(self._show_sources_loaded, settings, errors, error)
+
+    def _show_sources_loaded(self, settings, errors, error) -> bool:
+        for app_type, widgets in self._source_widgets.items():
+            endpoint, pointer, result_label, test_button, save_button, reset_button = widgets
+            if settings is not None:
+                source = settings.get(app_type, default_version_source(app_type))
+                endpoint.set_text(source.endpoint)
+                pointer.set_text(source.json_pointer)
+                if app_type in errors:
+                    result_label.set_text(
+                        f"Saved {app_type.title()} settings are invalid: {errors[app_type]}. "
+                        "Saving or restoring defaults will replace only this app's record."
+                    )
+                else:
+                    result_label.set_text("Test the current fields without saving them.")
+                self._set_source_actions(app_type, True)
+            else:
+                result_label.set_text(f"Could not load saved settings: {error}. The file was not changed.")
+        return GLib.SOURCE_REMOVE
+
+    def _set_source_actions(self, app_type: str, sensitive: bool) -> None:
+        widgets = self._source_widgets.get(app_type)
+        if widgets is None:
+            return
+        for action in widgets[3:]:
+            action.set_sensitive(sensitive)
+
+    def _test_source_clicked(self, button, app_type, endpoint, pointer, result_label) -> None:
+        source = VersionSource(endpoint.get_text(), pointer.get_text())
+        result_label.set_text("Testing configuration…")
+        self._set_source_actions(app_type, False)
+        threading.Thread(
+            target=self._test_source_worker,
+            args=(app_type, source, result_label, button),
+            daemon=True,
+        ).start()
+
+    def _test_source_worker(self, app_type, source, result_label, button) -> None:
+        try:
+            result = self.version_client.test_configuration(source)
+        except Exception as error:
+            message = str(error)[:500] or type(error).__name__
+            result = VersionTestResult(
+                "Failed", None, "Not completed", None, "Not completed",
+                f"Unexpected configuration test failure: {message}",
+            )
+        GLib.idle_add(self._show_source_test, app_type, result, result_label, button)
+
+    def _show_source_test(self, app_type, result, result_label, button) -> bool:
+        extracted = repr(result.extracted_version) if result.extracted_version is not None else "None"
+        status = (
+            f"Connection: {result.connection_status}\nHTTP status: {result.http_status if result.http_status is not None else 'Unavailable'}"
+            f"\nJSON parsing: {result.json_result}\nExtracted version: {extracted}"
+            f"\nVersion validation: {result.validation_result}"
+        )
+        if result.error:
+            status += f"\nDetails: {result.error}"
+        result_label.set_text(status)
+        self._set_source_actions(app_type, True)
+        return GLib.SOURCE_REMOVE
+
+    def _save_source_clicked(self, button, app_type, endpoint, pointer, result_label) -> None:
+        source = VersionSource(endpoint.get_text(), pointer.get_text())
+        self._set_source_actions(app_type, False)
+        result_label.set_text("Saving configuration…")
+        threading.Thread(
+            target=self._save_source_worker,
+            args=(app_type, source, result_label, button),
+            daemon=True,
+        ).start()
+
+    def _save_source_worker(self, app_type, source, result_label, button) -> None:
+        try:
+            self.version_settings.save(app_type, source)
+            message = "Configuration saved. Refresh the app page to use the new version source."
+        except Exception as error:
+            message = f"Could not save configuration: {str(error)[:500]}"
+        GLib.idle_add(self._show_source_saved, app_type, message, result_label)
+
+    def _show_source_saved(self, app_type, message, result_label) -> bool:
+        result_label.set_text(message)
+        self._set_source_actions(app_type, True)
+        return GLib.SOURCE_REMOVE
+
+    def _reset_source_clicked(self, button, app_type, endpoint, pointer, result_label) -> None:
+        self._set_source_actions(app_type, False)
+        result_label.set_text("Restoring default configuration…")
+        threading.Thread(
+            target=self._reset_source_worker,
+            args=(app_type, endpoint, pointer, result_label, button),
+            daemon=True,
+        ).start()
+
+    def _reset_source_worker(self, app_type, endpoint, pointer, result_label, button) -> None:
+        try:
+            self.version_settings.reset(app_type)
+            source = default_version_source(app_type)
+            message = "Default configuration restored and saved."
+        except Exception as error:
+            source = None
+            message = f"Could not restore defaults: {str(error)[:500]}"
+        GLib.idle_add(self._show_source_reset, app_type, source, endpoint, pointer, message, result_label)
+
+    def _show_source_reset(self, app_type, source, endpoint, pointer, message, result_label) -> bool:
+        if source is not None:
+            endpoint.set_text(source.endpoint)
+            pointer.set_text(source.json_pointer)
+        result_label.set_text(message)
+        self._set_source_actions(app_type, True)
+        return GLib.SOURCE_REMOVE

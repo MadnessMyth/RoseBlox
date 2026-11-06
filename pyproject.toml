@@ -13,7 +13,7 @@ requires-python = ">=3.10"
 roseblox = "roseblox.__main__:main"
 
 [tool.setuptools.package-data]
-roseblox = ["resources/*.css"]
+roseblox = ["resources/*.css", "resources/*.svg"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -1,6 +1,7 @@
 """Backend tests that do not launch external applications."""
 
 import json
+import io
 import os
 import signal
 import subprocess
@@ -26,6 +27,7 @@ from roseblox.backend.rosemary import (
     build_launch_arguments,
     detect_rosemary,
     launch_application,
+    _drain_output,
     _matches_session,
     stop_application,
     wait_for_running,
@@ -33,6 +35,12 @@ from roseblox.backend.rosemary import (
 
 
 class RosemaryTests(unittest.TestCase):
+    def test_process_output_capture_is_bounded_and_drains_stream(self):
+        payload = b"x" * (70 * 1024)
+        captured = _drain_output(io.BytesIO(payload))
+        self.assertLess(len(captured), 65 * 1024)
+        self.assertIn(b"omitted middle", captured)
+
     def test_detects_rosemary_using_path_lookup(self):
         with patch("roseblox.backend.rosemary.shutil.which", return_value="/usr/bin/rosemary"):
             status = detect_rosemary(config_path=Path("/path/that/does/not/exist"))
@@ -235,6 +243,57 @@ class LibraryTests(unittest.TestCase):
             self.assertEqual([], store.load())
             self.assertTrue(marker.is_file())
             self.assertEqual("preserve", marker.read_text(encoding="utf-8"))
+
+    def test_legacy_library_records_load_with_external_defaults(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bundle = make_bundle(root, "player")
+            library_file = root / "library.json"
+            library_file.write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "installations": [
+                            {
+                                "id": "legacy-id",
+                                "display_name": "Old Player",
+                                "app_type": "player",
+                                "bundle_path": str(bundle),
+                                "registered_at": "2026-01-01T00:00:00+00:00",
+                                "validation_state": "valid",
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            [record] = LibraryStore(library_file).load()
+            self.assertEqual("legacy-id", record.id)
+            self.assertIsNone(record.version)
+            self.assertFalse(record.managed)
+            self.assertEqual("existing_bundle", record.source)
+
+    def test_managed_bundle_deletion_requires_flag_and_stays_within_managed_root(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            managed_root = root / "installations"
+            bundle = make_bundle(managed_root / "player" / "version-test", "player")
+            store = LibraryStore(root / "library.json")
+            record = store.add("player", bundle, "Managed", managed=True, source="download")
+            with patch("roseblox.backend.library.managed_install_root", return_value=managed_root):
+                self.assertTrue(store.remove(record.id))
+                self.assertTrue(bundle.is_dir())
+                second = store.add("player", bundle, "Managed", managed=True, source="download")
+
+                external_bundle = make_bundle(root / "external", "player")
+                external = store.add("player", external_bundle, "External")
+                with self.assertRaises(LibraryDataError):
+                    store.remove(external.id, delete_managed_files=True)
+                self.assertTrue(external_bundle.is_dir())
+
+                # A valid explicit managed deletion removes the bundle only.
+                self.assertTrue(store.remove(second.id, delete_managed_files=True))
+                self.assertFalse(bundle.exists())
 
     def test_builds_and_uses_exact_launch_arguments(self):
         with tempfile.TemporaryDirectory() as directory:
