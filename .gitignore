@@ -2,6 +2,9 @@
 __pycache__/
 *.py[cod]
 *.egg-info/
+build/
+dist/
+wheelhouse/
 .pytest_cache/
 .mypy_cache/
 
