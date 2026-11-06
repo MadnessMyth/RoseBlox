@@ -4,6 +4,7 @@ import json
 import io
 import os
 import signal
+import shutil
 import subprocess
 import tempfile
 import threading
@@ -243,6 +244,158 @@ class LibraryTests(unittest.TestCase):
             self.assertEqual([], store.load())
             self.assertTrue(marker.is_file())
             self.assertEqual("preserve", marker.read_text(encoding="utf-8"))
+
+    def test_store_instances_for_same_resolved_path_share_mutation_lock(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "sub" / ".." / "library.json"
+            first = LibraryStore(path)
+            second = LibraryStore(path.parent / "library.json")
+            self.assertIs(first.mutation_lock, second.mutation_lock)
+
+    def test_concurrent_player_and_studio_additions_are_all_preserved(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "library.json"
+            stores = [LibraryStore(path), LibraryStore(path.parent / "." / path.name)]
+            work = []
+            for index in range(16):
+                app_type = "player" if index % 2 == 0 else "studio"
+                work.append((stores[index % 2], app_type, make_bundle(root / str(index), app_type), f"Install {index}"))
+            barrier = threading.Barrier(len(work))
+            errors = []
+
+            def add(item):
+                store, app_type, bundle, name = item
+                barrier.wait()
+                try:
+                    store.add(app_type, bundle, name)
+                except Exception as error:
+                    errors.append(error)
+
+            threads = [threading.Thread(target=add, args=(item,)) for item in work]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=10)
+            self.assertFalse(any(thread.is_alive() for thread in threads))
+            self.assertEqual([], errors)
+            self.assertEqual(16, len(LibraryStore(path).load()))
+
+    def test_concurrent_removals_from_distinct_store_instances_are_preserved(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "library.json"
+            writer = LibraryStore(path)
+            records = [
+                writer.add(
+                    "player" if index % 2 == 0 else "studio",
+                    make_bundle(root / str(index), "player" if index % 2 == 0 else "studio"),
+                    f"Install {index}",
+                )
+                for index in range(12)
+            ]
+            barrier = threading.Barrier(len(records))
+            errors = []
+
+            def remove(record):
+                barrier.wait()
+                try:
+                    LibraryStore(path).remove(record.id)
+                except Exception as error:
+                    errors.append(error)
+
+            threads = [threading.Thread(target=remove, args=(record,)) for record in records]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=10)
+            self.assertFalse(any(thread.is_alive() for thread in threads))
+            self.assertEqual([], errors)
+            self.assertEqual([], LibraryStore(path).load())
+
+    def test_concurrent_add_and_remove_preserve_both_successful_mutations(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "library.json"
+            store = LibraryStore(path)
+            old = store.add("player", make_bundle(root / "old", "player"), "Old")
+            new_bundle = make_bundle(root / "new", "studio")
+            barrier = threading.Barrier(2)
+            errors = []
+
+            def add():
+                barrier.wait()
+                try:
+                    LibraryStore(path).add("studio", new_bundle, "New")
+                except Exception as error:
+                    errors.append(error)
+
+            def remove():
+                barrier.wait()
+                try:
+                    LibraryStore(path).remove(old.id)
+                except Exception as error:
+                    errors.append(error)
+
+            threads = [threading.Thread(target=add), threading.Thread(target=remove)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=10)
+            self.assertFalse(any(thread.is_alive() for thread in threads))
+            self.assertEqual([], errors)
+            [record] = LibraryStore(path).load()
+            self.assertEqual("studio", record.app_type)
+            self.assertTrue(new_bundle.is_dir())
+
+    def test_failed_library_persistence_does_not_remove_managed_bundle_or_record(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            managed_root = root / "installations"
+            bundle = make_bundle(managed_root / "player" / "v1", "player")
+            store = LibraryStore(root / "library.json")
+            record = store.add("player", bundle, "Managed", managed=True)
+            with patch("roseblox.backend.library.managed_install_root", return_value=managed_root):
+                with patch.object(store, "_save", side_effect=LibraryDataError("disk full")):
+                    with self.assertRaises(LibraryDataError):
+                        store.remove(record.id, delete_managed_files=True)
+            self.assertTrue(bundle.is_dir())
+            self.assertEqual([record], store.load())
+
+    def test_failed_managed_bundle_cleanup_restores_registration_and_bundle(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            managed_root = root / "installations"
+            bundle = make_bundle(managed_root / "studio" / "v1", "studio")
+            store = LibraryStore(root / "library.json")
+            record = store.add("studio", bundle, "Managed", managed=True)
+            with patch("roseblox.backend.library.managed_install_root", return_value=managed_root):
+                with patch("roseblox.backend.library.shutil.rmtree", side_effect=OSError("permission denied")):
+                    with self.assertRaisesRegex(LibraryDataError, "registration were restored"):
+                        store.remove(record.id, delete_managed_files=True)
+            self.assertTrue(bundle.is_dir())
+            self.assertEqual([record], store.load())
+
+    def test_partial_managed_bundle_cleanup_does_not_restore_invalid_registration(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            managed_root = root / "installations"
+            bundle = make_bundle(managed_root / "player" / "v1", "player")
+            store = LibraryStore(root / "library.json")
+            record = store.add("player", bundle, "Managed", managed=True)
+            real_rmtree = shutil.rmtree
+
+            def partially_remove(path):
+                real_rmtree(path / "Contents")
+                raise OSError("disk error during cleanup")
+
+            with patch("roseblox.backend.library.managed_install_root", return_value=managed_root):
+                with patch("roseblox.backend.library.shutil.rmtree", side_effect=partially_remove):
+                    with self.assertRaisesRegex(LibraryDataError, "registration remains removed"):
+                        store.remove(record.id, delete_managed_files=True)
+            self.assertTrue(bundle.is_dir())
+            self.assertFalse((bundle / "Contents").exists())
+            self.assertEqual([], store.load())
 
     def test_legacy_library_records_load_with_external_defaults(self):
         with tempfile.TemporaryDirectory() as directory:

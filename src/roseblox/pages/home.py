@@ -22,6 +22,25 @@ def selected_installation_index(
     )
 
 
+def choose_home_installation_id(
+    installations: list[InstallationRecord],
+    validation_by_id: dict[str, str],
+    *,
+    current_id: str | None,
+    resolved_preferred_id: str | None,
+    preference_changed: bool,
+) -> str | None:
+    """Preserve a temporary valid choice unless the saved preference changed."""
+    valid_ids = {
+        record.id for record in installations if validation_by_id.get(record.id) == "Valid"
+    }
+    if current_id in valid_ids and not preference_changed:
+        return current_id
+    if resolved_preferred_id in valid_ids:
+        return resolved_preferred_id
+    return next((record.id for record in installations if record.id in valid_ids), None)
+
+
 class HomePage(Gtk.Overlay):
     def __init__(self, window: Gtk.Window) -> None:
         super().__init__()
@@ -107,10 +126,23 @@ class HomePage(Gtk.Overlay):
         error: str | None,
         *,
         loading: bool,
+        preferred_ids: dict[str, str | None] | None = None,
+        resolved_preferred_ids: dict[str, str | None] | None = None,
+        preference_errors: dict[str, str] | None = None,
     ) -> None:
+        preferred_ids = preferred_ids or {"player": None, "studio": None}
+        resolved_preferred_ids = resolved_preferred_ids or {"player": None, "studio": None}
         for app_type, card in self.cards.items():
             installations = [record for record in records if record.app_type == app_type]
-            card.set_installations(installations, validation_by_id, error, loading)
+            card.set_installations(
+                installations,
+                validation_by_id,
+                error,
+                loading,
+                preferred_ids.get(app_type),
+                resolved_preferred_ids.get(app_type),
+                (preference_errors or {}).get(app_type),
+            )
 
     def _navigate(self, _button: Gtk.Button, page_id: str) -> None:
         self.window.navigate_to(page_id)
@@ -127,6 +159,10 @@ class _LaunchCard(Gtk.Box):
         self.library_error: str | None = None
         self.library_loading = True
         self.selected_id: str | None = None
+        self._last_preferred_id: str | None = None
+        self._last_resolved_preferred_id: str | None = None
+        self._has_snapshot = False
+        self._preference_error: str | None = None
         self._updating_model = False
         self.set_hexpand(True)
         self.set_valign(Gtk.Align.START)
@@ -187,26 +223,49 @@ class _LaunchCard(Gtk.Box):
         validation_by_id: dict[str, str],
         error: str | None,
         loading: bool,
+        preferred_id: str | None,
+        resolved_preferred_id: str | None,
+        preference_error: str | None,
     ) -> None:
         previous_id = self._selected_record_id()
+        preference_changed = (
+            not self._has_snapshot
+            or preferred_id != self._last_preferred_id
+            or resolved_preferred_id != self._last_resolved_preferred_id
+        )
         self.installations = installations
         self.validation_by_id = validation_by_id
         self.library_error = error
         self.library_loading = loading
+        self._last_preferred_id = preferred_id
+        self._last_resolved_preferred_id = resolved_preferred_id
         labels = [
             f"{record.display_name} · {record.version or 'Unknown version'}"
             for record in installations
         ]
         self._updating_model = True
         self.dropdown.set_model(Gtk.StringList.new(labels))
-        selected_index = selected_installation_index(installations, previous_id)
-        if installations:
+        selected_id = choose_home_installation_id(
+            installations,
+            validation_by_id,
+            current_id=previous_id,
+            resolved_preferred_id=resolved_preferred_id,
+            preference_changed=preference_changed,
+        )
+        selected_index = next(
+            (index for index, record in enumerate(installations) if record.id == selected_id),
+            Gtk.INVALID_LIST_POSITION,
+        )
+        if installations and selected_index != Gtk.INVALID_LIST_POSITION:
             self.dropdown.set_selected(selected_index)
             self.selected_id = installations[selected_index].id
         else:
+            self.dropdown.set_selected(Gtk.INVALID_LIST_POSITION)
             self.selected_id = None
         self._updating_model = False
+        self._has_snapshot = not loading
         self.selection_row.set_visible(len(installations) > 1)
+        self._preference_error = preference_error
         self._update_display()
 
     def _selected_record_id(self) -> str | None:
@@ -242,8 +301,16 @@ class _LaunchCard(Gtk.Box):
             self.launch_button.set_sensitive(False)
             return
         if record is None:
-            self.status.set_text(f"No {self.title} installations are registered.")
-            self.details.set_text("Add an existing app or install the latest version from the management page.")
+            if self.installations:
+                self.status.set_text(f"No valid {self.title} installations are available.")
+                self.details.set_text("Choose or register a valid application bundle from the management page.")
+            else:
+                self.status.set_text(f"No {self.title} installations are registered.")
+                self.details.set_text("Add an existing app or install the latest version from the management page.")
+            if self._last_preferred_id and self._last_preferred_id != self._last_resolved_preferred_id:
+                self.details.set_text(f"{self.details.get_text()} The saved preferred installation is unavailable.")
+            if self._preference_error:
+                self.details.set_text(f"{self.details.get_text()} Saved preference could not be read; using a safe fallback.")
             self.launch_button.set_label("Launch")
             self.launch_button.set_sensitive(False)
             return
@@ -262,7 +329,18 @@ class _LaunchCard(Gtk.Box):
             self.status.set_text(validation)
         version = record.version or "Unknown version"
         source = "Managed installation" if record.managed else "External application"
-        self.details.set_text(f"{version} · {source} — {record.bundle_path}")
+        preferred = " · Preferred installation" if record.id == self._last_preferred_id else ""
+        preference_notice = (
+            " · Saved preferred choice could not be read; using a valid fallback" if self._preference_error else ""
+        )
+        unavailable_notice = (
+            " · Saved preferred installation unavailable; using a valid fallback"
+            if self._last_preferred_id and self._last_preferred_id != self._last_resolved_preferred_id
+            else ""
+        )
+        self.details.set_text(
+            f"{version} · {source}{preferred}{unavailable_notice}{preference_notice} — {record.bundle_path}"
+        )
         self.launch_button.set_label(launch_label)
         can_launch = validation == "Valid" or launch_label in {"Launching...", "Stopping…", "Stop"}
         self.launch_button.set_sensitive(lifecycle_sensitive and can_launch)

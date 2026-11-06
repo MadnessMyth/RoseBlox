@@ -9,6 +9,11 @@ from gi.repository import Adw, GLib, Gtk
 
 from .backend.installer import InstallerService
 from .backend.library import BundleValidationError, InstallationRecord, LibraryStore, validate_bundle
+from .backend.preferences import (
+    PreferredInstallations,
+    PreferencesStore,
+    resolve_preferred_installation,
+)
 from .backend.rosemary import detect_rosemary
 from .backend.version_settings import VersionSettingsStore
 from .pages import PAGE_DEFINITIONS, create_page
@@ -23,6 +28,7 @@ class RosebloxWindow(Adw.ApplicationWindow):
         self.set_default_size(960, 640)
         self.set_size_request(680, 480)
         self.library = LibraryStore()
+        self.preferences_store = PreferencesStore()
         self.version_settings = VersionSettingsStore()
         self.installer = InstallerService(self.library, version_settings=self.version_settings)
         self.rosemary_status = detect_rosemary()
@@ -31,6 +37,9 @@ class RosebloxWindow(Adw.ApplicationWindow):
         self.stopping_installations = set()
         self.library_records: list[InstallationRecord] = []
         self.library_validation: dict[str, str] = {}
+        self.preferred_installations = PreferredInstallations()
+        self.resolved_preferred_ids = {"player": None, "studio": None}
+        self.preference_errors: dict[str, str] = {}
         self.library_error: str | None = None
         self.library_loading = True
         self.download_recovery_jobs = []
@@ -39,6 +48,8 @@ class RosebloxWindow(Adw.ApplicationWindow):
         self._refresh_in_progress = False
         self._refresh_pending_library = False
         self._refresh_pending_recovery = False
+        self._refresh_pending_preferences = False
+        self._snapshot_generation = 0
 
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.set_content(root)
@@ -81,14 +92,24 @@ class RosebloxWindow(Adw.ApplicationWindow):
         sidebar.add_css_class("navigation-sidebar")
         content.append(sidebar)
         content.append(self._stack)
-        self.refresh_pages(reload_library=True, reload_recovery=True)
+        self.refresh_pages(reload_library=True, reload_recovery=True, reload_preferences=True)
 
-    def refresh_pages(self, *, reload_library: bool = True, reload_recovery: bool = False) -> None:
+    def refresh_pages(
+        self,
+        *,
+        reload_library: bool = True,
+        reload_recovery: bool = False,
+        reload_preferences: bool = False,
+    ) -> None:
+        if reload_library:
+            reload_preferences = True
         self._refresh_pending_library |= reload_library
         self._refresh_pending_recovery |= reload_recovery
-        if not reload_library and not reload_recovery:
+        self._refresh_pending_preferences |= reload_preferences
+        if not reload_library and not reload_recovery and not reload_preferences:
             self._apply_shared_state()
             return
+        self._snapshot_generation += 1
         if self._refresh_in_progress:
             return
         self._start_pending_refresh()
@@ -96,24 +117,36 @@ class RosebloxWindow(Adw.ApplicationWindow):
     def _start_pending_refresh(self) -> None:
         load_library = self._refresh_pending_library
         load_recovery = self._refresh_pending_recovery
+        load_preferences = self._refresh_pending_preferences
         self._refresh_pending_library = False
         self._refresh_pending_recovery = False
+        self._refresh_pending_preferences = False
         self._refresh_in_progress = True
+        generation = self._snapshot_generation
         if load_library and not self._library_loaded:
             self.library_loading = True
             self._apply_shared_state()
         threading.Thread(
             target=self._load_shared_state_worker,
-            args=(load_library, load_recovery),
+            args=(load_library, load_recovery, load_preferences, generation),
             daemon=True,
         ).start()
 
-    def _load_shared_state_worker(self, load_library: bool, load_recovery: bool) -> None:
+    def _load_shared_state_worker(
+        self,
+        load_library: bool,
+        load_recovery: bool,
+        load_preferences: bool = False,
+        generation: int = 0,
+    ) -> None:
         records = None
         validation = None
         library_error = None
         recovery_jobs = None
         recovery_error = None
+        preferences = None
+        resolved_preferred_ids = None
+        preference_errors = None
         if load_library:
             try:
                 records = self.library.load()
@@ -136,8 +169,20 @@ class RosebloxWindow(Adw.ApplicationWindow):
             except Exception as error:
                 recovery_jobs = []
                 recovery_error = str(error)
+        if load_preferences:
+            preferences = self.preferences_store.load()
+            snapshot_records = records if records is not None else self.library_records
+            snapshot_validation = validation if validation is not None else self.library_validation
+            resolved_preferred_ids = {
+                app_type: resolve_preferred_installation(
+                    app_type, preferences, snapshot_records, snapshot_validation
+                )
+                for app_type in ("player", "studio")
+            }
+            preference_errors = dict(preferences.errors or {})
         GLib.idle_add(
             self._shared_state_loaded,
+            generation,
             load_library,
             records,
             validation,
@@ -145,10 +190,15 @@ class RosebloxWindow(Adw.ApplicationWindow):
             load_recovery,
             recovery_jobs,
             recovery_error,
+            load_preferences,
+            preferences,
+            resolved_preferred_ids,
+            preference_errors,
         )
 
     def _shared_state_loaded(
         self,
+        generation,
         load_library,
         records,
         validation,
@@ -156,7 +206,18 @@ class RosebloxWindow(Adw.ApplicationWindow):
         load_recovery,
         recovery_jobs,
         recovery_error,
+        load_preferences=False,
+        preferences=None,
+        resolved_preferred_ids=None,
+        preference_errors=None,
     ) -> bool:
+        if generation != self._snapshot_generation:
+            self._refresh_pending_library |= load_library
+            self._refresh_pending_recovery |= load_recovery
+            self._refresh_pending_preferences |= load_preferences
+            self._refresh_in_progress = False
+            self._start_pending_refresh()
+            return GLib.SOURCE_REMOVE
         if load_library:
             self.library_records = records or []
             self.library_validation = validation or {}
@@ -166,9 +227,17 @@ class RosebloxWindow(Adw.ApplicationWindow):
         if load_recovery:
             self.download_recovery_jobs = recovery_jobs or []
             self.download_recovery_error = recovery_error
+        if load_preferences:
+            self.preferred_installations = preferences or PreferredInstallations()
+            self.resolved_preferred_ids = resolved_preferred_ids or {"player": None, "studio": None}
+            self.preference_errors = preference_errors or {}
         self._refresh_in_progress = False
         self._apply_shared_state()
-        if self._refresh_pending_library or self._refresh_pending_recovery:
+        if (
+            self._refresh_pending_library
+            or self._refresh_pending_recovery
+            or self._refresh_pending_preferences
+        ):
             self._start_pending_refresh()
         return GLib.SOURCE_REMOVE
 
@@ -181,6 +250,12 @@ class RosebloxWindow(Adw.ApplicationWindow):
                     self.library_validation,
                     self.library_error,
                     loading=self.library_loading,
+                    preferred_ids={
+                        "player": self.preferred_installations.player_id,
+                        "studio": self.preferred_installations.studio_id,
+                    },
+                    resolved_preferred_ids=self.resolved_preferred_ids,
+                    preference_errors=self.preference_errors,
                 )
             set_recovery = getattr(page, "set_recovery_jobs", None)
             if set_recovery is not None:
@@ -192,6 +267,12 @@ class RosebloxWindow(Adw.ApplicationWindow):
                     self.library_validation,
                     self.library_error,
                     loading=self.library_loading,
+                    preferred_ids={
+                        "player": self.preferred_installations.player_id,
+                        "studio": self.preferred_installations.studio_id,
+                    },
+                    resolved_preferred_ids=self.resolved_preferred_ids,
+                    preference_errors=self.preference_errors,
                 )
 
     def navigate_to(self, page_id: str) -> None:

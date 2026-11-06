@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import tempfile
+import threading
 import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -17,6 +18,19 @@ APP_BUNDLE_NAMES = {
     "player": "RobloxPlayer.app",
     "studio": "RobloxStudio.app",
 }
+
+_MUTATION_LOCKS: dict[Path, threading.RLock] = {}
+_MUTATION_LOCKS_GUARD = threading.Lock()
+
+
+def _mutation_lock_for(path: Path) -> threading.RLock:
+    key = path.resolve()
+    with _MUTATION_LOCKS_GUARD:
+        lock = _MUTATION_LOCKS.get(key)
+        if lock is None:
+            lock = threading.RLock()
+            _MUTATION_LOCKS[key] = lock
+        return lock
 
 
 class BundleValidationError(ValueError):
@@ -107,6 +121,14 @@ class LibraryStore:
 
     def __init__(self, path: Path | None = None) -> None:
         self.path = Path(path) if path is not None else default_library_path()
+        self._mutation_lock: threading.RLock | None = None
+
+    @property
+    def mutation_lock(self) -> threading.RLock:
+        """Shared process-local lock for compound Library and preference changes."""
+        if self._mutation_lock is None:
+            self._mutation_lock = _mutation_lock_for(self.path)
+        return self._mutation_lock
 
     def load(self) -> list[InstallationRecord]:
         try:
@@ -145,61 +167,95 @@ class LibraryStore:
             raise ValueError("Installation source must be provided.")
         stored_archive_path = None if archive_path is None else str(Path(archive_path).absolute())
 
-        records = self.load()
-        if any(record.app_type == app_type and record.bundle_path == str(bundle) for record in records):
-            raise ValueError("This application bundle is already registered.")
-        record = InstallationRecord(
-            id=str(uuid.uuid4()),
-            display_name=display_name,
-            app_type=app_type,
-            bundle_path=str(bundle),
-            registered_at=datetime.now(timezone.utc).isoformat(),
-            validation_state="valid",
-            version=version,
-            managed=managed,
-            source=source,
-            archive_path=stored_archive_path,
-        )
-        self._save([*records, record])
-        return record
+        with self.mutation_lock:
+            # Revalidate after acquiring the lock: a concurrent deletion may have
+            # removed this bundle after the initial user selection.
+            bundle = validate_bundle(bundle, app_type)
+            records = self.load()
+            if any(record.app_type == app_type and record.bundle_path == str(bundle) for record in records):
+                raise ValueError("This application bundle is already registered.")
+            record = InstallationRecord(
+                id=str(uuid.uuid4()),
+                display_name=display_name,
+                app_type=app_type,
+                bundle_path=str(bundle),
+                registered_at=datetime.now(timezone.utc).isoformat(),
+                validation_state="valid",
+                version=version,
+                managed=managed,
+                source=source,
+                archive_path=stored_archive_path,
+            )
+            self._save([*records, record])
+            return record
 
     def remove(self, installation_id: str, *, delete_managed_files: bool = False) -> bool:
-        records = self.load()
-        record = next((item for item in records if item.id == installation_id), None)
-        if record is None:
-            return False
-        if delete_managed_files and not record.managed:
-            raise LibraryDataError("External application bundles can never be deleted by Roseblox.")
+        with self.mutation_lock:
+            records = self.load()
+            record = next((item for item in records if item.id == installation_id), None)
+            if record is None:
+                return False
+            if delete_managed_files and not record.managed:
+                raise LibraryDataError("External application bundles can never be deleted by Roseblox.")
 
-        tombstone: Path | None = None
-        if delete_managed_files:
-            bundle = self._validated_managed_bundle(record)
-            tombstone = bundle.with_name(f".roseblox-delete-{uuid.uuid4().hex}")
+            tombstone: Path | None = None
+            if delete_managed_files:
+                bundle = self._validated_managed_bundle(record)
+                tombstone = bundle.with_name(f".roseblox-delete-{uuid.uuid4().hex}")
+                try:
+                    os.replace(bundle, tombstone)
+                except OSError as error:
+                    raise LibraryDataError(f"Could not prepare managed bundle deletion: {error}") from error
+
+            remaining = [item for item in records if item.id != installation_id]
             try:
-                os.replace(bundle, tombstone)
-            except OSError as error:
-                raise LibraryDataError(f"Could not prepare managed bundle deletion: {error}") from error
-
-        remaining = [item for item in records if item.id != installation_id]
-        try:
-            self._save(remaining)
-        except LibraryDataError:
+                self._save(remaining)
+            except LibraryDataError:
+                if tombstone is not None:
+                    self._restore_bundle(tombstone, record.bundle_path)
+                raise
             if tombstone is not None:
                 try:
-                    os.replace(tombstone, record.bundle_path)
-                except OSError as restore_error:
+                    shutil.rmtree(tombstone)
+                except OSError as error:
+                    # If cleanup fails before deleting the tombstone, put both the
+                    # bundle and its record back. Partial cleanup cannot be made
+                    # perfectly transactional, so report any failed rollback.
+                    try:
+                        self._restore_bundle(tombstone, record.bundle_path)
+                    except (OSError, LibraryDataError) as restore_error:
+                        raise LibraryDataError(
+                            f"Managed deletion failed ({error}); bundle rollback failed ({restore_error}). "
+                            f"Inspect {record.bundle_path} and {tombstone}."
+                        ) from restore_error
+                    try:
+                        validate_bundle(record.bundle_path, record.app_type)
+                    except (BundleValidationError, OSError) as restore_error:
+                        raise LibraryDataError(
+                            f"Managed deletion removed part of the bundle before failing. The incomplete bundle "
+                            f"was restored at {record.bundle_path}; its Library registration remains removed."
+                        ) from restore_error
+                    try:
+                        self._save(records)
+                    except LibraryDataError as restore_error:
+                        raise LibraryDataError(
+                            f"Managed deletion failed ({error}); the bundle was restored at {record.bundle_path}, "
+                            f"but its Library registration could not be restored: {restore_error}"
+                        ) from restore_error
                     raise LibraryDataError(
-                        f"Library save failed and bundle restoration also failed at {tombstone}: {restore_error}"
-                    ) from restore_error
-            raise
-        if tombstone is not None:
-            try:
-                shutil.rmtree(tombstone)
-            except OSError as error:
-                raise LibraryDataError(
-                    f"Registration was removed, but managed bundle cleanup failed at {tombstone}: {error}"
-                ) from error
-        return True
+                        f"Managed deletion failed; the bundle and Library registration were restored: {error}"
+                    ) from error
+            return True
+
+    @staticmethod
+    def _restore_bundle(tombstone: Path, original: str | Path) -> None:
+        destination = Path(original)
+        if destination.exists() or destination.is_symlink():
+            raise LibraryDataError(f"Cannot restore managed bundle because its original path is occupied: {destination}")
+        try:
+            os.rename(tombstone, destination)
+        except OSError as error:
+            raise LibraryDataError(f"Could not restore managed bundle to {destination}: {error}") from error
 
     @staticmethod
     def _validated_managed_bundle(record: InstallationRecord) -> Path:

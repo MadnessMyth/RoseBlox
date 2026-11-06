@@ -1,7 +1,11 @@
 import unittest
+import tempfile
 from types import MethodType, SimpleNamespace
+from pathlib import Path
 from unittest.mock import Mock, patch
 
+from roseblox.backend.library import LibraryStore
+from roseblox.backend.preferences import PreferencesStore
 from roseblox.backend.version_settings import VersionSource, default_version_source
 from roseblox.pages.home import _LaunchCard
 from roseblox.pages.manager_page import InstallationPage, SettingsPage
@@ -109,6 +113,106 @@ class HomeLaunchDelegationTests(unittest.TestCase):
         self.assertEqual(("Stopping…", False), InstallationPage.launch_button_state(page, "stopping"))
         self.assertEqual(("Stop", True), InstallationPage.launch_button_state(page, "running"))
         self.assertEqual(("Launch", True), InstallationPage.launch_button_state(page, "stopped"))
+
+    def test_preference_worker_validates_and_refreshes_shared_snapshot(self):
+        record = SimpleNamespace(id="player-id", app_type="player")
+        preferences = SimpleNamespace(set_preferred=Mock())
+        store = object()
+        page = SimpleNamespace(
+            app_type="player",
+            window=SimpleNamespace(preferences_store=preferences),
+            store=store,
+            _preferred_save_finished=MethodType(InstallationPage._preferred_save_finished, SimpleNamespace(
+                _preference_busy=True,
+                _refresh_all=Mock(),
+                _show_error=Mock(),
+                _render_records=Mock(),
+                _current_records=Mock(return_value=[]),
+            )),
+        )
+        dispatched = []
+        with patch(
+            "roseblox.pages.manager_page.GLib.idle_add",
+            side_effect=lambda callback, *args: dispatched.append((callback, args)),
+        ):
+            InstallationPage._set_preferred_worker(page, record)
+        preferences.set_preferred.assert_called_once_with("player", "player-id", store)
+        self.assertEqual(1, len(dispatched))
+        callback, args = dispatched[0]
+        callback(*args)
+
+    def test_preference_success_requests_preferences_refresh(self):
+        page = SimpleNamespace(
+            _preference_busy=True,
+            _refresh_all=Mock(),
+            _show_error=Mock(),
+            _render_records=Mock(),
+            _current_records=Mock(return_value=[]),
+        )
+        InstallationPage._preferred_save_finished(page, None)
+        self.assertFalse(page._preference_busy)
+        page._refresh_all.assert_called_once_with(reload_library=False, reload_preferences=True)
+
+    def test_temporary_home_selection_does_not_write_preferences(self):
+        record = SimpleNamespace(id="temporary", app_type="player")
+        preferences = Mock()
+        card = SimpleNamespace(
+            _updating_model=False,
+            dropdown=SimpleNamespace(get_selected=lambda: 0),
+            installations=[record],
+            selected_id=None,
+            home=SimpleNamespace(window=SimpleNamespace(preferences_store=preferences)),
+            _update_display=Mock(),
+        )
+        _LaunchCard._selection_changed(card, None, None)
+        self.assertEqual("temporary", card.selected_id)
+        preferences.assert_not_called()
+
+    def test_removing_preferred_registration_clears_only_that_app_and_refreshes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            library = LibraryStore(root / "library.json")
+            player_bundle = root / "player" / "RobloxPlayer.app"
+            (player_bundle / "Contents").mkdir(parents=True)
+            studio_bundle = root / "studio" / "RobloxStudio.app"
+            (studio_bundle / "Contents").mkdir(parents=True)
+            player = library.add("player", player_bundle, "Player")
+            studio = library.add("studio", studio_bundle, "Studio")
+            preferences = PreferencesStore(root / "preferences.json")
+            preferences.set_preferred("player", player.id, library)
+            preferences.set_preferred("studio", studio.id, library)
+            refresh = Mock()
+            page = SimpleNamespace(
+                store=library,
+                window=SimpleNamespace(preferences_store=preferences),
+                _remove_failed=Mock(),
+                _remove_finished=MethodType(
+                    InstallationPage._remove_finished,
+                    SimpleNamespace(
+                        _refresh_all=refresh,
+                        _show_error=Mock(),
+                    ),
+                ),
+            )
+            dispatched = []
+            with patch(
+                "roseblox.pages.manager_page.GLib.idle_add",
+                side_effect=lambda callback, *args: dispatched.append((callback, args)),
+            ):
+                InstallationPage._remove_worker(page, player, False)
+            self.assertEqual(1, len(dispatched))
+            callback, args = dispatched[0]
+            callback(*args)
+            state = preferences.load()
+            self.assertIsNone(state.player_id)
+            self.assertEqual(studio.id, state.studio_id)
+            self.assertEqual([studio], library.load())
+            self.assertTrue(player_bundle.is_dir())
+            refresh.assert_called_once_with(
+                reload_library=True,
+                reload_recovery=False,
+                reload_preferences=True,
+            )
 
 
 if __name__ == "__main__":

@@ -21,6 +21,7 @@ from ..backend.library import (
     InstallationRecord,
     LibraryDataError,
 )
+from ..backend.preferences import PreferencesError
 from ..backend.rosemary import (
     LaunchSession,
     ProcessIdentityError,
@@ -63,7 +64,12 @@ class InstallationPage(Gtk.Box):
         self._sessions: dict[str, LaunchSession] = window.process_sessions
         self._launch_buttons: dict[str, Gtk.Button] = {}
         self._remove_buttons: dict[str, Gtk.Button] = {}
+        self._preferred_buttons: dict[str, Gtk.Button] = {}
         self._validation_by_id: dict[str, str] = {}
+        self._preferred_ids: dict[str, str | None] = {"player": None, "studio": None}
+        self._resolved_preferred_ids: dict[str, str | None] = {"player": None, "studio": None}
+        self._preference_errors: dict[str, str] = {}
+        self._preference_busy = False
         self._busy = False
         self._library_loading = True
         self._cancel_event: threading.Event | None = None
@@ -201,11 +207,23 @@ class InstallationPage(Gtk.Box):
         error: str | None,
         *,
         loading: bool,
+        preferred_ids: dict[str, str | None] | None = None,
+        resolved_preferred_ids: dict[str, str | None] | None = None,
+        preference_errors: dict[str, str] | None = None,
     ) -> None:
         self._library_loading = loading
         self.library_error = error
         self._validation_by_id = dict(validation_by_id)
+        if preferred_ids is not None:
+            self._preferred_ids = dict(preferred_ids)
+        if resolved_preferred_ids is not None:
+            self._resolved_preferred_ids = dict(resolved_preferred_ids)
+        if preference_errors is not None:
+            self._preference_errors = dict(preference_errors)
         if loading:
+            self._launch_buttons = {}
+            self._remove_buttons = {}
+            self._preferred_buttons = {}
             self._clear_rows()
             self.notice.set_label("Loading registered installations…")
             self.notice.set_visible(True)
@@ -213,6 +231,7 @@ class InstallationPage(Gtk.Box):
         if error:
             self._launch_buttons = {}
             self._remove_buttons = {}
+            self._preferred_buttons = {}
             self._clear_rows()
             self.notice.set_label(f"{error} No changes will be saved until the library file is repaired.")
             self.notice.set_visible(True)
@@ -244,6 +263,7 @@ class InstallationPage(Gtk.Box):
     def _render_records(self, records: list[InstallationRecord]) -> None:
         self._launch_buttons = {}
         self._remove_buttons = {}
+        self._preferred_buttons = {}
         self._clear_rows()
         if not records:
             empty = Gtk.Label(
@@ -296,7 +316,28 @@ class InstallationPage(Gtk.Box):
         details.append(bundle_path)
         contents.append(details)
 
+        preferred_id = self._preferred_ids.get(record.app_type)
+        if record.id == preferred_id:
+            available = self._validation_by_id.get(record.id) == "Valid"
+            marker_text = (
+                f"Preferred {kind} installation"
+                if available
+                else f"Saved preferred {kind} installation · unavailable"
+            )
+            preferred_marker = Gtk.Label(label=marker_text)
+            preferred_marker.set_xalign(0)
+            preferred_marker.add_css_class("dim-label")
+            details.append(preferred_marker)
+
         if self.app_type:
+            preferred_button = Gtk.Button.new_with_label(
+                "Preferred" if record.id == preferred_id else "Set as preferred"
+            )
+            preferred_button.set_sensitive(record.id != preferred_id and not self._preference_busy)
+            preferred_button.connect("clicked", self._on_set_preferred_clicked, record)
+            self._preferred_buttons[record.id] = preferred_button
+            contents.append(preferred_button)
+
             launch_button = Gtk.Button()
             launch_button.add_css_class("suggested-action")
             launch_button.connect("clicked", self._on_launch_clicked, record)
@@ -316,6 +357,31 @@ class InstallationPage(Gtk.Box):
         contents.append(remove)
         row.set_child(contents)
         return row
+
+    def _on_set_preferred_clicked(self, _button: Gtk.Button, record: InstallationRecord) -> None:
+        if self._preference_busy or self.app_type is None:
+            return
+        self._preference_busy = True
+        for button in self._preferred_buttons.values():
+            button.set_sensitive(False)
+        threading.Thread(target=self._set_preferred_worker, args=(record,), daemon=True).start()
+
+    def _set_preferred_worker(self, record: InstallationRecord) -> None:
+        try:
+            self.window.preferences_store.set_preferred(record.app_type, record.id, self.store)
+        except Exception as error:
+            GLib.idle_add(self._preferred_save_finished, str(error))
+            return
+        GLib.idle_add(self._preferred_save_finished, None)
+
+    def _preferred_save_finished(self, error: str | None) -> bool:
+        self._preference_busy = False
+        if error is not None:
+            self._show_error("Could not set preferred installation", error)
+            self._render_records(self._current_records())
+            return GLib.SOURCE_REMOVE
+        self._refresh_all(reload_library=False, reload_preferences=True)
+        return GLib.SOURCE_REMOVE
 
     def _on_add_clicked(self, _button: Gtk.Button) -> None:
         picker = Gtk.FileDialog.new()
@@ -1023,21 +1089,48 @@ class InstallationPage(Gtk.Box):
         ).start()
 
     def _remove_worker(self, record: InstallationRecord, delete_managed_files: bool) -> None:
+        preference_error = None
         try:
-            removed = self.store.remove(record.id, delete_managed_files=delete_managed_files)
+            with self.store.mutation_lock:
+                removed = self.store.remove(record.id, delete_managed_files=delete_managed_files)
+                if removed:
+                    try:
+                        self.window.preferences_store.clear_if_matches(record.app_type, record.id)
+                    except PreferencesError as error:
+                        preference_error = str(error)
         except (LibraryDataError, OSError) as error:
             GLib.idle_add(self._remove_failed, str(error))
             return
         if removed:
-            GLib.idle_add(self._refresh_all)
+            GLib.idle_add(self._remove_finished, preference_error)
+
+    def _remove_finished(self, preference_error: str | None) -> bool:
+        self._refresh_all(reload_library=True, reload_recovery=False, reload_preferences=True)
+        if preference_error:
+            self._show_error(
+                "Installation removed",
+                "The registration was removed, but its saved preferred selection could not be cleared. "
+                f"Roseblox will use a valid fallback. {preference_error}",
+            )
+        return GLib.SOURCE_REMOVE
 
     def _remove_failed(self, message: str) -> bool:
         self._show_error("Could not remove registration", message)
         return GLib.SOURCE_REMOVE
 
-    def _refresh_all(self, *, reload_library: bool = True, reload_recovery: bool = False) -> bool:
+    def _refresh_all(
+        self,
+        *,
+        reload_library: bool = True,
+        reload_recovery: bool = False,
+        reload_preferences: bool = False,
+    ) -> bool:
         if hasattr(self.window, "refresh_pages"):
-            self.window.refresh_pages(reload_library=reload_library, reload_recovery=reload_recovery)
+            self.window.refresh_pages(
+                reload_library=reload_library,
+                reload_recovery=reload_recovery,
+                reload_preferences=reload_preferences,
+            )
         else:
             self.refresh()
         return GLib.SOURCE_REMOVE
