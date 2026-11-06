@@ -7,6 +7,7 @@ from gi.repository import Gtk
 
 from .home import HomePage
 from .manager_page import InstallationPage, SettingsPage
+from .onboarding import OnboardingPage
 
 PAGE_DEFINITIONS = (
     ("home", "Home", "go-home-symbolic", "A quick overview of your Roblox installations."),
@@ -29,6 +30,8 @@ def create_page(
     rosemary_status,
     library_error: str | None,
     version_settings,
+    setup_store=None,
+    url_handlers=None,
 ) -> Gtk.Widget:
     """Build a page, retaining the original Home landing view."""
     if page_id == "home":
@@ -51,6 +54,8 @@ def create_page(
             window=window,
             version_settings=version_settings,
             version_client=installer.version_client,
+            setup_store=setup_store,
+            url_handlers=url_handlers,
         )
         scroller = Gtk.ScrolledWindow()
         scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)

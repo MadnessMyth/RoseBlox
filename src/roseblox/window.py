@@ -14,7 +14,9 @@ from .backend.preferences import (
     PreferencesStore,
     resolve_preferred_installation,
 )
-from .backend.rosemary import detect_rosemary
+from .backend.rosemary import detect_rosemary, save_rosemary_executable
+from .backend.setup import SetupState, SetupStore
+from .backend.url_handlers import URLHandlerService, URLHandlerStatus
 from .backend.version_settings import VersionSettingsStore
 from .pages import PAGE_DEFINITIONS, create_page
 
@@ -30,6 +32,11 @@ class RosebloxWindow(Adw.ApplicationWindow):
         self.library = LibraryStore()
         self.preferences_store = PreferencesStore()
         self.version_settings = VersionSettingsStore()
+        self.setup_store = SetupStore()
+        self.url_handlers = URLHandlerService(self.setup_store)
+        self.setup_state = SetupState()
+        self.url_handler_status = URLHandlerStatus(False, False, "URL-handler status has not been checked.")
+        self.setup_error = None
         self.installer = InstallerService(self.library, version_settings=self.version_settings)
         self.rosemary_status = detect_rosemary()
         self.process_sessions = {}
@@ -49,6 +56,7 @@ class RosebloxWindow(Adw.ApplicationWindow):
         self._refresh_pending_library = False
         self._refresh_pending_recovery = False
         self._refresh_pending_preferences = False
+        self._refresh_pending_setup = False
         self._snapshot_generation = 0
 
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -69,6 +77,7 @@ class RosebloxWindow(Adw.ApplicationWindow):
         self._stack.set_hexpand(True)
         self._stack.set_vexpand(True)
         self.pages = {}
+        self.settings_page = None
 
         for page_id, title, icon_name, description in PAGE_DEFINITIONS:
             page = create_page(
@@ -82,9 +91,20 @@ class RosebloxWindow(Adw.ApplicationWindow):
                 rosemary_status=self.rosemary_status,
                 library_error=self.library_error,
                 version_settings=self.version_settings,
+                setup_store=self.setup_store,
+                url_handlers=self.url_handlers,
             )
             self.pages[page_id] = page
             self._stack.add_titled(page, page_id, title)
+            if page_id == "settings":
+                self.settings_page = page.get_child()
+
+        from .pages.onboarding import OnboardingPage
+        self.onboarding_page = OnboardingPage(self, self.setup_store, self.url_handlers)
+        setup_scroller = Gtk.ScrolledWindow()
+        setup_scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        setup_scroller.set_child(self.onboarding_page)
+        self._stack.add_named(setup_scroller, "setup")
 
         sidebar = Gtk.StackSidebar()
         sidebar.set_stack(self._stack)
@@ -106,6 +126,11 @@ class RosebloxWindow(Adw.ApplicationWindow):
         self._refresh_pending_library |= reload_library
         self._refresh_pending_recovery |= reload_recovery
         self._refresh_pending_preferences |= reload_preferences
+        self._refresh_pending_setup = (
+            getattr(self, "_refresh_pending_setup", False)
+            or reload_preferences
+            or reload_library
+        )
         if not reload_library and not reload_recovery and not reload_preferences:
             self._apply_shared_state()
             return
@@ -118,9 +143,11 @@ class RosebloxWindow(Adw.ApplicationWindow):
         load_library = self._refresh_pending_library
         load_recovery = self._refresh_pending_recovery
         load_preferences = self._refresh_pending_preferences
+        load_setup = getattr(self, "_refresh_pending_setup", False)
         self._refresh_pending_library = False
         self._refresh_pending_recovery = False
         self._refresh_pending_preferences = False
+        self._refresh_pending_setup = False
         self._refresh_in_progress = True
         generation = self._snapshot_generation
         if load_library and not self._library_loaded:
@@ -128,7 +155,7 @@ class RosebloxWindow(Adw.ApplicationWindow):
             self._apply_shared_state()
         threading.Thread(
             target=self._load_shared_state_worker,
-            args=(load_library, load_recovery, load_preferences, generation),
+            args=(load_library, load_recovery, load_preferences, generation, load_setup),
             daemon=True,
         ).start()
 
@@ -138,6 +165,7 @@ class RosebloxWindow(Adw.ApplicationWindow):
         load_recovery: bool,
         load_preferences: bool = False,
         generation: int = 0,
+        load_setup: bool = False,
     ) -> None:
         records = None
         validation = None
@@ -147,6 +175,9 @@ class RosebloxWindow(Adw.ApplicationWindow):
         preferences = None
         resolved_preferred_ids = None
         preference_errors = None
+        setup_state = None
+        setup_error = None
+        handler_status = None
         if load_library:
             try:
                 records = self.library.load()
@@ -180,6 +211,12 @@ class RosebloxWindow(Adw.ApplicationWindow):
                 for app_type in ("player", "studio")
             }
             preference_errors = dict(preferences.errors or {})
+        if load_setup:
+            try:
+                setup_state = self.setup_store.load()
+                handler_status = self.url_handlers.check()
+            except Exception as error:
+                setup_error = str(error)[:500]
         GLib.idle_add(
             self._shared_state_loaded,
             generation,
@@ -194,6 +231,10 @@ class RosebloxWindow(Adw.ApplicationWindow):
             preferences,
             resolved_preferred_ids,
             preference_errors,
+            load_setup,
+            setup_state,
+            setup_error,
+            handler_status,
         )
 
     def _shared_state_loaded(
@@ -210,11 +251,16 @@ class RosebloxWindow(Adw.ApplicationWindow):
         preferences=None,
         resolved_preferred_ids=None,
         preference_errors=None,
+        load_setup=False,
+        setup_state=None,
+        setup_error=None,
+        handler_status=None,
     ) -> bool:
         if generation != self._snapshot_generation:
             self._refresh_pending_library |= load_library
             self._refresh_pending_recovery |= load_recovery
             self._refresh_pending_preferences |= load_preferences
+            self._refresh_pending_setup = getattr(self, "_refresh_pending_setup", False) or load_setup
             self._refresh_in_progress = False
             self._start_pending_refresh()
             return GLib.SOURCE_REMOVE
@@ -231,12 +277,31 @@ class RosebloxWindow(Adw.ApplicationWindow):
             self.preferred_installations = preferences or PreferredInstallations()
             self.resolved_preferred_ids = resolved_preferred_ids or {"player": None, "studio": None}
             self.preference_errors = preference_errors or {}
+        if load_setup:
+            if setup_state is not None:
+                self.setup_state = setup_state
+            self.setup_error = setup_error
+            self.url_handler_status = handler_status
+            self.onboarding_page.apply_snapshot(
+                self.rosemary_status, self.setup_state, setup_error, handler_status,
+                self.library_records, self.library_validation,
+            )
+            if self.settings_page is not None:
+                self.settings_page.apply_setup_snapshot(
+                    self.rosemary_status, self.setup_state, setup_error, handler_status
+                )
+            if not getattr(self, "_initial_page_chosen", False):
+                self._initial_page_chosen = True
+                self._stack.set_visible_child_name(
+                    "home" if self.setup_state and self.setup_state.onboarding_completed else "setup"
+                )
         self._refresh_in_progress = False
         self._apply_shared_state()
         if (
             self._refresh_pending_library
             or self._refresh_pending_recovery
             or self._refresh_pending_preferences
+            or getattr(self, "_refresh_pending_setup", False)
         ):
             self._start_pending_refresh()
         return GLib.SOURCE_REMOVE
@@ -276,5 +341,95 @@ class RosebloxWindow(Adw.ApplicationWindow):
                 )
 
     def navigate_to(self, page_id: str) -> None:
-        if page_id in self.pages:
+        if page_id == "setup":
+            self._stack.set_visible_child_name("setup")
+        elif page_id in self.pages:
             self._stack.set_visible_child_name(page_id)
+
+    def choose_rosemary_executable(self) -> None:
+        dialog = Gtk.FileDialog.new()
+        dialog.set_title("Choose Rosemary executable")
+        dialog.open(self, None, self._rosemary_file_chosen, None)
+
+    def _rosemary_file_chosen(self, dialog, result, _data=None) -> None:
+        try:
+            file = dialog.open_finish(result)
+            path = file.get_path()
+            if not path:
+                raise ValueError("Choose a local Rosemary executable file.")
+        except Exception as error:
+            if "dismiss" not in str(error).lower() and "cancel" not in str(error).lower():
+                self._show_window_error("Could not choose Rosemary", str(error))
+            return
+        self.save_rosemary_choice(path)
+
+    def save_rosemary_choice(self, path: str | None) -> None:
+        threading.Thread(target=self._save_rosemary_worker, args=(path,), daemon=True).start()
+
+    def _save_rosemary_worker(self, path):
+        try:
+            save_rosemary_executable(path)
+            status = detect_rosemary()
+            error = None
+        except Exception as failure:
+            status = None
+            error = str(failure)
+        GLib.idle_add(self._rosemary_saved, status, error)
+
+    def _rosemary_saved(self, status, error):
+        if error:
+            self._show_window_error("Could not configure Rosemary", error)
+        else:
+            self.rosemary_status = status
+            for page in self.pages.values():
+                if hasattr(page, "rosemary_status"):
+                    page.rosemary_status = status
+                elif hasattr(page, "get_child") and hasattr(page.get_child(), "apply_setup_snapshot"):
+                    page.get_child().apply_setup_snapshot(
+                        status,
+                        getattr(self, "setup_state", None),
+                        None,
+                        getattr(self, "url_handler_status", None),
+                    )
+            self.onboarding_page._status = status
+            self.onboarding_page.apply_snapshot(
+                status, getattr(self, "setup_state", None), None,
+                getattr(self, "url_handler_status", None), self.library_records, self.library_validation,
+            )
+        return GLib.SOURCE_REMOVE
+
+    def _show_window_error(self, title: str, message: str) -> None:
+        dialog = Adw.MessageDialog.new(self, title, message[:1000])
+        dialog.add_response("close", "Close")
+        dialog.set_default_response("close")
+        dialog.present()
+
+    def handle_roblox_url(self, uri: str) -> bool:
+        from .backend.url_handlers import parse_roblox_url
+        try:
+            parsed = parse_roblox_url(uri)
+        except ValueError as error:
+            self._show_window_error("Unsupported Roblox link", str(error))
+            return GLib.SOURCE_REMOVE
+        app_type = parsed.app_type
+        self.navigate_to(app_type)
+        controller = self.pages.get(app_type)
+        records = [record for record in self.library_records if record.app_type == app_type]
+        preferred = self.resolved_preferred_ids.get(app_type)
+        record = next(
+            (
+                item for item in records
+                if item.id == preferred and self.library_validation.get(item.id) == "Valid"
+            ),
+            None,
+        )
+        if record is None:
+            record = next((item for item in records if self.library_validation.get(item.id) == "Valid"), None)
+        if record is None:
+            self._show_window_error(
+                "Roblox installation required",
+                f"No valid {('Player' if app_type == 'player' else 'Studio')} installation is registered. Use the {app_type.title()} page to install or import it, then open the link again.",
+            )
+            return GLib.SOURCE_REMOVE
+        controller.request_launch_url(record, parsed.uri)
+        return GLib.SOURCE_REMOVE

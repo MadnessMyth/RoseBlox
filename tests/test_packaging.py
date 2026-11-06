@@ -7,10 +7,15 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ArchPackagingTests(unittest.TestCase):
-    def test_recipe_uses_a_version_tag_and_real_runtime_dependencies(self):
+    def test_recipe_uses_the_versioned_archive_and_real_runtime_dependencies(self):
         recipe = (ROOT / "packaging" / "arch" / "PKGBUILD").read_text(encoding="utf-8")
-        self.assertIn("git+https://github.com/MadnessMyth/RoseBlox.git#tag=v${pkgver}", recipe)
-        self.assertIn("depends=('gtk4' 'libadwaita' 'python' 'python-gobject')", recipe)
+        self.assertIn(
+            "https://github.com/MadnessMyth/RoseBlox/archive/refs/tags/v${pkgver}.tar.gz",
+            recipe,
+        )
+        self.assertIn("ec7280f533fca9c5a43e7f26d6d30bcb3a63e1caff6537042fbe721aa6e1b7a9", recipe)
+        self.assertNotIn("makedepends=('git'", recipe)
+        self.assertIn("depends=('gtk4' 'libadwaita' 'python' 'python-gobject' 'xdg-utils')", recipe)
         self.assertIn("libarchive", recipe)
         self.assertIn("python -m build --wheel --no-isolation", recipe)
         self.assertIn("python -m installer --destdir=", recipe)

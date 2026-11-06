@@ -7,16 +7,22 @@ import gi
 gi.require_version("Adw", "1")
 gi.require_version("Gdk", "4.0")
 from gi.repository import Adw, Gdk, Gtk
+from gi.repository import Gio, GLib
 
 from .window import RosebloxWindow
+from .backend.url_handlers import parse_roblox_url
 
 
 class RosebloxApplication(Adw.Application):
     """The Roseblox application object."""
 
     def __init__(self) -> None:
-        super().__init__(application_id="io.github.roseblox.Roseblox")
+        super().__init__(
+            application_id="io.github.roseblox.Roseblox",
+            flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE,
+        )
         self.connect("activate", self._on_activate)
+        self.connect("command-line", self._on_command_line)
 
     def do_startup(self) -> None:
         Adw.Application.do_startup(self)
@@ -39,3 +45,21 @@ class RosebloxApplication(Adw.Application):
         if window is None:
             window = RosebloxWindow(application=self)
         window.present()
+
+    def _on_command_line(self, _application, command_line) -> int:
+        arguments = command_line.get_arguments()[1:]
+        uri = None
+        if arguments:
+            if len(arguments) != 2 or arguments[0] != "--roblox-url":
+                command_line.print("Usage: roseblox [--roblox-url URI]\\n")
+                return 2
+            try:
+                uri = parse_roblox_url(arguments[1]).uri
+            except ValueError as error:
+                command_line.print(f"Invalid Roblox link: {error}\\n")
+                return 2
+        self.activate()
+        if uri is not None:
+            window = self.props.active_window
+            GLib.idle_add(window.handle_roblox_url, uri)
+        return 0

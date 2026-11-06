@@ -7,6 +7,7 @@ import os
 import signal
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
 from dataclasses import dataclass
@@ -50,9 +51,13 @@ class LaunchSession:
     stdout: bytes = b""
     stderr: bytes = b""
     output_done: threading.Event | None = None
+    plain_ctrl_click_supported: bool = False
 
 
 _MAX_CAPTURED_OUTPUT = 64 * 1024
+PLAIN_CTRL_CLICK_VARIABLE = "ROSEMARY_PLAIN_CTRL_CLICK"
+_ROSEMARY_SETTINGS_LOCK = threading.RLock()
+_INPUT_SUPPORT_CACHE: dict[tuple[str, int, int], bool] = {}
 
 
 def _drain_output(stream) -> bytes:
@@ -231,17 +236,103 @@ def detect_rosemary(config_path: Path | None = None) -> RosemaryStatus:
     return RosemaryStatus(os.path.abspath(executable) if executable else None)
 
 
-def build_launch_arguments(rosemary_path: str, bundle_path: str | Path) -> list[str]:
-    """Build the exact Rosemary invocation without invoking a shell."""
+def build_launch_arguments(
+    rosemary_path: str,
+    bundle_path: str | Path,
+    guest_arguments: tuple[str, ...] | list[str] = (),
+) -> list[str]:
+    """Build the Rosemary invocation without invoking a shell."""
     absolute_bundle = os.path.abspath(os.fspath(bundle_path))
     if not absolute_bundle.endswith(os.sep):
         absolute_bundle += os.sep
-    return [rosemary_path, absolute_bundle]
+    if any(not isinstance(argument, str) or "\0" in argument for argument in guest_arguments):
+        raise ValueError("Rosemary arguments must be valid strings without NUL characters.")
+    return [rosemary_path, absolute_bundle, *guest_arguments]
+
+
+def validate_rosemary_executable(path: str | Path) -> str:
+    """Return a validated absolute path to an executable Rosemary binary."""
+    candidate = Path(os.path.abspath(os.path.expanduser(os.fspath(path))))
+    if not candidate.is_file() or not os.access(candidate, os.X_OK):
+        raise ValueError(f"Selected Rosemary path is not an executable file: {candidate}")
+    return str(candidate.resolve())
+
+
+def save_rosemary_executable(
+    path: str | Path | None,
+    config_path: Path | None = None,
+) -> None:
+    """Update only Roseblox's Rosemary executable setting, atomically."""
+    config_path = config_path or default_config_path()
+    with _ROSEMARY_SETTINGS_LOCK:
+        document: dict[str, object] = {}
+        if config_path.exists():
+            try:
+                document = json.loads(config_path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeError, json.JSONDecodeError) as error:
+                raise ValueError(f"Could not read Roseblox settings; the file was not changed: {error}") from error
+            if not isinstance(document, dict):
+                raise ValueError("Roseblox settings must contain a JSON object; the file was not changed.")
+        if path is None:
+            document.pop("rosemary_executable", None)
+        else:
+            document["rosemary_executable"] = validate_rosemary_executable(path)
+        temporary_path: Path | None = None
+        try:
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=config_path.parent, delete=False
+            ) as stream:
+                temporary_path = Path(stream.name)
+                json.dump(document, stream, indent=2, sort_keys=True)
+                stream.write("\n")
+            os.replace(temporary_path, config_path)
+        except OSError as error:
+            if temporary_path is not None:
+                try:
+                    temporary_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+            raise ValueError(f"Could not save Roseblox settings: {error}") from error
+
+
+def rosemary_supports_plain_ctrl_click(rosemary_path: str | Path) -> bool:
+    """Detect the documented capability in this Rosemary executable."""
+    executable = Path(rosemary_path).resolve()
+    try:
+        stat = executable.stat()
+    except OSError:
+        return False
+    key = (str(executable), stat.st_mtime_ns, stat.st_size)
+    cached = _INPUT_SUPPORT_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    marker = PLAIN_CTRL_CLICK_VARIABLE.encode("ascii")
+    carry = b""
+    supported = False
+    try:
+        with executable.open("rb") as stream:
+            while True:
+                chunk = stream.read(1024 * 1024)
+                if not chunk:
+                    break
+                combined = carry + chunk
+                if marker in combined:
+                    supported = True
+                    break
+                carry = combined[-(len(marker) - 1) :]
+    except OSError:
+        supported = False
+    _INPUT_SUPPORT_CACHE[key] = supported
+    return supported
 
 
 def launch_application(
     installation: InstallationRecord | Mapping[str, object],
     rosemary_status: RosemaryStatus | None = None,
+    *,
+    guest_arguments: tuple[str, ...] | list[str] = (),
 ) -> LaunchSession:
     """Start Rosemary asynchronously and return a bundle-bound process session."""
     app_type = installation.app_type if isinstance(installation, InstallationRecord) else str(installation["app_type"])
@@ -253,16 +344,22 @@ def launch_application(
         detail = f" {status.error}" if status.error else ""
         raise RosemaryUnavailableError(f"Rosemary is required to launch Roblox.{detail}")
 
+    supports_plain_ctrl_click = rosemary_supports_plain_ctrl_click(status.executable)
+    environment = os.environ.copy()
+    if supports_plain_ctrl_click:
+        environment[PLAIN_CTRL_CLICK_VARIABLE] = "1"
     process = subprocess.Popen(
-        build_launch_arguments(status.executable, bundle_path),
+        build_launch_arguments(status.executable, bundle_path, guest_arguments),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        env=environment,
     )
     session = LaunchSession(
         process=process,
         rosemary_path=status.executable,
         bundle_path=os.path.abspath(bundle_path),
         output_done=threading.Event(),
+        plain_ctrl_click_supported=supports_plain_ctrl_click,
     )
     threading.Thread(target=_collect_output, args=(session,), daemon=True).start()
     return session

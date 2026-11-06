@@ -465,7 +465,9 @@ class LibraryTests(unittest.TestCase):
 
         args, kwargs = popen.call_args
         self.assertEqual(["/usr/bin/rosemary", f"{bundle.absolute()}{os.sep}"], args[0])
-        self.assertEqual({"stdout": -1, "stderr": -1}, kwargs)
+        self.assertEqual({"stdout": -1, "stderr": -1}, {key: value for key, value in kwargs.items() if key != "env"})
+        self.assertEqual(os.environ.get("PATH"), kwargs["env"].get("PATH"))
+        self.assertEqual(os.environ.get("HOME"), kwargs["env"].get("HOME"))
         self.assertEqual(str(bundle.absolute()), session.bundle_path)
 
 

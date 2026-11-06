@@ -6,29 +6,28 @@ pkgdesc='Native GTK launcher and installation manager for Roblox through Rosemar
 arch=('any')
 url='https://github.com/MadnessMyth/RoseBlox'
 license=('MIT')
-depends=('gtk4' 'libadwaita' 'python' 'python-gobject')
-makedepends=('git' 'python-build' 'python-installer' 'python-setuptools' 'python-wheel')
+depends=('gtk4' 'libadwaita' 'python' 'python-gobject' 'xdg-utils')
+makedepends=('python-build' 'python-installer' 'python-setuptools' 'python-wheel')
 optdepends=('libarchive: required for importing or extracting Roblox ZIP archives (bsdtar)')
 
-# Use the immutable release tag rather than a moving branch.
 source=(
-  "roseblox::git+https://github.com/MadnessMyth/RoseBlox.git#tag=v${pkgver}"
+  "roseblox-${pkgver}.tar.gz::https://github.com/MadnessMyth/RoseBlox/archive/refs/tags/v${pkgver}.tar.gz"
   'io.github.roseblox.Roseblox.desktop'
   'io.github.roseblox.Roseblox.svg'
 )
 sha256sums=(
-  'SKIP'
+  'ec7280f533fca9c5a43e7f26d6d30bcb3a63e1caff6537042fbe721aa6e1b7a9'
   '7b3a04ef8d6138d1daaca97575be79ea5517253b502b857a7c3f40b6f19ffc93'
   'd95259e28df1478d01c8555180e83dc2d8064b8fc95110a03104152d3278a863'
 )
 
 build() {
-  cd "$srcdir/roseblox"
+  cd "$srcdir/RoseBlox-$pkgver"
   python -m build --wheel --no-isolation
 }
 
 package() {
-  cd "$srcdir/roseblox"
+  cd "$srcdir/RoseBlox-$pkgver"
   python -m installer --destdir="$pkgdir" dist/*.whl
   install -Dm644 "$srcdir/io.github.roseblox.Roseblox.desktop" \
     "$pkgdir/usr/share/applications/io.github.roseblox.Roseblox.desktop"
