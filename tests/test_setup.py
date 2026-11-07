@@ -56,7 +56,8 @@ class SetupStoreTests(unittest.TestCase):
 
 
 class URLHandlerTests(unittest.TestCase):
-    def _service(self, root, defaults=None, *, fail_on_set=None):
+    def _service(self, root, defaults=None, *, fail_on_set=None, fallback_to_installed=False):
+        """Fake xdg-mime; ``fallback_to_installed`` mimics its search of installed entries."""
         defaults = dict(defaults or {})
         calls = []
         executable = root / "bin" / "roseblox"
@@ -83,6 +84,13 @@ class URLHandlerTests(unittest.TestCase):
                             value = ""
                     except FileNotFoundError:
                         value = ""
+                if not value and fallback_to_installed and service_ref:
+                    try:
+                        desktop = service_ref[0].desktop_path.read_text(encoding="utf-8")
+                    except FileNotFoundError:
+                        desktop = ""
+                    if f"{mime_type};" in desktop:
+                        value = DESKTOP_ID
                 return subprocess.CompletedProcess(arguments, 0, value + "\n", "")
             if fail_on_set and arguments[-1] == fail_on_set:
                 return subprocess.CompletedProcess(arguments, 1, "", "registration failed")
@@ -181,6 +189,31 @@ class URLHandlerTests(unittest.TestCase):
             self.assertNotIn(DESKTOP_ID, updated)
             self.assertIn("x-scheme-handler/https=browser.desktop;", updated)
             self.assertIn("other.desktop;", updated)
+
+    def test_disable_without_previous_handlers_succeeds_when_lookup_falls_back(self):
+        with tempfile.TemporaryDirectory() as directory:
+            service, _defaults, _calls = self._service(Path(directory), fallback_to_installed=True)
+            self.assertTrue(service.enable().enabled)
+            status = service.disable()
+            self.assertFalse(status.enabled)
+            self.assertFalse(status.registered)
+            self.assertFalse(service.setup_store.load().url_handlers_enabled)
+            self.assertFalse(service.desktop_path.exists())
+            for scheme in SUPPORTED_SCHEMES:
+                self.assertIsNone(service._query_default(f"x-scheme-handler/{scheme}"))
+
+    def test_failed_enable_without_previous_handlers_rolls_back_cleanly(self):
+        with tempfile.TemporaryDirectory() as directory:
+            service, _defaults, _calls = self._service(
+                Path(directory),
+                fail_on_set="x-scheme-handler/roblox-studio-auth",
+                fallback_to_installed=True,
+            )
+            with self.assertRaises(URLHandlerError) as raised:
+                service.enable()
+            self.assertNotIn("Rollback was incomplete", str(raised.exception))
+            self.assertFalse(service.desktop_path.exists())
+            self.assertEqual({}, service.setup_store.load().previous_url_defaults)
 
     def test_disable_does_not_replace_external_default_changed_after_enable(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -258,12 +258,13 @@ class URLHandlerService:
             return self.check()
         except Exception as error:
             rollback_errors = self._restore_defaults(old_defaults)
+            if "created" in locals() and created:
+                self._remove_owned_desktop(contents)
+            rollback_errors += self._verify_not_default()
             try:
                 self.setup_store.save_url_handlers(False, old_defaults if rollback_errors else {})
             except SetupSettingsError as save_error:
                 rollback_errors.append(str(save_error))
-            if "created" in locals() and created:
-                self._remove_owned_desktop(contents)
             detail = str(error)
             if rollback_errors:
                 detail += " Rollback was incomplete: " + "; ".join(rollback_errors)
@@ -285,6 +286,8 @@ class URLHandlerService:
             self._remove_owned_desktop(expected)
         except (OSError, URLHandlerError) as error:
             errors.append(str(error))
+        if not errors:
+            errors = self._verify_not_default()
         if errors:
             raise URLHandlerError("Could not fully disable URL handling: " + "; ".join(errors))
         self.setup_store.save_url_handlers(False, {})
@@ -301,8 +304,22 @@ class URLHandlerService:
                     self._set_default(old_default, mime_type)
                 else:
                     self._remove_own_default(mime_type)
-                    if self._query_default(mime_type) == DESKTOP_ID:
-                        raise URLHandlerError(f"Could not clear Roseblox as the {mime_type} default.")
+            except URLHandlerError as error:
+                errors.append(str(error))
+        return errors
+
+    def _verify_not_default(self) -> list[str]:
+        """Confirm Roseblox no longer handles any scheme.
+
+        Run only after the desktop entry is gone: xdg-mime and GIO fall back to any
+        installed entry declaring the MIME type, so while it exists the query would
+        still report Roseblox even with every explicit association removed.
+        """
+        errors: list[str] = []
+        for mime_type in (_SCHEME_MIME[scheme] for scheme in SUPPORTED_SCHEMES):
+            try:
+                if self._query_default(mime_type) == DESKTOP_ID:
+                    errors.append(f"Could not clear Roseblox as the {mime_type} default.")
             except URLHandlerError as error:
                 errors.append(str(error))
         return errors
