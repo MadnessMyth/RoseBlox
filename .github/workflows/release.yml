@@ -1,0 +1,49 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to publish, such as v0.4.1"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Publish the release from packaging/RELEASE.md
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          case "$TAG" in
+            v[0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "Not a version tag: $TAG" >&2; exit 1 ;;
+          esac
+          git rev-parse --verify --quiet "refs/tags/$TAG" >/dev/null || { echo "No tag $TAG" >&2; exit 1; }
+          git show "$TAG:packaging/RELEASE.md" \
+            | awk -v heading="## Release notes — $TAG" '$0 == heading {found=1; next} /^## / {if (found) exit} found' \
+            > notes.md
+          if ! grep -q '[^[:space:]]' notes.md; then
+            echo "packaging/RELEASE.md at $TAG has no \"Release notes — $TAG\" section" >&2
+            exit 1
+          fi
+          newest="$(git tag --list 'v[0-9]*' --sort=-v:refname | head -n 1)"
+          latest=false
+          [ "$TAG" = "$newest" ] && latest=true
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "Roseblox ${TAG#v}" --notes-file notes.md --latest="$latest"
+          else
+            gh release create "$TAG" --verify-tag --title "Roseblox ${TAG#v}" --notes-file notes.md --latest="$latest"
+          fi
