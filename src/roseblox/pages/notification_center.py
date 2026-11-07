@@ -8,14 +8,17 @@ from dataclasses import dataclass
 
 import gi
 
-gi.require_version("Adw", "1")
 gi.require_version("Gtk", "4.0")
-from gi.repository import Adw, GLib, Gtk
+from gi.repository import GLib, Gtk, Pango
 
 from ..backend.setup import SetupSettingsError
 from ..backend.updates import APP_TITLES, CHECK_INTERVAL_SECONDS, AvailableUpdate, check_for_updates
 
 RECENT_LIMIT = 20
+# Narrow enough that the popover stays centered under the bell even when the window
+# is maximized and the bell is close to the screen edge.
+POPOVER_WIDTH = 240
+_TEXT_WIDTH_CHARS = 40  # Upper bound; the popover width decides where text wraps.
 
 
 @dataclass(frozen=True)
@@ -69,18 +72,21 @@ class NotificationCenter(Gtk.MenuButton):
         self.set_popover(self.popover)
 
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
-        content.set_margin_top(12)
-        content.set_margin_bottom(12)
-        content.set_margin_start(12)
-        content.set_margin_end(12)
+        content.set_size_request(POPOVER_WIDTH, -1)
+        content.set_margin_top(10)
+        content.set_margin_bottom(10)
+        content.set_margin_start(8)
+        content.set_margin_end(8)
         heading_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         heading = Gtk.Label(label="Notifications")
         heading.add_css_class("title-4")
         heading.set_halign(Gtk.Align.START)
         heading.set_hexpand(True)
         heading_row.append(heading)
-        self.check_button = Gtk.Button.new_with_label("Check for Updates")
+        self.check_button = Gtk.Button.new_from_icon_name("view-refresh-symbolic")
         self.check_button.add_css_class("flat")
+        self.check_button.set_tooltip_text("Check for Updates")
+        self.check_button.update_property([Gtk.AccessibleProperty.LABEL], ["Check for Updates"])
         self.check_button.connect("clicked", lambda _button: self.check_updates())
         heading_row.append(self.check_button)
         content.append(heading_row)
@@ -90,7 +96,7 @@ class NotificationCenter(Gtk.MenuButton):
         self.empty_label.set_wrap(True)
         self.empty_label.set_justify(Gtk.Justification.CENTER)
         self.empty_label.set_halign(Gtk.Align.CENTER)
-        self.empty_label.set_max_width_chars(40)
+        self.empty_label.set_max_width_chars(_TEXT_WIDTH_CHARS)
         self.empty_label.set_margin_top(12)
         self.empty_label.set_margin_bottom(12)
         content.append(self.empty_label)
@@ -111,7 +117,7 @@ class NotificationCenter(Gtk.MenuButton):
         self.status_label.add_css_class("dim-label")
         self.status_label.add_css_class("caption")
         self.status_label.set_wrap(True)
-        self.status_label.set_max_width_chars(48)
+        self.status_label.set_max_width_chars(_TEXT_WIDTH_CHARS)
         self.status_label.set_halign(Gtk.Align.START)
         self.status_label.set_xalign(0)
         self.status_label.set_visible(False)
@@ -121,7 +127,6 @@ class NotificationCenter(Gtk.MenuButton):
         scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         scroller.set_propagate_natural_height(True)
         scroller.set_max_content_height(560)
-        scroller.set_min_content_width(380)
         scroller.set_child(content)
         self.popover.set_child(scroller)
         self.connect("destroy", lambda *_: self._stop_timer())
@@ -219,7 +224,7 @@ class NotificationCenter(Gtk.MenuButton):
             return
         self._checking = True
         self.check_button.set_sensitive(False)
-        self.check_button.set_label("Checking…")
+        self.check_button.set_tooltip_text("Checking for updates…")
         skipped = dict(getattr(getattr(self.window, "setup_state", None), "skipped_versions", {}) or {})
         threading.Thread(target=self._check_worker, args=(skipped,), daemon=True).start()
 
@@ -240,7 +245,7 @@ class NotificationCenter(Gtk.MenuButton):
     def _check_finished(self, updates: list[AvailableUpdate], errors: dict[str, str]) -> bool:
         self._checking = False
         self.check_button.set_sensitive(True)
-        self.check_button.set_label("Check for Updates")
+        self.check_button.set_tooltip_text("Check for Updates")
         offered = {update.app_type for update in updates}
         # A failed lookup keeps the update already shown for that app.
         kept = [update for update in self.updates if update.app_type in errors and update.app_type not in offered]
@@ -305,55 +310,66 @@ class NotificationCenter(Gtk.MenuButton):
         self.status_label.set_visible(bool(problems))
         self._render_badge()
 
-    def _download_row(self, app_type: str, state) -> Gtk.Widget:
-        title = APP_TITLES.get(app_type, app_type)
+    @staticmethod
+    def _label(text: str, *css_classes: str) -> Gtk.Label:
+        label = Gtk.Label(label=text)
+        for css_class in css_classes:
+            label.add_css_class(css_class)
+        label.set_halign(Gtk.Align.START)
+        label.set_xalign(0)
+        label.set_wrap(True)
+        label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        label.set_max_width_chars(_TEXT_WIDTH_CHARS)
+        return label
+
+    def _card_row(self, title: str, subtitle: str) -> Gtk.ListBoxRow:
         row = Gtk.ListBoxRow()
         row.set_activatable(False)
-        row.add_css_class("notification-download")
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         box.set_margin_top(10)
         box.set_margin_bottom(10)
-        box.set_margin_start(12)
-        box.set_margin_end(12)
+        box.set_margin_start(10)
+        box.set_margin_end(10)
         row.set_child(box)
+        row.content = box
+        row.title_label = self._label(title)
+        box.append(row.title_label)
+        row.message_label = self._label(subtitle, "dim-label", "caption")
+        box.append(row.message_label)
+        return row
 
-        top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        labels = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        labels.set_hexpand(True)
-        row.title_label = Gtk.Label(label=f"Installing {title}")
-        row.title_label.set_halign(Gtk.Align.START)
-        row.title_label.set_xalign(0)
-        labels.append(row.title_label)
-        row.message_label = Gtk.Label(label=state.message or "Working…")
-        row.message_label.add_css_class("dim-label")
-        row.message_label.add_css_class("caption")
-        row.message_label.set_halign(Gtk.Align.START)
-        row.message_label.set_xalign(0)
-        row.message_label.set_wrap(True)
-        row.message_label.set_max_width_chars(40)
-        labels.append(row.message_label)
-        top.append(labels)
-        if state.cancellable:
-            cancel = Gtk.Button.new_with_label("Cancel")
-            cancel.set_valign(Gtk.Align.CENTER)
-            cancel.connect("clicked", self._cancel_clicked, app_type)
-            top.append(cancel)
-        open_button = Gtk.Button.new_from_icon_name("go-next-symbolic")
+    @staticmethod
+    def _button_row(*buttons: Gtk.Widget) -> Gtk.Box:
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        box.set_halign(Gtk.Align.END)
+        for button in buttons:
+            box.append(button)
+        return box
+
+    def _download_row(self, app_type: str, state) -> Gtk.Widget:
+        title = APP_TITLES.get(app_type, app_type)
+        row = self._card_row(f"Installing {title}", state.message or "Working…")
+        row.add_css_class("notification-download")
+        row.progress_bar = Gtk.ProgressBar()
+        if state.fraction is None:
+            row.progress_bar.pulse()
+        else:
+            row.progress_bar.set_fraction(state.fraction)
+            row.progress_bar.set_text(state.progress_text or f"{state.fraction:.0%}")
+            row.progress_bar.set_show_text(True)
+        row.content.append(row.progress_bar)
+
+        buttons = []
+        open_button = Gtk.Button.new_with_label("Show")
         open_button.add_css_class("flat")
-        open_button.set_valign(Gtk.Align.CENTER)
         open_button.set_tooltip_text(f"Open the {title} page")
         open_button.connect("clicked", self._open_clicked, app_type)
-        top.append(open_button)
-        box.append(top)
-
-        progress = Gtk.ProgressBar()
-        if state.fraction is None:
-            progress.pulse()
-        else:
-            progress.set_fraction(state.fraction)
-            progress.set_text(state.progress_text or f"{state.fraction:.0%}")
-            progress.set_show_text(True)
-        box.append(progress)
+        buttons.append(open_button)
+        if state.cancellable:
+            cancel = Gtk.Button.new_with_label("Cancel")
+            cancel.connect("clicked", self._cancel_clicked, app_type)
+            buttons.append(cancel)
+        row.content.append(self._button_row(*buttons))
         return row
 
     def _cancel_clicked(self, _button, app_type: str) -> None:
@@ -366,39 +382,34 @@ class NotificationCenter(Gtk.MenuButton):
         self.window.navigate_to(app_type)
 
     def _update_row(self, update: AvailableUpdate) -> Gtk.Widget:
-        row = Adw.ActionRow.new()
-        row.set_title(f"{APP_TITLES.get(update.app_type, update.app_type)} update available")
-        subtitle = f"{update.version} is available."
+        subtitle = f"New: {update.version}"
         if update.installed_version:
-            subtitle += f" You have {update.installed_version}."
-        row.set_subtitle(GLib.markup_escape_text(subtitle))
-        row.set_subtitle_lines(3)
+            subtitle += f"\nYou have: {update.installed_version}"
+        row = self._card_row(f"{APP_TITLES.get(update.app_type, update.app_type)} update", subtitle)
         skip = Gtk.Button.new_with_label("Skip")
-        skip.set_valign(Gtk.Align.CENTER)
         skip.set_tooltip_text("Skip this version")
         skip.connect("clicked", self._skip_clicked, update)
-        row.add_suffix(skip)
         install = Gtk.Button.new_with_label("Update")
         install.add_css_class("suggested-action")
-        install.set_valign(Gtk.Align.CENTER)
         install.set_sensitive(update.app_type not in self.operations)
         install.connect("clicked", self._update_clicked, update.app_type)
-        row.add_suffix(install)
+        row.content.append(self._button_row(skip, install))
         return row
 
-    @staticmethod
-    def _recent_row(entry: RecentEntry) -> Gtk.Widget:
-        row = Adw.ActionRow.new()
+    def _recent_row(self, entry: RecentEntry) -> Gtk.Widget:
         title = APP_TITLES.get(entry.app_type, entry.app_type)
         when = time.strftime("%H:%M", time.localtime(entry.finished_at))
-        row.set_title(f"{title} · {when}")
-        row.set_subtitle(GLib.markup_escape_text(entry.message))
-        row.set_subtitle_lines(3)
+        row = self._card_row(f"{title} · {when}", entry.message)
         icon_name, style = {
             "failed": ("dialog-error-symbolic", "error"),
             "cancelled": ("process-stop-symbolic", "dim-label"),
         }.get(entry.outcome, ("object-select-symbolic", "success"))
         icon = Gtk.Image.new_from_icon_name(icon_name)
         icon.add_css_class(style)
-        row.add_prefix(icon)
+        icon.set_valign(Gtk.Align.START)
+        title_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        row.content.remove(row.title_label)
+        title_row.append(icon)
+        title_row.append(row.title_label)
+        row.content.prepend(title_row)
         return row

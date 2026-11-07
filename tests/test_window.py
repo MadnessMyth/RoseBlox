@@ -456,8 +456,7 @@ class RealWindowTests(unittest.TestCase):
         self.assertEqual(expected, controller.progress_bar.get_text())
 
         row = window.notification_center.downloads_list.get_row_at_index(0)
-        bar = row.get_child().get_last_child()
-        self.assertEqual(expected, bar.get_text())
+        self.assertEqual(expected, row.progress_bar.get_text())
         setup_row = window.onboarding_page._app_widgets["player"][0]
         self.assertTrue(setup_row.get_subtitle().endswith(expected))
 
@@ -487,8 +486,8 @@ class RealWindowTests(unittest.TestCase):
             self.assertEqual([update], center.updates)
             self.assertEqual("1", center.badge.get_text())
             row = center.updates_list.get_row_at_index(0)
-            self.assertEqual("Roblox Player update available", row.get_title())
-            self.assertIn("You have version-0123456789abcdef", row.get_subtitle())
+            self.assertEqual("Roblox Player update", row.title_label.get_text())
+            self.assertIn("You have: version-0123456789abcdef", row.message_label.get_text())
 
             with patch.object(window, "install_update") as install_update:
                 center._update_clicked(None, "player")
