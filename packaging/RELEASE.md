@@ -1,5 +1,37 @@
 # Roseblox release preparation
 
+## Release checklist — v0.4.0
+
+- [x] Bump the version in `pyproject.toml`, `src/roseblox/__init__.py`, and `packaging/arch-git/PKGBUILD`.
+- [x] Run the full unittest suite, Python compilation, and `git diff --check`, on the host and on Arch Linux.
+- [ ] Build and install `roseblox-git` on Arch Linux and check the activity watcher entry point and Diagnostics against the real Rosemary 0.5.0.
+- [ ] Create the annotated `v0.4.0` Git tag on the release commit.
+- [ ] Point `packaging/arch/PKGBUILD` at the `v0.4.0` tag, record the archive checksum, and regenerate `.SRCINFO`.
+- [ ] Build `packaging/arch/PKGBUILD` with `makepkg` on Arch Linux and install it.
+- [ ] Create the GitHub release for `v0.4.0` from these notes.
+
+## Release notes — v0.4.0
+
+### New
+
+- **Settings → While Playing** (Player), all off by default:
+  - **Discord Rich Presence**: the game's name, creator and icon, and how long you have been playing, with **Join Server** and **View Game** buttons. Join Server is hidden in private servers and can be turned off. It uses Roseblox's own Discord application; Settings → Advanced can use a different one.
+  - **Server location**: a notification with the server's city, region and country when you join a game, looked up with ipwho.is.
+  - **Close Roblox when leaving a game**: Roblox closes when you go back to its home screen.
+- **Mods** page, with separate mods for Player and Studio:
+  - A **custom font** for all of Roblox's interface text, and a **custom mouse cursor**.
+  - The **classic "oof" death sound** and the **classic avatar editor background** (Player).
+  - A **mods folder** whose files replace the matching files in Roblox's content. Refused files are listed with the reason.
+  - Mods are applied when Roblox launches, and the original files are kept and put back when a mod is removed.
+- **Open Place…** on Studio installations opens a `.rbxl` or `.rbxlx` file directly in Studio.
+- **Diagnostics** includes `rosemary prefix info`: the Rosemary version that made the prefix and its base system.
+
+### Safety
+
+- While Playing reads only the Roblox output Roseblox already saves in `player.log`. It never reads Roblox's memory, cookies or login, and uses only public Roblox web APIs that need no account.
+- Close on leave signals only the Roblox process Roseblox started, after checking it is still the same process.
+- Mods replace only images, sounds, fonts, meshes and font family files inside the installation. Scripts and other files are refused, and no Roblox files outside the installation are changed. The avatar editor background is downloaded from a pinned commit and checked against a fixed SHA-256.
+
 ## Release checklist — v0.3.0
 
 - [x] Bump the version in `pyproject.toml`, `src/roseblox/__init__.py`, and `packaging/arch-git/PKGBUILD`.
