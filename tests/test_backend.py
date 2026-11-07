@@ -28,19 +28,29 @@ from roseblox.backend.rosemary import (
     build_launch_arguments,
     detect_rosemary,
     launch_application,
-    _drain_output,
     _matches_session,
+    _open_launch_log,
+    _read_log_tail,
     stop_application,
     wait_for_running,
 )
 
 
 class RosemaryTests(unittest.TestCase):
-    def test_process_output_capture_is_bounded_and_drains_stream(self):
-        payload = b"x" * (70 * 1024)
-        captured = _drain_output(io.BytesIO(payload))
-        self.assertLess(len(captured), 65 * 1024)
-        self.assertIn(b"omitted middle", captured)
+    def test_launch_log_tail_is_bounded_and_previous_run_is_kept(self):
+        with tempfile.TemporaryDirectory() as directory:
+            logs = Path(directory) / "logs"
+            path, stream = _open_launch_log(logs, "player")
+            with stream:
+                stream.write(b"first run\n")
+            path, stream = _open_launch_log(logs, "player")
+            with stream:
+                stream.write(b"x" * (70 * 1024) + b"\nlast line\n")
+            self.assertEqual(b"first run\n", (logs / "player.log.1").read_bytes())
+            tail = _read_log_tail(path)
+            self.assertLess(len(tail), 65 * 1024)
+            self.assertTrue(tail.startswith("[Roseblox omitted earlier process output.]"))
+            self.assertTrue(tail.endswith("last line"))
 
     def test_detects_rosemary_using_path_lookup(self):
         with patch("roseblox.backend.rosemary.shutil.which", return_value="/usr/bin/rosemary"):
@@ -498,15 +508,20 @@ class LibraryTests(unittest.TestCase):
             )
 
             with patch("roseblox.backend.rosemary.subprocess.Popen") as popen:
-                # Real pipes reach EOF; a Mock stream would keep the output reader spinning.
-                popen.return_value.stdout = io.BytesIO()
-                popen.return_value.stderr = io.BytesIO()
-                session = launch_application(record, RosemaryStatus("/usr/bin/rosemary"))
-            self.assertTrue(session.output_done.wait(timeout=5))
+                session = launch_application(
+                    record, RosemaryStatus("/usr/bin/rosemary"), log_directory=root / "logs"
+                )
+            self.assertTrue(session.output_done.is_set())
+            self.assertEqual(root / "logs" / "studio.log", session.log_path)
 
         args, kwargs = popen.call_args
         self.assertEqual(["/usr/bin/rosemary", f"{bundle.absolute()}{os.sep}"], args[0])
-        self.assertEqual({"stdout": -1, "stderr": -1}, {key: value for key, value in kwargs.items() if key != "env"})
+        # Rosemary must not depend on Roseblox's pipes or session, so Roblox survives
+        # the launcher closing.
+        self.assertTrue(kwargs["start_new_session"])
+        self.assertEqual(subprocess.STDOUT, kwargs["stderr"])
+        self.assertEqual(subprocess.DEVNULL, kwargs["stdin"])
+        self.assertEqual(str(root / "logs" / "studio.log"), kwargs["stdout"].name)
         self.assertEqual(os.environ.get("PATH"), kwargs["env"].get("PATH"))
         self.assertEqual(os.environ.get("HOME"), kwargs["env"].get("HOME"))
         self.assertEqual(str(bundle.absolute()), session.bundle_path)

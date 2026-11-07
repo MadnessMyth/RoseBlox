@@ -365,6 +365,7 @@ class RosemarySetupTests(unittest.TestCase):
                         session = launch_application(
                             record, RosemaryStatus(str(executable)),
                             guest_arguments=("roblox-player:1+launchmode:play",),
+                            log_directory=root / "logs",
                         )
                 environment = popen.call_args.kwargs["env"]
                 self.assertEqual("1", environment[PLAIN_CTRL_CLICK_VARIABLE])
@@ -390,7 +391,7 @@ class RosemarySetupTests(unittest.TestCase):
             fake_process.poll = lambda: None
             with patch.dict(os.environ, {}, clear=True):
                 with patch("roseblox.backend.rosemary.subprocess.Popen", return_value=fake_process) as popen:
-                    session = launch_application(record, RosemaryStatus(str(executable)))
+                    session = launch_application(record, RosemaryStatus(str(executable)), log_directory=root / "logs")
             self.assertNotIn(PLAIN_CTRL_CLICK_VARIABLE, popen.call_args.kwargs["env"])
             self.assertFalse(session.plain_ctrl_click_supported)
             self.assertFalse(rosemary_supports_plain_ctrl_click(executable))

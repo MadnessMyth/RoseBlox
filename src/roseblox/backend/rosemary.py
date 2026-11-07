@@ -53,37 +53,19 @@ class LaunchSession:
     stderr: bytes = b""
     output_done: threading.Event | None = None
     plain_ctrl_click_supported: bool = False
+    log_path: Path | None = None
+
+    def output_text(self) -> str:
+        """Rosemary's output so far: the end of its log file, or captured pipe output."""
+        if self.log_path is not None:
+            return _read_log_tail(self.log_path)
+        return (self.stderr or self.stdout).decode("utf-8", errors="replace").strip()
 
 
 _MAX_CAPTURED_OUTPUT = 64 * 1024
 PLAIN_CTRL_CLICK_VARIABLE = "ROSEMARY_PLAIN_CTRL_CLICK"
 _ROSEMARY_SETTINGS_LOCK = threading.RLock()
 _INPUT_SUPPORT_CACHE: dict[tuple[str, int, int], bool] = {}
-
-
-def _drain_output(stream) -> bytes:
-    """Drain a pipe without allowing a noisy child to consume unbounded memory."""
-    half_limit = _MAX_CAPTURED_OUTPUT // 2
-    beginning = bytearray()
-    ending = bytearray()
-    truncated = False
-    read = getattr(stream, "read1", stream.read)
-    while True:
-        chunk = read(8192)
-        if not chunk:
-            break
-        prefix_space = half_limit - len(beginning)
-        if prefix_space > 0:
-            beginning.extend(chunk[:prefix_space])
-        remainder = chunk[max(prefix_space, 0) :]
-        if remainder:
-            ending.extend(remainder)
-            if len(ending) > half_limit:
-                del ending[: len(ending) - half_limit]
-            truncated = True
-    if truncated:
-        return bytes(beginning) + b"\n[Roseblox omitted middle process output.]\n" + bytes(ending)
-    return bytes(beginning + ending)
 
 
 @dataclass(frozen=True)
@@ -165,31 +147,6 @@ def _matches_session(session: LaunchSession) -> bool:
     return snapshot.start_time == session.start_time
 
 
-def _collect_output(session: LaunchSession) -> None:
-    readers: list[threading.Thread] = []
-    try:
-        def read_into(stream, attribute: str) -> None:
-            if stream is None:
-                return
-            try:
-                setattr(session, attribute, _drain_output(stream))
-            except Exception:
-                setattr(session, attribute, b"")
-
-        for stream, attribute in (
-            (session.process.stdout, "stdout"),
-            (session.process.stderr, "stderr"),
-        ):
-            reader = threading.Thread(target=read_into, args=(stream, attribute), daemon=True)
-            readers.append(reader)
-            reader.start()
-        for reader in readers:
-            reader.join()
-    finally:
-        if session.output_done is not None:
-            session.output_done.set()
-
-
 def wait_for_running(session: LaunchSession, timeout: float = 8.0) -> None:
     """Wait off the GTK thread until this exact Rosemary guest is verifiable."""
     deadline = time.monotonic() + timeout
@@ -197,7 +154,7 @@ def wait_for_running(session: LaunchSession, timeout: float = 8.0) -> None:
         if session.process.poll() is not None:
             if session.output_done is not None:
                 session.output_done.wait(timeout=1.0)
-            details = (session.stderr or session.stdout).decode("utf-8", errors="replace").strip()
+            details = session.output_text()
             message = details or "Rosemary exited before its Roblox application could be verified."
             raise LaunchIdentityError(message)
         if _matches_session(session):
@@ -371,13 +328,47 @@ def _file_contains_marker(executable: Path) -> bool:
     return supported
 
 
+def default_log_directory() -> Path:
+    state_home = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local" / "state")
+    return state_home / "roseblox" / "logs"
+
+
+def _read_log_tail(path: Path) -> str:
+    try:
+        with path.open("rb") as stream:
+            stream.seek(0, os.SEEK_END)
+            size = stream.tell()
+            stream.seek(max(size - _MAX_CAPTURED_OUTPUT, 0))
+            data = stream.read()
+    except OSError:
+        return ""
+    text = data.decode("utf-8", errors="replace")
+    if size > _MAX_CAPTURED_OUTPUT:
+        text = "[Roseblox omitted earlier process output.]\n" + text.split("\n", 1)[-1]
+    return text.strip()
+
+
+def _open_launch_log(log_directory: Path, app_type: str):
+    """Open a fresh log for this application, keeping the previous run as ``.1``."""
+    log_directory.mkdir(parents=True, exist_ok=True)
+    path = log_directory / f"{app_type}.log"
+    if path.exists():
+        os.replace(path, path.with_name(path.name + ".1"))
+    return path, path.open("wb")
+
+
 def launch_application(
     installation: InstallationRecord | Mapping[str, object],
     rosemary_status: RosemaryStatus | None = None,
     *,
     guest_arguments: tuple[str, ...] | list[str] = (),
+    log_directory: Path | None = None,
 ) -> LaunchSession:
-    """Start Rosemary asynchronously and return a bundle-bound process session."""
+    """Start Rosemary asynchronously and return a bundle-bound process session.
+
+    Rosemary writes to a log file in its own session rather than to pipes, so Roblox
+    keeps running (and logging) after Roseblox exits.
+    """
     app_type = installation.app_type if isinstance(installation, InstallationRecord) else str(installation["app_type"])
     bundle_path = installation.bundle_path if isinstance(installation, InstallationRecord) else str(installation["bundle_path"])
     validate_bundle(bundle_path, app_type)
@@ -391,18 +382,27 @@ def launch_application(
     environment = os.environ.copy()
     if supports_plain_ctrl_click:
         environment[PLAIN_CTRL_CLICK_VARIABLE] = "1"
-    process = subprocess.Popen(
-        build_launch_arguments(status.executable, bundle_path, guest_arguments),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        env=environment,
-    )
-    session = LaunchSession(
+    arguments = build_launch_arguments(status.executable, bundle_path, guest_arguments)
+    try:
+        log_path, log_stream = _open_launch_log(log_directory or default_log_directory(), app_type)
+    except OSError as error:
+        raise RosemaryUnavailableError(f"Could not create the Rosemary log file: {error}") from error
+    with log_stream:
+        process = subprocess.Popen(
+            arguments,
+            stdin=subprocess.DEVNULL,
+            stdout=log_stream,
+            stderr=subprocess.STDOUT,
+            env=environment,
+            start_new_session=True,
+        )
+    done = threading.Event()
+    done.set()
+    return LaunchSession(
         process=process,
         rosemary_path=status.executable,
         bundle_path=os.path.abspath(bundle_path),
-        output_done=threading.Event(),
+        output_done=done,
         plain_ctrl_click_supported=supports_plain_ctrl_click,
+        log_path=log_path,
     )
-    threading.Thread(target=_collect_output, args=(session,), daemon=True).start()
-    return session

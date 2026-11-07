@@ -1045,7 +1045,7 @@ class InstallationPage(Gtk.Box):
         return_code = session.process.wait()
         if session.output_done is not None:
             session.output_done.wait(timeout=2.0)
-        output = (session.stderr or session.stdout).decode("utf-8", errors="replace").strip()
+        output = session.output_text()
         GLib.idle_add(self._session_exited, installation_id, session, return_code, output)
 
     def _session_exited(
