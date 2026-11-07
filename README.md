@@ -26,7 +26,7 @@ cd RoseBlox/packaging/arch-git
 makepkg -si
 ```
 
-To update, run `git pull` in the checkout, then `makepkg -si` in `packaging/arch-git` again.
+To update, run `git checkout -- packaging/arch-git/PKGBUILD && git pull` in the checkout (makepkg records the built version in the PKGBUILD), then `makepkg -si` in `packaging/arch-git` again.
 
 The repository also includes a pinned release PKGBUILD at `packaging/arch/PKGBUILD`, which builds the `v0.1.0` tag; that tag predates first-run setup and the Roblox link fixes. Both packages provide `roseblox` and conflict with each other.
 

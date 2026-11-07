@@ -63,12 +63,19 @@ Click **Finish Setup**. You can reopen setup at any time from **Settings → Fir
 
 ```sh
 cd ~/RoseBlox
+git checkout -- packaging/arch-git/PKGBUILD
 git pull
 cd packaging/arch-git
 makepkg -si
 ```
 
-`git pull` updates the packaging recipe, and `makepkg` fetches and builds the latest `master`. Your settings, installations and link choice are kept. `pacman -Q roseblox-git` shows the new version, for example `0.1.0.r14.g1a2b3c4-1`, where the last part is the commit it was built from.
+Or as one line:
+
+```sh
+cd ~/RoseBlox && git checkout -- packaging/arch-git/PKGBUILD && git pull && cd packaging/arch-git && makepkg -si
+```
+
+`makepkg` writes the version it built into `PKGBUILD`, so the `git checkout` line discards that edit before `git pull`; otherwise the pull can refuse to run. `git pull` updates the packaging recipe, and `makepkg` fetches and builds the latest `master`. Your settings, installations and link choice are kept. `pacman -Q roseblox-git` shows the new version, for example `0.1.0.r14.g1a2b3c4-1`, where the last part is the commit it was built from.
 
 ### Rosemary
 

@@ -1,0 +1,5 @@
+/src/
+/pkg/
+*.pkg.tar*
+roseblox-*.tar.gz
+*.log
