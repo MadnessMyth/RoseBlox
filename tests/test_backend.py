@@ -126,6 +126,44 @@ class RosemaryTests(unittest.TestCase):
             with patch("roseblox.backend.rosemary.os.path.samefile", return_value=True):
                 self.assertFalse(_matches_session(session))
 
+    def test_release_launcher_reexecuting_through_elf_loader_is_verified(self):
+        process = unittest.mock.Mock()
+        process.pid = 1234
+        process.poll.return_value = None
+        session = LaunchSession(process, "/opt/rosemary/AppRun", "/apps/RobloxPlayer.app", start_time=987)
+        loader = ProcessSnapshot(
+            "/tmp/.mount_Rosema1/glibc/lib/ld-linux-x86-64.so.2",
+            (
+                "/tmp/.mount_Rosema1/glibc/lib/ld-linux-x86-64.so.2",
+                "--argv0",
+                "/opt/rosemary/AppRun",
+                "/tmp/.mount_Rosema1/libexec/rosemary",
+                "/apps/RobloxPlayer.app/",
+            ),
+            987,
+        )
+        with patch("roseblox.backend.rosemary.read_process_snapshot", return_value=loader):
+            self.assertTrue(_matches_session(session))
+
+        without_runtime = ProcessSnapshot(
+            "/usr/lib/ld-linux-x86-64.so.2",
+            ("/usr/lib/ld-linux-x86-64.so.2", "/usr/bin/other", "/apps/RobloxPlayer.app/"),
+            987,
+        )
+        unrelated = ProcessSnapshot(
+            "/usr/bin/python3",
+            ("/usr/bin/python3", "/tmp/libexec/rosemary", "/apps/RobloxPlayer.app/"),
+            987,
+        )
+        runtime_after_bundle = ProcessSnapshot(
+            "/usr/lib/ld-linux-x86-64.so.2",
+            ("/usr/lib/ld-linux-x86-64.so.2", "/apps/RobloxPlayer.app/", "/tmp/libexec/rosemary"),
+            987,
+        )
+        for snapshot in (without_runtime, unrelated, runtime_after_bundle):
+            with patch("roseblox.backend.rosemary.read_process_snapshot", return_value=snapshot):
+                self.assertFalse(_matches_session(session), snapshot)
+
     def test_launch_that_exits_before_identity_is_confirmed_fails(self):
         process = unittest.mock.Mock()
         process.poll.return_value = 1

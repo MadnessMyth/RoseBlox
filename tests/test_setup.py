@@ -283,6 +283,22 @@ class RosemarySetupTests(unittest.TestCase):
             self.assertFalse(session.plain_ctrl_click_supported)
             self.assertFalse(rosemary_supports_plain_ctrl_click(executable))
 
+    def test_release_launcher_reports_the_runtime_capability(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "bin").mkdir()
+            (root / "libexec").mkdir()
+            launcher = root / "bin" / "rosemary"
+            launcher.write_bytes(b"ELF\0static launcher\0")
+            launcher.chmod(0o755)
+            (root / "AppRun").symlink_to("bin/rosemary")
+            runtime = root / "libexec" / "rosemary"
+            runtime.write_bytes(b"ELF\0old build\0")
+            self.assertFalse(rosemary_supports_plain_ctrl_click(root / "AppRun"))
+            runtime.write_bytes(b"ELF\0newer build\0" + PLAIN_CTRL_CLICK_VARIABLE.encode() + b"\0")
+            self.assertTrue(rosemary_supports_plain_ctrl_click(root / "AppRun"))
+            self.assertTrue(rosemary_supports_plain_ctrl_click(launcher))
+
     def test_configure_and_restore_rosemary_path_preserves_other_settings(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

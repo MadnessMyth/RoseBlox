@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import signal
 import shutil
 import subprocess
@@ -111,6 +112,32 @@ def read_process_snapshot(pid: int) -> ProcessSnapshot | None:
     return ProcessSnapshot(executable, arguments, start_time)
 
 
+_ELF_LOADER_PATTERN = re.compile(r"^ld-(linux[\w.-]*|musl-[\w.-]+)\.so(\.\d+)*$")
+
+
+def _same_file(first: str, second: str) -> bool:
+    try:
+        return os.path.samefile(first, second)
+    except OSError:
+        return os.path.realpath(first) == os.path.realpath(second)
+
+
+def _launched_rosemary_binary(snapshot: ProcessSnapshot, bundle_index: int) -> str | None:
+    """Find libexec/rosemary run by an ELF loader, as Rosemary's release launcher does.
+
+    Release builds (AppImage, extracted AppImage, Butter) start a static launcher which
+    re-executes ``<root>/libexec/rosemary`` through a bundled or host ``ld-linux`` loader,
+    so ``/proc/<pid>/exe`` names the loader instead of the selected executable.
+    """
+    if not _ELF_LOADER_PATTERN.match(os.path.basename(snapshot.executable)):
+        return None
+    for argument in snapshot.arguments[1:bundle_index]:
+        path = Path(argument)
+        if path.name == "rosemary" and path.parent.name == "libexec" and path.is_absolute():
+            return argument
+    return None
+
+
 def _matches_session(session: LaunchSession) -> bool:
     if session.process.poll() is not None:
         return False
@@ -119,13 +146,18 @@ def _matches_session(session: LaunchSession) -> bool:
         return False
 
     expected_bundle = os.path.normpath(session.bundle_path)
-    if not any(os.path.normpath(argument) == expected_bundle for argument in snapshot.arguments):
+    bundle_index = next(
+        (
+            index
+            for index, argument in enumerate(snapshot.arguments)
+            if os.path.normpath(argument) == expected_bundle
+        ),
+        None,
+    )
+    if bundle_index is None:
         return False
-    try:
-        if not os.path.samefile(snapshot.executable, session.rosemary_path):
-            return False
-    except OSError:
-        if os.path.realpath(snapshot.executable) != os.path.realpath(session.rosemary_path):
+    if not _same_file(snapshot.executable, session.rosemary_path):
+        if _launched_rosemary_binary(snapshot, bundle_index) is None:
             return False
 
     if session.start_time is None:
@@ -297,8 +329,19 @@ def save_rosemary_executable(
 
 
 def rosemary_supports_plain_ctrl_click(rosemary_path: str | Path) -> bool:
-    """Detect the documented capability in this Rosemary executable."""
+    """Detect the documented capability in this Rosemary executable.
+
+    A release launcher (``bin/rosemary``, or ``AppRun`` linking to it) carries no
+    options itself; the runtime it starts lives beside it in ``libexec/rosemary``.
+    """
     executable = Path(rosemary_path).resolve()
+    if _file_contains_marker(executable):
+        return True
+    runtime = executable.parent.parent / "libexec" / "rosemary"
+    return executable.parent.name == "bin" and runtime.is_file() and _file_contains_marker(runtime)
+
+
+def _file_contains_marker(executable: Path) -> bool:
     try:
         stat = executable.stat()
     except OSError:
