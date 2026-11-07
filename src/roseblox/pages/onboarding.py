@@ -14,6 +14,7 @@ from ..backend.rosemary import RosemaryStatus
 from ..backend.rosemary_install import ROSEMARY_PROJECT_URL, RosemaryInstallState
 from ..backend.setup import SetupSettingsError, SetupStore
 from ..backend.url_handlers import URLHandlerError, URLHandlerService, URLHandlerStatus
+from .update_checks import UpdateCheckRow
 
 _ICON_PATH = Path(__file__).resolve().parent.parent / "resources" / "roseblox-icon.svg"
 _BADGE_STATES = ("badge-done", "badge-attention", "badge-optional", "badge-working")
@@ -69,6 +70,7 @@ class OnboardingPage(Gtk.Box):
         content.append(self._build_rosemary_step())
         content.append(self._build_links_step())
         content.append(self._build_apps_step())
+        content.append(self._build_updates_step())
 
         self.error_label = Gtk.Label()
         self.error_label.set_xalign(0)
@@ -113,7 +115,7 @@ class OnboardingPage(Gtk.Box):
         title.add_css_class("title-1")
         hero.append(title)
         introduction = Gtk.Label(
-            label="Three quick steps get Roblox running on Linux. Everything here can be changed later in Settings."
+            label="A few quick steps get Roblox running on Linux. Everything here can be changed later in Settings."
         )
         introduction.set_wrap(True)
         introduction.set_justify(Gtk.Justification.CENTER)
@@ -236,6 +238,25 @@ class OnboardingPage(Gtk.Box):
             self._app_widgets[app_type] = (row, progress, cancel, action)
         return group
 
+    def _build_updates_step(self) -> Gtk.Widget:
+        group, self.updates_badge = self._step_group(
+            "4 · Updates",
+            "Optional. Get a notification when a new Player or Studio version is out, "
+            "with a button to install it or skip that version.",
+        )
+        self.update_row = UpdateCheckRow(self.window, icon_name="software-update-available-symbolic")
+        group.add(self.update_row)
+        return group
+
+    def _render_updates(self) -> None:
+        status = self.update_row.status
+        if status is not None and status.enabled and not status.error:
+            _set_badge(self.updates_badge, "Enabled", "done")
+        elif status is not None and status.enabled:
+            _set_badge(self.updates_badge, "Needs attention", "attention")
+        else:
+            _set_badge(self.updates_badge, "Optional", "optional")
+
     @property
     def player_button(self) -> Gtk.Button:
         return self._app_widgets["player"][3]
@@ -273,6 +294,7 @@ class OnboardingPage(Gtk.Box):
         self._render_rosemary()
         self._render_links()
         self._render_apps()
+        self._render_updates()
         completed = self._setup_state is not None and self._setup_state.onboarding_completed
         self.skip_button.set_visible(not completed)
         self.finish_button.set_label("Done" if completed else "Finish Setup")

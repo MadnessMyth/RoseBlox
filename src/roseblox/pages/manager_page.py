@@ -25,6 +25,8 @@ from ..backend.library import (
 from ..backend.preferences import PreferencesError
 from ..backend.rosemary_install import RosemaryInstallState
 from ..backend.setup import ClosePreference, SetupSettingsError
+from ..backend.updates import APP_TITLES, UpdateCheckerError
+from .update_checks import UpdateCheckRow
 from ..backend.rosemary import (
     LaunchSession,
     ProcessIdentityError,
@@ -85,6 +87,7 @@ class InstallationPage(Gtk.Box):
         self._preference_errors: dict[str, str] = {}
         self._preference_busy = False
         self._busy = False
+        self._make_preferred_after_install = False
         self._library_loading = True
         self._cancel_event: threading.Event | None = None
         self._checking_version = False
@@ -714,13 +717,22 @@ class InstallationPage(Gtk.Box):
     def _on_download_clicked(self, _button: Gtk.Button) -> None:
         if self._busy or self.library_error:
             return
+        self._make_preferred_after_install = False
         self._cancel_event = threading.Event()
         self._begin_operation("Checking the latest version…", cancellable=True)
         threading.Thread(target=self._download_worker, daemon=True).start()
 
-    def start_install_from_setup(self) -> None:
-        """Start the same current-version installation flow used by this page."""
+    def start_install_from_setup(self, *, make_preferred: bool = False) -> bool:
+        """Start the same current-version installation flow used by this page.
+
+        With ``make_preferred`` the installed version becomes the one Home and links
+        launch, which is what accepting an update notification means.
+        """
+        if self._busy or self.library_error:
+            return False
         self._on_download_clicked(self.download_button)
+        self._make_preferred_after_install = make_preferred
+        return True
 
     @property
     def operation_busy(self) -> bool:
@@ -939,6 +951,8 @@ class InstallationPage(Gtk.Box):
     def _operation_finished(self, result: InstallResult | None, error: Exception | None) -> bool:
         self._busy = False
         self._cancel_event = None
+        make_preferred = self._make_preferred_after_install
+        self._make_preferred_after_install = False
         self.cancel_button.set_visible(False)
         self.progress_bar.set_visible(False)
         self._set_library_actions(not self._library_loading and self.library_error is None)
@@ -959,6 +973,12 @@ class InstallationPage(Gtk.Box):
                 if result.already_installed
                 else f"Installed {result.record.display_name}. Archive preserved at {result.archive_path}."
             )
+            if make_preferred:
+                message += " It is now the preferred installation."
+                self._preference_busy = True
+                threading.Thread(
+                    target=self._set_preferred_worker, args=(result.record,), daemon=True
+                ).start()
             self.workflow_status.set_text(message)
             self.workflow_status.set_visible(True)
             self._refresh_all(reload_library=True, reload_recovery=True)
@@ -1366,6 +1386,34 @@ class SettingsPage(Gtk.Box):
             self._close_rows[app_type] = (expander, link_switch)
         self.append(close_group)
 
+        updates_group = Adw.PreferencesGroup.new()
+        updates_group.set_title("Updates")
+        updates_group.set_description(
+            "A small background checker starts when you log in, looks for new Player and Studio "
+            "versions every few hours, and sends a notification with Update and Skip buttons."
+        )
+        self.update_row = UpdateCheckRow(window)
+        updates_group.add(self.update_row)
+        self.check_now_row = Adw.ActionRow.new()
+        self.check_now_row.set_title("Check for updates now")
+        self.check_now_row.set_subtitle("Get a notification right away if a newer version is available.")
+        self.check_now_button = Gtk.Button.new_with_label("Check Now")
+        self.check_now_button.set_valign(Gtk.Align.CENTER)
+        self.check_now_button.connect("clicked", self._check_now_clicked)
+        self.check_now_row.add_suffix(self.check_now_button)
+        self.check_now_row.set_visible(False)
+        updates_group.add(self.check_now_row)
+        self.skipped_row = Adw.ActionRow.new()
+        self.skipped_row.set_title("Skipped versions")
+        self.skipped_row.set_subtitle("None")
+        self.ask_again_button = Gtk.Button.new_with_label("Ask Again")
+        self.ask_again_button.set_valign(Gtk.Align.CENTER)
+        self.ask_again_button.set_sensitive(False)
+        self.ask_again_button.connect("clicked", self._ask_again_clicked)
+        self.skipped_row.add_suffix(self.ask_again_button)
+        updates_group.add(self.skipped_row)
+        self.append(updates_group)
+
         settings = {app: default_version_source(app) for app in ("player", "studio")}
         self._source_widgets = {}
         for app_type, title in (("player", "Roblox Player"), ("studio", "Roblox Studio")):
@@ -1421,6 +1469,7 @@ class SettingsPage(Gtk.Box):
     def apply_setup_snapshot(self, rosemary_status, setup_state, setup_error, handler_status) -> None:
         if setup_state is not None:
             self._show_close_preferences(setup_state)
+            self._show_skipped_versions(setup_state.skipped_versions)
         enabled = bool(setup_state and setup_state.url_handlers_enabled)
         self._url_switch_block = True
         self.url_switch.set_active(enabled)
@@ -1501,6 +1550,36 @@ class SettingsPage(Gtk.Box):
             message = "Available once Rosemary is detected."
         self.rosemary_input_row.set_subtitle(message)
         return GLib.SOURCE_REMOVE
+
+    def apply_update_status(self, status) -> None:
+        self.check_now_row.set_visible(status.enabled)
+
+    def _show_skipped_versions(self, skipped: dict[str, str]) -> None:
+        if skipped:
+            self.skipped_row.set_subtitle(
+                "; ".join(f"{APP_TITLES[app]} {version}" for app, version in sorted(skipped.items()))
+                + ". You will be asked again when a newer version comes out."
+            )
+        else:
+            self.skipped_row.set_subtitle("None")
+        self.ask_again_button.set_sensitive(bool(skipped))
+
+    def _check_now_clicked(self, _button) -> None:
+        try:
+            self.window.update_checker.check_now()
+        except (UpdateCheckerError, OSError) as error:
+            self.check_now_row.set_subtitle(f"Could not check: {str(error)[:300]}")
+            return
+        self.check_now_row.set_subtitle("Checking… a notification appears if an update is available.")
+
+    def _ask_again_clicked(self, _button) -> None:
+        try:
+            state = self.setup_store.clear_skipped_versions()
+        except SetupSettingsError as error:
+            self.skipped_row.set_subtitle(f"Not changed: {str(error)[:300]}")
+            return
+        self.window.setup_state = state
+        self._show_skipped_versions(state.skipped_versions)
 
     def _show_close_preferences(self, setup_state) -> None:
         self._close_block = True

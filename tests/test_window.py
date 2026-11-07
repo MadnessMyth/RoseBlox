@@ -299,6 +299,78 @@ class RealWindowTests(unittest.TestCase):
         self.assertTrue(player_link.get_active())
         self.assertTrue(studio_row.get_enable_expansion())
 
+    def test_update_from_notification_installs_and_becomes_preferred(self):
+        from roseblox.backend.installer import InstallResult
+
+        records = _write_library(self.data_home)
+        window = self._build_window()
+        page = window.pages["player"]
+        with patch.object(page, "_on_download_clicked") as download:
+            window.install_update("player")
+            self.assertTrue(self._wait_until(lambda: download.called))
+        self.assertEqual("player", window._stack.get_visible_child_name())
+        self.assertTrue(page._make_preferred_after_install)
+
+        older = next(item for item in window.library_records if item.app_type == "player")
+        window.preferences_store.set_preferred("player", older.id, window.library)
+        bundle = self.data_home / "roseblox" / "installations" / "player-version-1111111111111111" / "RobloxPlayer.app"
+        (bundle / "Contents").mkdir(parents=True)
+        newer = window.library.add(
+            "player", bundle, "Roblox Player (new)", version="version-1111111111111111", source="download"
+        )
+        page._busy = True
+        page._operation_finished(InstallResult(newer, None), None)
+        self.assertTrue(self._wait_until(lambda: window.preferences_store.load().player_id == newer.id))
+        self.assertIn("It is now the preferred installation.", page.workflow_status.get_text())
+        self.assertFalse(page._make_preferred_after_install)
+
+        # A normal "Download and Install Latest" leaves the preferred installation alone.
+        page._make_preferred_after_install = False
+        page._busy = True
+        page._operation_finished(InstallResult(older, None, already_installed=True), None)
+        self._wait_until(lambda: False, timeout=0.3)
+        self.assertEqual(newer.id, window.preferences_store.load().player_id)
+        self.assertTrue(records)
+
+    def test_update_switches_in_settings_and_setup_stay_in_sync(self):
+        from roseblox.backend.updates import UpdateCheckerStatus
+
+        window = self._loaded_window()
+        settings_row = window.settings_page.update_row
+        setup_row = window.onboarding_page.update_row
+        self.assertFalse(settings_row.switch.get_active())
+        self.assertEqual("Optional", window.onboarding_page.updates_badge.get_text())
+        self.assertFalse(window.settings_page.check_now_row.get_visible())
+
+        window.update_checker = Mock()
+        window.update_checker.enable.return_value = UpdateCheckerStatus(True, "On.")
+        setup_row.switch.set_active(True)
+        self.assertTrue(self._wait_until(lambda: settings_row.switch.get_active() and not setup_row.busy))
+        window.update_checker.enable.assert_called_once_with()
+        self.assertTrue(window.settings_page.check_now_row.get_visible())
+
+        window.update_checker.disable.side_effect = __import__(
+            "roseblox.backend.updates", fromlist=["UpdateCheckerError"]
+        ).UpdateCheckerError("disk full")
+        window.update_checker.status.return_value = UpdateCheckerStatus(True, "On.")
+        settings_row.switch.set_active(False)
+        self.assertTrue(self._wait_until(lambda: not settings_row.busy))
+        self.assertTrue(settings_row.switch.get_active())
+        self.assertEqual("disk full", settings_row.get_subtitle())
+
+    def test_skipped_versions_can_be_asked_again(self):
+        from roseblox.backend.setup import SetupStore
+
+        store = SetupStore(self.config_home / "roseblox" / "setup.json")
+        store.skip_version("player", "version-0123456789abcdef")
+        window = self._loaded_window()
+        settings = window.settings_page
+        self.assertIn("Roblox Player version-0123456789abcdef", settings.skipped_row.get_subtitle())
+        self.assertTrue(settings.ask_again_button.get_sensitive())
+        settings.ask_again_button.emit("clicked")
+        self.assertEqual({}, store.load().skipped_versions)
+        self.assertEqual("None", settings.skipped_row.get_subtitle())
+
     def test_launches_report_whether_they_came_from_a_link(self):
         records = _write_library(self.data_home)
         window = self._loaded_window()
@@ -322,7 +394,7 @@ class RealWindowTests(unittest.TestCase):
 
 class EntryPointTests(unittest.TestCase):
     def test_links_are_accepted_bare_or_after_the_option(self):
-        from roseblox.application import roblox_url_from_arguments
+        from roseblox.command_line import roblox_url_from_arguments
 
         uri = "roblox-player:1+launchmode:play+gameinfo:abc"
         self.assertIsNone(roblox_url_from_arguments([]))
@@ -337,12 +409,34 @@ class EntryPointTests(unittest.TestCase):
     def test_command_line_arguments_reach_the_application(self):
         from roseblox import __main__ as entry_point
 
+        from roseblox.application import RosebloxApplication
+
         argv = ["roseblox", "--roblox-url", "roblox://placeId=1"]
         with patch.object(entry_point.sys, "argv", argv), patch.object(
-            entry_point.RosebloxApplication, "__init__", return_value=None
-        ), patch.object(entry_point.RosebloxApplication, "run", return_value=0) as run:
+            RosebloxApplication, "__init__", return_value=None
+        ), patch.object(RosebloxApplication, "run", return_value=0) as run:
             self.assertEqual(0, entry_point.main())
         run.assert_called_once_with(argv)
+
+    def test_update_service_runs_without_the_window(self):
+        from roseblox import __main__ as entry_point
+
+        argv = ["roseblox", "--update-service", "--check-now"]
+        with patch.object(entry_point.sys, "argv", argv), patch(
+            "roseblox.update_service.main", return_value=0
+        ) as service:
+            self.assertEqual(0, entry_point.main())
+        service.assert_called_once_with(argv)
+
+    def test_notification_commands_are_parsed(self):
+        from roseblox.command_line import WindowRequest, parse_window_arguments
+
+        self.assertEqual(WindowRequest(install_update="studio"), parse_window_arguments(["--install-update", "studio"]))
+        self.assertEqual(WindowRequest(show="player"), parse_window_arguments(["--show", "player"]))
+        self.assertEqual(WindowRequest(), parse_window_arguments([]))
+        for arguments in (["--install-update"], ["--install-update", "phone"], ["--show", "player", "x"]):
+            with self.subTest(arguments=arguments), self.assertRaisesRegex(ValueError, "^Usage"):
+                parse_window_arguments(arguments)
 
 
 if __name__ == "__main__":

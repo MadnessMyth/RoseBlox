@@ -1,7 +1,6 @@
 """Backend tests that do not launch external applications."""
 
 import json
-import io
 import os
 import signal
 import shutil

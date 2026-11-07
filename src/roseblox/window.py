@@ -23,6 +23,7 @@ from .backend.rosemary_install import (
     start_rosemary_install,
 )
 from .backend.setup import SetupSettingsError, SetupState, SetupStore
+from .backend.updates import UpdateCheckerService
 from .backend.url_handlers import URLHandlerService, URLHandlerStatus
 from .backend.version_settings import VersionSettingsStore
 from .pages import PAGE_DEFINITIONS, create_page
@@ -54,6 +55,9 @@ class RosebloxWindow(Adw.ApplicationWindow):
         self.version_settings = VersionSettingsStore()
         self.setup_store = SetupStore()
         self.url_handlers = URLHandlerService(self.setup_store)
+        self.update_checker = UpdateCheckerService(self.setup_store)
+        self.update_checker_status = None
+        self.update_check_rows = []
         self.setup_state = SetupState()
         self.url_handler_status = URLHandlerStatus(False, False, "URL-handler status has not been checked.")
         self.setup_error = None
@@ -79,6 +83,7 @@ class RosebloxWindow(Adw.ApplicationWindow):
         self._refresh_pending_setup = False
         self._snapshot_generation = 0
         self._pending_roblox_url: str | None = None
+        self._pending_update: str | None = None
         self.rosemary_install = RosemaryInstallState()
         self._rosemary_install_process = None
         self._rosemary_install_deadline = 0.0
@@ -219,6 +224,7 @@ class RosebloxWindow(Adw.ApplicationWindow):
         setup_state = None
         setup_error = None
         handler_status = None
+        update_status = None
         if load_library:
             try:
                 records = self.library.load()
@@ -258,6 +264,7 @@ class RosebloxWindow(Adw.ApplicationWindow):
                 handler_status = self.url_handlers.check()
             except Exception as error:
                 setup_error = str(error)[:500]
+            update_status = self.update_checker.status()
         GLib.idle_add(
             self._shared_state_loaded,
             generation,
@@ -276,6 +283,7 @@ class RosebloxWindow(Adw.ApplicationWindow):
             setup_state,
             setup_error,
             handler_status,
+            update_status,
         )
 
     def _shared_state_loaded(
@@ -296,6 +304,7 @@ class RosebloxWindow(Adw.ApplicationWindow):
         setup_state=None,
         setup_error=None,
         handler_status=None,
+        update_status=None,
     ) -> bool:
         if generation != self._snapshot_generation:
             self._refresh_pending_library |= load_library
@@ -323,6 +332,8 @@ class RosebloxWindow(Adw.ApplicationWindow):
                 self.setup_state = setup_state
             self.setup_error = setup_error
             self.url_handler_status = handler_status
+            if update_status is not None:
+                self.apply_update_checker_status(update_status, reload=False)
             self.onboarding_page.apply_snapshot(
                 self.rosemary_status, self.setup_state, setup_error, handler_status,
                 self.library_records, self.library_validation,
@@ -342,6 +353,10 @@ class RosebloxWindow(Adw.ApplicationWindow):
         if pending_url is not None and not self.library_loading:
             self._pending_roblox_url = None
             GLib.idle_add(self.handle_roblox_url, pending_url)
+        pending_update = getattr(self, "_pending_update", None)
+        if pending_update is not None and not self.library_loading:
+            self._pending_update = None
+            GLib.idle_add(self.install_update, pending_update)
         if (
             self._refresh_pending_library
             or self._refresh_pending_recovery
@@ -544,6 +559,36 @@ class RosebloxWindow(Adw.ApplicationWindow):
         dialog.add_response("close", "Close")
         dialog.set_default_response("close")
         dialog.present()
+
+    def apply_update_checker_status(self, status, message=None, *, source=None, reload=True) -> None:
+        self.update_checker_status = status
+        for row in self.update_check_rows:
+            row.apply_status(status, message if row is source else None)
+        if self.settings_page is not None:
+            self.settings_page.apply_update_status(status)
+        if reload:
+            self.refresh_pages(reload_library=False, reload_preferences=True)
+
+    def show_page(self, app_type: str) -> bool:
+        self.navigate_to(app_type)
+        self.present()
+        return GLib.SOURCE_REMOVE
+
+    def install_update(self, app_type: str) -> bool:
+        """Install the latest version, as requested from an update notification."""
+        if self.library_loading:
+            self._pending_update = app_type
+            return GLib.SOURCE_REMOVE
+        self.navigate_to(app_type)
+        page = self.pages.get(app_type)
+        if page is None or page.operation_busy:
+            return GLib.SOURCE_REMOVE
+        if not page.start_install_from_setup(make_preferred=True):
+            self._show_window_error(
+                "Could not update Roblox",
+                page.library_error or "Roseblox could not start the installation.",
+            )
+        return GLib.SOURCE_REMOVE
 
     def handle_roblox_url(self, uri: str) -> bool:
         from .backend.url_handlers import parse_roblox_url
