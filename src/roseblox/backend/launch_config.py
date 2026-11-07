@@ -30,6 +30,7 @@ GUEST_ENVIRONMENT_VARIABLE = "ROSEMARY_ENVIRON"
 MANGOHUD_VARIABLE = "MANGOHUD"
 COMMAND_KEY_VARIABLE = "ROSEMARY_COMMAND_KEY"
 DECORATIONS_VARIABLE = "ROSEMARY_DECORATIONS"
+DISABLE_USER_PLUGINS_ARGUMENT = "-disableLoadUserPlugins"
 COMMAND_KEYS = ("super", "ctrl", "alt", "super+ctrl:edit")
 DECORATIONS = ("client", "server")
 MIN_REFRESH_RATE = 24
@@ -136,6 +137,7 @@ class AppLaunchConfig:
     mangohud: bool = False
     command_key: str | None = None
     decorations: str | None = None
+    disable_user_plugins: bool = False
 
     def problems(self) -> list[str]:
         found: list[str] = []
@@ -179,6 +181,8 @@ class AppLaunchConfig:
             found.append(f"The Command key must be one of {', '.join(COMMAND_KEYS)}.")
         if self.decorations is not None and self.decorations not in DECORATIONS:
             found.append(f"The titlebar must be one of {', '.join(DECORATIONS)}.")
+        if not isinstance(self.disable_user_plugins, bool):
+            found.append("The Studio plugin setting must be true or false.")
         return found
 
     def validated(self) -> "AppLaunchConfig":
@@ -210,6 +214,7 @@ class AppLaunchConfig:
             "mangohud": self.mangohud,
             "command_key": self.command_key,
             "decorations": self.decorations,
+            "disable_user_plugins": self.disable_user_plugins,
         }
 
     @classmethod
@@ -229,6 +234,7 @@ class AppLaunchConfig:
             mangohud=document.get("mangohud", False),
             command_key=document.get("command_key"),
             decorations=document.get("decorations"),
+            disable_user_plugins=document.get("disable_user_plugins", False),
         ).validated()
 
 
@@ -266,6 +272,12 @@ def effective_environment(
     return environment
 
 
+def effective_arguments(config: AppLaunchConfig, app_type: str) -> tuple[str, ...]:
+    """The arguments Roblox receives after any link: switches Roseblox controls, then the user's own."""
+    switches = (DISABLE_USER_PLUGINS_ARGUMENT,) if app_type == "studio" and config.disable_user_plugins else ()
+    return (*switches, *config.arguments)
+
+
 def environment_changes(
     config: AppLaunchConfig, base: Mapping[str, str], gpus: list[Gpu] | tuple[Gpu, ...] = ()
 ) -> dict[str, str]:
@@ -297,6 +309,12 @@ def describe_changes(
     setting("MangoHud", "on" if old.mangohud else "off", "on" if new.mangohud else "off", "off")
     setting("Command key", old.command_key, new.command_key, "Rosemary default")
     setting("Titlebar", old.decorations, new.decorations, "Rosemary default")
+    setting(
+        "Studio user plugins",
+        "not loaded" if old.disable_user_plugins else "loaded",
+        "not loaded" if new.disable_user_plugins else "loaded",
+        "loaded",
+    )
     for label, before, after in (
         ("FastFlag", old.fast_flags, new.fast_flags),
         ("Rosemary variable", old.rosemary_environment, new.rosemary_environment),

@@ -227,6 +227,47 @@ class KeyboardAndWindowTests(unittest.TestCase):
         )
 
 
+class StudioPluginTests(unittest.TestCase):
+    def test_the_plugin_switch_is_a_studio_argument(self):
+        config = AppLaunchConfig(arguments=("-x",), disable_user_plugins=True)
+        self.assertEqual(("-disableLoadUserPlugins", "-x"), launch_config.effective_arguments(config, "studio"))
+        self.assertEqual(("-x",), launch_config.effective_arguments(config, "player"))
+        self.assertEqual(("-x",), launch_config.effective_arguments(AppLaunchConfig(arguments=("-x",)), "studio"))
+        self.assertEqual(config, AppLaunchConfig.from_document(config.to_document()))
+        self.assertFalse(AppLaunchConfig.from_document({}).disable_user_plugins)
+        self.assertEqual(1, len(AppLaunchConfig(disable_user_plugins="yes").problems()))
+        self.assertEqual(
+            ["Studio user plugins: loaded → not loaded"],
+            launch_config.describe_changes(AppLaunchConfig(), AppLaunchConfig(disable_user_plugins=True)),
+        )
+
+    def test_studio_launches_with_the_switch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bundle = root / "RobloxStudio.app"
+            (bundle / "Contents" / "MacOS").mkdir(parents=True)
+            executable = root / "rosemary"
+            executable.write_bytes(b"ELF\0")
+            executable.chmod(0o755)
+            process = subprocess.CompletedProcess([], 0)
+            process.pid = 5150
+            process.poll = lambda: None
+            with patch("roseblox.backend.rosemary.subprocess.Popen", return_value=process) as popen:
+                launch_application(
+                    {"app_type": "studio", "bundle_path": str(bundle)},
+                    RosemaryStatus(str(executable)),
+                    guest_arguments=("-task", "EditFile", "-localPlaceFile", "/Volumes/Host/p.rbxl"),
+                    log_directory=root / "logs",
+                    launch_config=AppLaunchConfig(disable_user_plugins=True),
+                    flag_backup_directory=root / "backups",
+                )
+        command = popen.call_args.args[0]
+        self.assertEqual(
+            ["--", "-task", "EditFile", "-localPlaceFile", "/Volumes/Host/p.rbxl", "-disableLoadUserPlugins"],
+            command[command.index("--"):],
+        )
+
+
 class LaunchConfigStoreTests(unittest.TestCase):
     def setUp(self):
         self._directory = tempfile.TemporaryDirectory()

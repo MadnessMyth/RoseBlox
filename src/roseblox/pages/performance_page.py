@@ -46,6 +46,7 @@ from ..backend.transfer_rate import format_size
 from ..backend.launch_config import (
     APP_TYPES,
     AppLaunchConfig,
+    effective_arguments,
     effective_environment,
     LaunchConfigError,
     LaunchConfigStore,
@@ -282,6 +283,7 @@ class PerformancePage(Gtk.Box):
         self._build_graphics()
         self._build_flags()
         self._build_input()
+        self._build_studio()
         self._build_environment()
         self._build_arguments()
         self._build_backups()
@@ -437,6 +439,19 @@ class PerformancePage(Gtk.Box):
         group.add(self.decorations_row)
         section.add(group)
 
+    def _build_studio(self) -> None:
+        self.studio_section = self._section(
+            "studio", "Studio startup", "Options Roblox Studio reads from its command line.", expanded=False
+        )
+        group = Adw.PreferencesGroup.new()
+        self.plugins_row = self._switch_row("Don't load my plugins", self._plugins_changed)
+        self.plugins_row.set_subtitle(
+            "Starts Studio with -disableLoadUserPlugins. Studio may start faster, but plugins you installed "
+            "are unavailable until you turn this off. Roblox's built-in tools still load."
+        )
+        group.add(self.plugins_row)
+        self.studio_section.add(group)
+
     def _build_environment(self) -> None:
         section = self._section(
             "environment", "Environment", "Variables for this application only; nothing is set globally.", expanded=False
@@ -587,6 +602,8 @@ class PerformancePage(Gtk.Box):
             self._select(self.decorations_row, DECORATION_CHOICES, config.decorations, describe=False)
             self.decorations_row.set_subtitle(DECORATION_DESCRIPTIONS[config.decorations])
             self._show_framerate_cap()
+            self.studio_section.set_visible(self.app_type == "studio")
+            self.plugins_row.switch.set_active(config.disable_user_plugins)
             self.gamemode_row.switch.set_active(config.gamemode)
             self.gamemode_row.switch.set_sensitive(self.gamemode_available or config.gamemode)
             self.gamemode_row.set_subtitle(
@@ -855,7 +872,7 @@ class PerformancePage(Gtk.Box):
         rosemary = getattr(status, "executable", None) or "rosemary"
         bundle = self._bundle_path() or f"<{APP_TITLES[self.app_type]} bundle>"
         link = ["<link, when opened from a link>"] if self.app_type == "player" else []
-        command = build_launch_arguments(rosemary, bundle, [*link, *arguments])
+        command = build_launch_arguments(rosemary, bundle, [*link, *effective_arguments(self.draft, self.app_type)])
         self.command_preview.set_text("Command:\n" + shlex.join(command))
 
     def _bundle_path(self) -> str | None:
@@ -891,6 +908,10 @@ class PerformancePage(Gtk.Box):
     def _decorations_changed(self, row, _pspec) -> None:
         if not self._updating:
             self._set_draft(replace(self.draft, decorations=DECORATION_CHOICES[row.get_selected()][0]))
+
+    def _plugins_changed(self, switch, _pspec) -> None:
+        if not self._updating:
+            self._set_draft(replace(self.draft, disable_user_plugins=switch.get_active()))
 
     def _mangohud_changed(self, switch, _pspec) -> None:
         if not self._updating:

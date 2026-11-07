@@ -153,7 +153,7 @@ class PerformancePageTests(unittest.TestCase):
         for target, replacement in (
             ("roseblox.pages.performance_page.list_gpus", lambda: list(self.gpus)),
             ("roseblox.pages.performance_page.gamemode.available", lambda: self.gamemode_available),
-            ("roseblox.pages.performance_page.mangohud.layer_installed", lambda: self.mangohud_available),
+            ("roseblox.pages.performance_page.mangohud.layer_installed", lambda *_args: self.mangohud_available),
         ):
             patcher = patch(target, side_effect=replacement)
             patcher.start()
@@ -216,6 +216,16 @@ class PerformancePageTests(unittest.TestCase):
         self.assertIn("ROSEMARY_COMMAND_KEY=super+ctrl:edit", page.environment_preview.get_text())
         page._discard_clicked(None)
         self.assertEqual(0, page.command_key_row.get_selected())
+
+    def test_the_studio_plugin_switch_is_only_for_studio(self):
+        page = self._page()
+        self.assertFalse(page.studio_section.get_visible())
+        page.app_buttons["studio"].set_active(True)
+        self.assertTrue(page.studio_section.get_visible())
+        page.plugins_row.switch.set_active(True)
+        self.assertTrue(page.draft.disable_user_plugins)
+        self.assertIn("-disableLoadUserPlugins", page.command_preview.get_text())
+        self.assertIn("Studio user plugins: loaded → not loaded", page.changes)
 
     def test_mangohud_is_offered_when_its_layer_is_installed(self):
         page = self._page()

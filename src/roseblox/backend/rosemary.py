@@ -18,7 +18,7 @@ from typing import Mapping
 from . import gamemode
 from .fast_flags import FastFlagError, write_bundle_flags
 from .gpu import list_gpus
-from .launch_config import AppLaunchConfig, effective_environment
+from .launch_config import AppLaunchConfig, effective_arguments, effective_environment
 from .library import InstallationRecord, validate_bundle
 
 
@@ -407,7 +407,7 @@ def launch_application(
     if launch_config is not None:
         gpus = list_gpus() if launch_config.gpu else []
         environment = effective_environment(launch_config, environment, gpus)
-        guest_arguments = (*guest_arguments, *launch_config.arguments)
+        guest_arguments = (*guest_arguments, *effective_arguments(launch_config, app_type))
         try:
             write_bundle_flags(
                 bundle_path,

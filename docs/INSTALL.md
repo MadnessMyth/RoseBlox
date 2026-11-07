@@ -138,11 +138,12 @@ The **Performance** page holds launch settings for **Player** and **Studio** sep
 - **Keyboard & window**
   - **Command key**: which key acts as the Mac Command key. **Super, and Ctrl for editing** keeps Super as Command and also lets Ctrl+A, Ctrl+C, Ctrl+V, Ctrl+X, Ctrl+Y and Ctrl+Z work, which is handy in Studio. **Ctrl** and **Alt** make that key the Command key instead.
   - **Titlebar**: Rosemary's Mac-style titlebar, or your desktop's titlebar with the menus in a row below it.
+- **Studio startup** (Studio only, closed by default): **Don't load my plugins** starts Studio with `-disableLoadUserPlugins`. Studio may start faster, but the plugins you installed are unavailable until you turn it off. Roblox's built-in tools still load.
 - **Environment** (closed by default): extra variables for Rosemary, and variables for Roblox itself. Variables that look like passwords, tokens or cookies are refused, and so are library injection variables (`LD_PRELOAD`, `DYLD_*` and similar). Settings that have their own control, such as the presentation mode, must be changed there.
 - **Launch arguments** (closed by default): extra arguments for Roblox, passed after the link Roseblox opens and never through a shell. Login ticket and authentication arguments are refused. The preview shows the whole command.
 - **Backups** (closed by default): every change you apply first saves the previous settings of both apps. **Restore…** brings one back, and **Reset to Defaults…** clears the settings of the selected app. The 30 newest backups are kept in `~/.config/roseblox/backups/`.
 - **Caches** (closed by default): Rosemary's Metal shader cache and Roblox's caches, with their sizes. **Move to Trash…** moves one to your desktop's trash, so you can still get it back. Roblox and Rosemary rebuild them by themselves, so the first start afterwards can be slower. Your Roblox login and settings are never touched.
-- **Diagnostics** (closed by default): Rosemary's version, your GPUs and Vulkan drivers, whether GameMode and MangoHud are installed, and other details for bug reports. **Copy Report** copies them as text.
+- **Diagnostics** (closed by default): Rosemary's version, what `rosemary prefix info` reports about the prefix, your GPUs and Vulkan drivers, whether GameMode and MangoHud are installed, and other details for bug reports. **Copy Report** copies them as text.
 
 The settings are saved in `~/.config/roseblox/launch-config.json`.
 
