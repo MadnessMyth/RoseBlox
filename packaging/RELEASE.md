@@ -1,5 +1,25 @@
 # Roseblox release preparation
 
+## Release checklist — v0.4.2
+
+- [x] Bump the version in `pyproject.toml`, `src/roseblox/__init__.py`, and `packaging/arch-git/PKGBUILD`.
+- [x] Run the full unittest suite, Python compilation, and `git diff --check`, on the host and on Arch Linux.
+- [ ] Create the annotated `v0.4.2` Git tag on the release commit.
+- [ ] Point `packaging/arch/PKGBUILD` at the `v0.4.2` tag, record the archive checksum, and regenerate `.SRCINFO`.
+- [ ] Build `packaging/arch/PKGBUILD` with `makepkg` on Arch Linux and install it.
+- [ ] Create the GitHub release for `v0.4.2` from these notes (the release workflow does this when the tag is pushed).
+
+## Release notes — v0.4.2
+
+### Fixed
+
+- **Discord Rich Presence and the server location notification now work.** The Mac Player writes the lines that say you joined a game to its own log in the prefix (`~/Library/Logs/Roblox` in the guest), not to Rosemary's output, so Roseblox never saw a game start. Roseblox now follows the log file the Player has open, and `~/.local/state/roseblox/logs/activity.log` records which log it follows and each game you join.
+- Starting a Player while another Player installation was running moved the first Player's `player.log` aside, so its presence stopped updating. Each running Player now keeps its own log (`player.log`, `player-2.log`, …), even across Roseblox restarts.
+
+### New
+
+- **Settings → After Launching → Allow more than one Roblox Player** (off by default) adds **Duplicate…** to Player installations. Roblox shows the window that is already open when the same installation is launched twice, so a second Player runs from a copy: Duplicate copies the app in the background with progress and **Cancel Copy**, checks free space first, and adds nothing if the copy fails. Each copy has its own **Launch** and **Stop** and can sign in to its own account. With the setting on, a Roblox link opened while Player runs goes to an installation that is not running. This is new and lightly tested; please open an issue with `activity.log` and the `player*.log` files if a copy does not start its own Player.
+
 ## Release checklist — v0.4.1
 
 - [x] Bump the version in `pyproject.toml`, `src/roseblox/__init__.py`, and `packaging/arch-git/PKGBUILD`.
