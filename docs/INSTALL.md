@@ -83,11 +83,24 @@ Click a section heading in **Settings** to open or close it; Roseblox remembers 
 - **Appearance**: **Colors** (Roseblox or System), **Style** (Dark, Light, or Follow system), and **Accent color** (Roseblox pink, your desktop's accent color, or a fixed color). Changes apply immediately.
 - **Rosemary**: Rosemary status, **Ctrl + left-click compatibility** (turn it off if you want Rosemary's default Ctrl + click behavior), and **First-time setup**.
 - **After Launching**: close Roseblox after Player or Studio starts. See [Closing Roseblox after launching](#closing-roseblox-after-launching).
+- **While Playing**: Discord Rich Presence, a server location notification, and closing Roblox when you leave a game. See [While Playing](#while-playing).
 - **Roblox Links**: open `roblox://` links with Roseblox.
 - **Updates**: update notifications, **Check Now**, and skipped versions.
-- **Advanced** (closed by default): the Rosemary executable path and the Player and Studio version sources. You normally do not need to change these.
+- **Advanced** (closed by default): the Rosemary executable path, the Player and Studio version sources, and the Discord application ID. You normally do not need to change these.
 
 ![Light style with System colors and a teal accent](screenshots/12-system-colors-teal.png)
+
+### While Playing
+
+![While Playing](screenshots/16-while-playing.png)
+
+These work with Roblox Player and are off until you turn them on. Turn them on before you start the Player; they apply to every game you join after that, even if Roseblox closes.
+
+- **Discord Rich Presence**: your Discord profile shows "Playing Roseblox" with the game's name, creator and icon, and how long you have been in it. Other people see a **View Game** button and, while **Join Server button** is on, a **Join Server** button that opens Roblox's own join page for your server. Private servers never get a Join Server button. The Discord desktop app must be running; the regular, Flatpak and Snap builds all work. Discord only shows the buttons to other people, not to you.
+- **Server location notification**: when you join a server, a notification says where it is, for example "The server is in Frankfurt am Main, Hessen, Germany." The Roblox server's address (never yours) is looked up with [ipwho.is](https://ipwho.is).
+- **Close Roblox when leaving a game**: Roblox closes when you leave a game, instead of going back to the Roblox home screen. Being disconnected does not close it.
+
+Roseblox reads these events from Roblox's log output in `~/.local/state/roseblox/logs/player.log`. Problems are written to `~/.local/state/roseblox/logs/activity.log`.
 
 ### Notification center
 
@@ -219,4 +232,6 @@ To update after a new release, run `git pull` in `~/RoseBlox`, then `makepkg -si
 | Roblox stopped starting after you changed Performance settings | Open **Performance → Backups** and **Restore…** the backup from before the change, or click **Reset to Defaults…**. |
 | "GameMode was not started" | Install GameMode (`sudo pacman -S gamemode`) and log out and back in. The app still runs, only without GameMode. |
 | The MangoHud overlay does not appear | Check that **Performance → Diagnostics** says the MangoHud layer is installed, and that the overlay is not hidden in `~/.config/MangoHud/MangoHud.conf` (MangoHud's toggle key is Right Shift + F12). With Rosemary's AppImage, also add `ROSEMARY_GLIBC` = `host` under **Performance → Environment → Rosemary**. |
+| Discord does not show the game | Make sure the Discord desktop app is running (Roseblox tries again every 30 seconds while you are in a game), and that sharing your detected activities is on in Discord's **Activity Privacy** settings. The browser version of Discord cannot show Rich Presence. See `~/.local/state/roseblox/logs/activity.log`. |
+| No server location notification | Make sure notifications for "Roseblox" are allowed in your desktop's settings. If ipwho.is cannot be reached, the reason is in `~/.local/state/roseblox/logs/activity.log`. |
 | Clicking **Update** in a notification does nothing | See `~/.local/state/roseblox/logs/roseblox.log` for the window it opened. |
