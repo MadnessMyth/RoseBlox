@@ -28,7 +28,7 @@ makepkg -si
 
 To update, run `git checkout -- packaging/arch-git/PKGBUILD && git pull` in the checkout (makepkg records the built version in the PKGBUILD), then `makepkg -si` in `packaging/arch-git` again.
 
-The repository also includes a pinned release PKGBUILD at `packaging/arch/PKGBUILD`, which builds the `v0.1.0` tag; that tag predates first-run setup and the Roblox link fixes. Both packages provide `roseblox` and conflict with each other.
+To stay on tagged releases instead, use the pinned release PKGBUILD at `packaging/arch/PKGBUILD`, which builds the latest release tag; update it with `git pull` and `makepkg -si` in `packaging/arch`. Both packages provide `roseblox` and conflict with each other.
 
 Run `makepkg` as a regular user; it will request system package installation through pacman as needed. Each recipe installs Roseblox into the system Python package path, its MIT license under `/usr/share/licenses/<package name>/`, a scalable application icon, and the `roseblox` command and desktop menu entry. **The AUR package has not been published yet.**
 
@@ -52,4 +52,4 @@ Version source settings are stored separately in `$XDG_CONFIG_HOME/roseblox/vers
 
 Library records are loaded and bundle-validated in a shared background snapshot. The Library, Player, Studio, and Home views reuse that snapshot instead of each repeating the read and validation work. Recoverable download state is likewise scanned once during startup and shared with the Player and Studio pages.
 
-See [the v0.1.0 release checklist and draft notes](packaging/RELEASE.md) before preparing a public release. [Flatpak and AppImage distribution constraints](packaging/DISTRIBUTION.md) are documented for future evaluation; neither format is currently provided.
+See [the release checklist and notes](packaging/RELEASE.md) before preparing a public release. [Flatpak and AppImage distribution constraints](packaging/DISTRIBUTION.md) are documented for future evaluation; neither format is currently provided.

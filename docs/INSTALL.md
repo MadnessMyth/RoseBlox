@@ -85,7 +85,7 @@ Or as one line:
 cd ~/RoseBlox && git checkout -- packaging/arch-git/PKGBUILD && git pull && cd packaging/arch-git && makepkg -si
 ```
 
-`makepkg` writes the version it built into `PKGBUILD`, so the `git checkout` line discards that edit before `git pull`; otherwise the pull can refuse to run. `git pull` updates the packaging recipe, and `makepkg` fetches and builds the latest `master`. Your settings, installations and link choice are kept. `pacman -Q roseblox-git` shows the new version, for example `0.1.0.r14.g1a2b3c4-1`, where the last part is the commit it was built from.
+`makepkg` writes the version it built into `PKGBUILD`, so the `git checkout` line discards that edit before `git pull`; otherwise the pull can refuse to run. `git pull` updates the packaging recipe, and `makepkg` fetches and builds the latest `master`. Your settings, installations and link choice are kept. `pacman -Q roseblox-git` shows the new version, for example `0.2.0.r3.g1a2b3c4-1`, where the last part is the commit it was built from.
 
 ### Rosemary
 
@@ -101,13 +101,24 @@ Click **Check Again** under Rosemary in Settings if Roseblox is already open.
 
 In Roseblox, open the **Player** or **Studio** page. Click **Refresh Version** to see the latest Roblox version, then click **Download and Install Latest**. To make the new version the default on Home, click **Set as preferred** on its row. Older versions stay installed until you click **Remove**.
 
+## Tagged releases instead of `master`
+
+If you only want tagged releases such as `v0.2.0`, build the `roseblox` package from `packaging/arch` in step 5 instead:
+
+```sh
+cd ~/RoseBlox/packaging/arch
+makepkg -si
+```
+
+To update after a new release, run `git pull` in `~/RoseBlox`, then `makepkg -si` in `packaging/arch` again. This recipe does not modify itself, so no `git checkout` step is needed. To switch between `roseblox` and `roseblox-git`, build the other one; pacman offers to replace the installed package.
+
 ## Uninstall
 
 1. In **Settings → Roblox Links**, turn off **Open Roblox links with Roseblox**. This restores the previous link handler.
 2. Remove the package:
 
    ```sh
-   sudo pacman -R roseblox-git
+   sudo pacman -R roseblox-git    # or: sudo pacman -R roseblox
    ```
 
 3. Optional: delete downloaded Roblox apps and settings:

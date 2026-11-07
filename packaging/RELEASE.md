@@ -1,17 +1,46 @@
-# Roseblox v0.1.0 release preparation
+# Roseblox release preparation
 
-## Release checklist
+## Release checklist — v0.2.0
 
-- [x] Add the project owner's chosen MIT License (`MadnessMyth`, 2026) and package it under `/usr/share/licenses/roseblox/`.
-- [ ] Review the release notes and README installation instructions.
-- [ ] Run the full unittest suite, Python compilation, and `git diff --check`.
-- [ ] Build `packaging/arch/PKGBUILD` with `makepkg`; inspect its contents with `bsdtar -tf` and, where available, `namcap`.
-- [ ] Manually launch the installed package from a desktop menu and verify Player and Studio through an existing Rosemary installation.
-- [ ] Create the `v0.1.0` source tag referenced by the PKGBUILD and regenerate `.SRCINFO` after any recipe changes.
-- [ ] Create the `v0.1.0` Git tag and GitHub release manually after review.
-- [ ] Publish the AUR recipe manually after the tagged source is available and release metadata is complete.
+- [x] Bump the version in `pyproject.toml`, `src/roseblox/__init__.py`, and `packaging/arch-git/PKGBUILD`.
+- [x] Review the release notes and the installation guide in `docs/INSTALL.md`.
+- [x] Run the full unittest suite, Python compilation, and `git diff --check`.
+- [ ] Create the annotated `v0.2.0` Git tag on the release commit.
+- [ ] Point `packaging/arch/PKGBUILD` at the `v0.2.0` tag, record the archive checksum, and regenerate `.SRCINFO` with `makepkg --printsrcinfo`. The checksum is committed after the tag because the tagged archive cannot contain its own checksum.
+- [ ] Build `packaging/arch/PKGBUILD` and `packaging/arch-git/PKGBUILD` with `makepkg` on Arch Linux and install each package.
+- [ ] Create the GitHub release for `v0.2.0` from these notes.
+- [ ] Manually launch the installed package from a desktop menu and verify Player and Studio through Rosemary on hardware with a Vulkan driver.
+- [ ] Publish the AUR recipe manually after the release metadata is complete.
 
-No Git tag, GitHub release, AUR submission, or system package installation is performed by this project preparation.
+## Release notes — v0.2.0
+
+### New
+
+- First-time setup opens on first launch with three steps: Rosemary, Roblox links, and Player and Studio. Each step shows whether it is required, optional, installing, or ready, and setup can be reopened from Settings.
+- **Install Rosemary** opens a terminal that runs `paru` or `yay` with `-S --needed rosemary sdl3 vulkan-icd-loader`, then `rosemary prefix create`. Roseblox detects the new installation automatically. An existing Rosemary executable or AppImage can be chosen instead.
+- Roblox link handling (`roblox`, `roblox-player`, `roblox-studio`, `roblox-studio-auth`) can be turned on or off in Settings and during setup, with a Repair action. Turning it off restores the previous handler.
+- Player and Studio can be installed directly from setup, with progress and Cancel.
+- Settings has a single Rosemary section for status, installation, the executable, and Ctrl + left-click compatibility.
+- Home shows a banner with a shortcut to setup when Rosemary is missing.
+- The `roseblox-git` recipe in `packaging/arch-git/` builds the latest `master`, and `docs/INSTALL.md` covers installing, updating, and uninstalling.
+
+### Fixed
+
+- Roblox links opened only the main window: command-line arguments were not passed to the application, so `--roblox-url` was ignored.
+- Launching through a Rosemary release build (AppImage or extracted tree) was reported as failed because those builds re-execute through the ELF loader.
+- Ctrl + left-click support was not detected in Rosemary launcher builds.
+- A startup error could leave every page on "Loading registered installations…".
+- A Roblox link received while the library was still loading was dropped.
+- Turning off link handling failed when no other application had handled Roblox links before.
+- Invalid command-line arguments caused an exception instead of a usage message.
+- Lists and dialogs rendered with light colors on light desktop themes.
+
+### Requirements and limitations
+
+- Automatic Rosemary installation needs an Arch-based system with `paru` or `yay` and a terminal emulator. On other systems, install Rosemary from its documentation and choose the executable in Settings.
+- Roblox needs a Vulkan driver for the GPU, such as `vulkan-radeon`, `vulkan-intel`, or `nvidia-utils`.
+- Archive extraction uses the system `bsdtar` command from `libarchive`.
+- Roseblox is licensed under the MIT License; see `LICENSE` in the source repository.
 
 ## Release notes — v0.1.0
 
