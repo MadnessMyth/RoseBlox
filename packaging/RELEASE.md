@@ -2,10 +2,10 @@
 
 ## Release checklist — v0.2.3
 
-- [ ] Bump the version in `pyproject.toml`, `src/roseblox/__init__.py`, and `packaging/arch-git/PKGBUILD`.
-- [ ] Run the full unittest suite, Python compilation, and `git diff --check`.
-- [ ] Check every Appearance choice, the notification center, and a real download on Arch Linux.
-- [ ] Create the annotated `v0.2.3` Git tag on the release commit.
+- [x] Bump the version in `pyproject.toml`, `src/roseblox/__init__.py`, and `packaging/arch-git/PKGBUILD`.
+- [x] Run the full unittest suite, Python compilation, and `git diff --check`.
+- [x] Check every Appearance choice, the notification center, and a real download on Arch Linux.
+- [x] Create the annotated `v0.2.3` Git tag on the release commit.
 - [ ] Point `packaging/arch/PKGBUILD` at the `v0.2.3` tag, record the archive checksum, and regenerate `.SRCINFO`.
 - [ ] Build `packaging/arch/PKGBUILD` with `makepkg` on Arch Linux and install it.
 - [ ] Create the GitHub release for `v0.2.3` from these notes.
