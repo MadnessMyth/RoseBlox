@@ -1,5 +1,28 @@
 # Roseblox release preparation
 
+## Release checklist — v0.2.2
+
+- [x] Bump the version in `pyproject.toml`, `src/roseblox/__init__.py`, and `packaging/arch-git/PKGBUILD`.
+- [x] Run the full unittest suite, Python compilation, and `git diff --check`.
+- [x] Test close-after-launch and the update checker with the installed `roseblox-git` package on Arch Linux, against a desktop notification server.
+- [ ] Create the annotated `v0.2.2` Git tag on the release commit.
+- [ ] Point `packaging/arch/PKGBUILD` at the `v0.2.2` tag, record the archive checksum, and regenerate `.SRCINFO`.
+- [ ] Build `packaging/arch/PKGBUILD` with `makepkg` on Arch Linux and install it.
+- [ ] Create the GitHub release for `v0.2.2` from these notes.
+
+## Release notes — v0.2.2
+
+### New
+
+- **Settings → After Launching** has separate **Close after opening Roblox Player** and **Close after opening Roblox Studio** switches, each with **Only when opened from a link**. Roseblox closes five seconds after the app starts, and stays open if the app exits in that time or a download is running. Roblox keeps running after Roseblox closes.
+- **Roblox update notifications** (Settings → Updates, and the new optional step 4 of setup). A background checker starts when you log in, checks one minute later and every three hours, and notifies you about new Player and Studio versions. **Update** installs the new version with progress and makes it the preferred installation; **Skip This Version** stays quiet until the next version. Settings also has **Check Now** and **Ask Again** for skipped versions.
+- Rosemary's output is saved to `~/.local/state/roseblox/logs/player.log` and `studio.log`, keeping the previous run as `.log.1`.
+
+### Fixed
+
+- After installing a new Roblox version, Home kept launching the first installation unless you had set a preferred one. Updating from a notification now makes the new version preferred.
+- The **Open Roblox links with Roseblox** switches showed a grey track after being turned on.
+
 ## Release checklist — v0.2.1
 
 - [x] Bump the version in `pyproject.toml`, `src/roseblox/__init__.py`, and `packaging/arch-git/PKGBUILD`.

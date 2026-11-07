@@ -1,7 +1,7 @@
 # Maintainer: Roseblox contributors
 pkgname=roseblox-git
 _pkgname=roseblox
-pkgver=0.2.1
+pkgver=0.2.2
 pkgrel=1
 pkgdesc='Native GTK launcher and installation manager for Roblox through Rosemary (latest master)'
 arch=('any')
