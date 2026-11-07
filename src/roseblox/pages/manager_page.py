@@ -22,6 +22,7 @@ from ..backend.library import (
     InstallationRecord,
     LibraryDataError,
 )
+from ..backend.launch_config import LaunchConfigStore
 from ..backend.preferences import PreferencesError
 from ..backend.rosemary_install import RosemaryInstallState
 from ..backend.setup import ACCENT_CHOICES, COLOR_STYLES, COLOR_THEMES, Appearance, ClosePreference, SetupSettingsError
@@ -1047,6 +1048,7 @@ class InstallationPage(Gtk.Box):
                 self.rosemary_status,
                 guest_arguments=guest_arguments,
                 plain_ctrl_click=getattr(setup_state, "plain_ctrl_click", True),
+                launch_config=LaunchConfigStore().load(record.app_type),
             )
             wait_for_running(session)
         except Exception as error:

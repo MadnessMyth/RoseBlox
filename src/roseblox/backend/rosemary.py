@@ -15,6 +15,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
 
+from .fast_flags import FastFlagError, write_bundle_flags
+from .launch_config import AppLaunchConfig, effective_environment
 from .library import InstallationRecord, validate_bundle
 
 
@@ -333,6 +335,11 @@ def default_log_directory() -> Path:
     return state_home / "roseblox" / "logs"
 
 
+def default_flag_backup_directory() -> Path:
+    config_home = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
+    return config_home / "roseblox" / "backups"
+
+
 def _read_log_tail(path: Path) -> str:
     try:
         with path.open("rb") as stream:
@@ -364,11 +371,14 @@ def launch_application(
     guest_arguments: tuple[str, ...] | list[str] = (),
     log_directory: Path | None = None,
     plain_ctrl_click: bool = True,
+    launch_config: AppLaunchConfig | None = None,
+    flag_backup_directory: Path | None = None,
 ) -> LaunchSession:
     """Start Rosemary asynchronously and return a bundle-bound process session.
 
     Rosemary writes to a log file in its own session rather than to pipes, so Roblox
-    keeps running (and logging) after Roseblox exits.
+    keeps running (and logging) after Roseblox exits. With ``launch_config`` the
+    bundle's FastFlags are written first, and its environment and arguments apply.
     """
     app_type = installation.app_type if isinstance(installation, InstallationRecord) else str(installation["app_type"])
     bundle_path = installation.bundle_path if isinstance(installation, InstallationRecord) else str(installation["bundle_path"])
@@ -386,6 +396,17 @@ def launch_application(
     else:
         # Turned off in Settings means Rosemary's default, even if the variable is set globally.
         environment.pop(PLAIN_CTRL_CLICK_VARIABLE, None)
+    if launch_config is not None:
+        environment = effective_environment(launch_config, environment)
+        guest_arguments = (*guest_arguments, *launch_config.arguments)
+        try:
+            write_bundle_flags(
+                bundle_path,
+                launch_config.fast_flags,
+                flag_backup_directory or default_flag_backup_directory(),
+            )
+        except FastFlagError as error:
+            raise RosemaryUnavailableError(f"Could not apply FastFlags: {error}") from error
     arguments = build_launch_arguments(status.executable, bundle_path, guest_arguments)
     try:
         log_path, log_stream = _open_launch_log(log_directory or default_log_directory(), app_type)
