@@ -1,0 +1,26 @@
+pkgbase = roseblox-git
+	pkgdesc = Native GTK launcher and installation manager for Roblox through Rosemary (latest master)
+	pkgver = 0.4.1
+	pkgrel = 1
+	url = https://github.com/MadnessMyth/RoseBlox
+	arch = any
+	license = MIT
+	makedepends = git
+	makedepends = python-build
+	makedepends = python-installer
+	makedepends = python-setuptools
+	makedepends = python-wheel
+	depends = gtk4
+	depends = libadwaita
+	depends = python
+	depends = python-gobject
+	depends = xdg-utils
+	optdepends = libarchive: required for importing or extracting Roblox ZIP archives (bsdtar)
+	optdepends = gamemode: Performance → GameMode
+	optdepends = mangohud: Performance → MangoHud overlay
+	provides = roseblox
+	conflicts = roseblox
+	source = RoseBlox::git+https://github.com/MadnessMyth/RoseBlox.git#branch=master
+	sha256sums = SKIP
+
+pkgname = roseblox-git
