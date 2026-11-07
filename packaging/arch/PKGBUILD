@@ -1,6 +1,6 @@
 # Maintainer: Roseblox contributors
 pkgname=roseblox
-pkgver=0.4.0
+pkgver=0.4.1
 pkgrel=1
 pkgdesc='Native GTK launcher and installation manager for Roblox through Rosemary'
 arch=('any')
@@ -20,7 +20,7 @@ source=(
   'io.github.roseblox.Roseblox.svg'
 )
 sha256sums=(
-  '01064dd00001cd3307f7aa7ec5740806d42fc3e9c4ef94031ccfffd2d54071f0'
+  'ca38a19d92ab2443d063aa76a385b62a14f774fa477694ca713b522723ef75c2'
   'cd9e1e127ca6ccb21056d185527be2ca2bbf45ebe44540020ca8438ea579045d'
   'd95259e28df1478d01c8555180e83dc2d8064b8fc95110a03104152d3278a863'
 )
