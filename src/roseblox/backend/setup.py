@@ -56,6 +56,30 @@ class Appearance:
 
 
 @dataclass(frozen=True)
+class WhilePlaying:
+    """Roblox Player activity features; all off until the user turns them on."""
+
+    discord_presence: bool = False
+    discord_join_button: bool = True
+    discord_application_id: str = ""
+    server_location: bool = False
+    close_on_leave: bool = False
+
+    @property
+    def any_enabled(self) -> bool:
+        return self.discord_presence or self.server_location or self.close_on_leave
+
+    def validate(self) -> "WhilePlaying":
+        for value in (self.discord_presence, self.discord_join_button, self.server_location, self.close_on_leave):
+            if not isinstance(value, bool):
+                raise ValueError("While Playing switches must be on or off.")
+        application_id = self.discord_application_id
+        if not isinstance(application_id, str) or (application_id and not application_id.isdigit()) or len(application_id) > 22:
+            raise ValueError("The Discord application ID must be a number.")
+        return self
+
+
+@dataclass(frozen=True)
 class SetupState:
     onboarding_completed: bool = False
     url_handlers_enabled: bool = False
@@ -66,6 +90,7 @@ class SetupState:
     appearance: Appearance = field(default_factory=Appearance)
     plain_ctrl_click: bool = True
     expanded_sections: dict[str, bool] = field(default_factory=dict)
+    while_playing: WhilePlaying = field(default_factory=WhilePlaying)
 
     def close_preference(self, app_type: str) -> ClosePreference:
         return self.close_after_launch.get(app_type, ClosePreference())
@@ -112,6 +137,7 @@ class SetupStore:
             appearance=self._appearance(document.get("appearance", {})),
             plain_ctrl_click=self._boolean(document, "plain_ctrl_click", True),
             expanded_sections=self._expanded_sections(document.get("expanded_sections", {})),
+            while_playing=self._while_playing(document.get("while_playing", {})),
         )
 
     def complete_onboarding(self) -> SetupState:
@@ -180,6 +206,16 @@ class SetupStore:
             raise ValueError("The Ctrl + left-click setting must be on or off.")
         return self._update(plain_ctrl_click=enabled)
 
+    def save_while_playing(self, settings: WhilePlaying) -> SetupState:
+        settings.validate()
+        return self._update(while_playing={
+            "discord_presence": settings.discord_presence,
+            "discord_join_button": settings.discord_join_button,
+            "discord_application_id": settings.discord_application_id,
+            "server_location": settings.server_location,
+            "close_on_leave": settings.close_on_leave,
+        })
+
     def save_section_expanded(self, section: str, expanded: bool) -> SetupState:
         if not isinstance(section, str) or not section or not isinstance(expanded, bool):
             raise ValueError("Invalid Settings section state.")
@@ -203,6 +239,23 @@ class SetupStore:
                 value.get("style", defaults.style),
                 value.get("accent", defaults.accent),
             ).validate()
+        except ValueError as error:
+            raise invalid from error
+
+    @staticmethod
+    def _while_playing(value: object) -> WhilePlaying:
+        invalid = SetupSettingsError("Saved While Playing settings are invalid; the file was not changed.")
+        if not isinstance(value, dict):
+            raise invalid
+        defaults = WhilePlaying()
+        try:
+            return WhilePlaying(**{
+                name: value.get(name, getattr(defaults, name))
+                for name in (
+                    "discord_presence", "discord_join_button", "discord_application_id",
+                    "server_location", "close_on_leave",
+                )
+            }).validate()
         except ValueError as error:
             raise invalid from error
 

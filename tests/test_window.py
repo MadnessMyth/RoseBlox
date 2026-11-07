@@ -5,6 +5,7 @@ import threading
 import time
 import unittest
 import uuid
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -322,13 +323,60 @@ class RealWindowTests(unittest.TestCase):
         self.assertTrue(player_link.get_active())
         self.assertTrue(studio_row.get_enable_expansion())
 
+    def test_while_playing_switches_save_and_discord_needs_an_application_id(self):
+        from roseblox.backend.setup import SetupStore, WhilePlaying
+
+        window = self._loaded_window()
+        settings = window.settings_page
+        discord_row, discord = settings._playing_rows["discord_presence"]
+        _join_row, join = settings._playing_rows["discord_join_button"]
+        _location_row, location = settings._playing_rows["server_location"]
+        self.assertFalse(discord.get_sensitive())
+        self.assertIn("application ID", discord_row.get_subtitle())
+        self.assertFalse(join.get_sensitive())
+
+        location.set_active(True)
+        settings.discord_id_row.set_text("not a number")
+        settings.discord_id_row.emit("apply")
+        self.assertTrue(settings.playing_message.get_visible())
+        settings.discord_id_row.set_text("123456789012345678")
+        settings.discord_id_row.emit("apply")
+        self.assertTrue(discord.get_sensitive())
+        discord.set_active(True)
+        self.assertTrue(join.get_sensitive())
+        state = SetupStore(self.config_home / "roseblox" / "setup.json").load()
+        self.assertEqual(
+            WhilePlaying(discord_presence=True, discord_application_id="123456789012345678", server_location=True),
+            state.while_playing,
+        )
+        self.assertIn("ipwho.is", settings._playing_rows["server_location"][0].get_subtitle())
+
+    def test_the_activity_watcher_starts_only_when_a_while_playing_feature_is_on(self):
+        from unittest import mock
+
+        from roseblox.backend.setup import WhilePlaying
+
+        window = self._loaded_window()
+        page = window.pages["player"]
+        session = SimpleNamespace(process=SimpleNamespace(pid=4242), start_time=777, log_path=Path("/tmp/player.log"))
+        with mock.patch("roseblox.pages.manager_page._spawn_detached") as spawn, mock.patch(
+            "roseblox.pages.manager_page.GLib.child_watch_add"
+        ):
+            page._start_activity_watcher(session)
+            spawn.assert_not_called()
+            window.setup_state = replace(window.setup_state, while_playing=WhilePlaying(close_on_leave=True))
+            spawn.return_value = SimpleNamespace(pid=5000)
+            page._start_activity_watcher(session)
+        arguments = spawn.call_args.args[0]
+        self.assertEqual(["--activity-watch", "4242", "777", "/tmp/player.log"], arguments[3:])
+
     def test_settings_are_grouped_into_sections_that_remember_their_state(self):
         from roseblox.backend.setup import SetupStore
 
         window = self._loaded_window()
         settings = window.settings_page
         self.assertEqual(
-            ["appearance", "rosemary", "launching", "links", "updates", "advanced"], list(settings._sections)
+            ["appearance", "rosemary", "launching", "playing", "links", "updates", "advanced"], list(settings._sections)
         )
         advanced = settings._sections["advanced"]
         self.assertFalse(advanced.expanded)

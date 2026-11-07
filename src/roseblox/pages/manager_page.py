@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import subprocess
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import gi
@@ -25,8 +25,19 @@ from ..backend.library import (
 from ..backend.launch_config import LaunchConfigStore
 from ..backend.preferences import PreferencesError
 from ..backend.rosemary_install import RosemaryInstallState
-from ..backend.setup import ACCENT_CHOICES, COLOR_STYLES, COLOR_THEMES, Appearance, ClosePreference, SetupSettingsError
-from ..backend.updates import APP_TITLES, NotificationLog, UpdateCheckerError
+from ..backend.discord_rpc import effective_application_id, valid_application_id
+from ..backend.setup import (
+    ACCENT_CHOICES,
+    COLOR_STYLES,
+    COLOR_THEMES,
+    Appearance,
+    ClosePreference,
+    SetupSettingsError,
+    WhilePlaying,
+)
+from ..backend.game_info import LOCATION_SERVICE
+from ..backend.updates import APP_TITLES, NotificationLog, UpdateCheckerError, _spawn_detached
+from ..activity_service import watcher_arguments
 from .sections import CollapsibleSection
 from .update_checks import UpdateCheckRow
 from ..theme import ACCENT_NAMES, system_accent_available
@@ -34,6 +45,7 @@ from ..backend.rosemary import (
     LaunchSession,
     ProcessIdentityError,
     RosemaryStatus,
+    default_log_directory,
     launch_application,
     stop_application,
     wait_for_running,
@@ -1084,10 +1096,30 @@ class InstallationPage(Gtk.Box):
             args=(installation_id, session),
             daemon=True,
         ).start()
+        if app_type == "player":
+            self._start_activity_watcher(session)
         started = getattr(self.window, "application_started", None)
         if started is not None and app_type is not None:
             started(app_type, session, from_link)
         return GLib.SOURCE_REMOVE
+
+    def _start_activity_watcher(self, session: LaunchSession) -> None:
+        settings = getattr(getattr(self.window, "setup_state", None), "while_playing", None)
+        if settings is None or not settings.any_enabled:
+            return
+        if session.log_path is None or session.start_time is None:
+            return
+        try:
+            process = _spawn_detached(
+                watcher_arguments(session.process.pid, session.start_time, session.log_path),
+                default_log_directory() / "activity.log",
+            )
+        except OSError as error:
+            center = getattr(self.window, "notification_center", None)
+            if center is not None:
+                center.notify("player", f"While Playing features did not start: {error}", "failed")
+            return
+        GLib.child_watch_add(GLib.PRIORITY_DEFAULT, process.pid, lambda *_: None)
 
     def _launch_failed(self, installation_id: str, message: str) -> bool:
         self._launching_ids.discard(installation_id)
@@ -1399,6 +1431,42 @@ class SettingsPage(Gtk.Box):
             self._close_rows[app_type] = (expander, link_switch)
         launching.add(close_group)
 
+        playing = self._section(
+            "playing",
+            "While Playing",
+            "For Roblox Player. Turn these on before starting it; they apply to the games you join.",
+        )
+        playing_group = Adw.PreferencesGroup.new()
+        self._playing_block = False
+        self._playing_rows: dict[str, tuple[Adw.ActionRow, Gtk.Switch]] = {}
+        for field_name, title in (
+            ("discord_presence", "Discord Rich Presence"),
+            ("discord_join_button", "Join Server button"),
+            ("server_location", "Server location notification"),
+            ("close_on_leave", "Close Roblox when leaving a game"),
+        ):
+            row = Adw.ActionRow.new()
+            row.set_title(title)
+            switch = Gtk.Switch()
+            switch.set_valign(Gtk.Align.CENTER)
+            switch.connect("notify::active", self._playing_changed)
+            row.add_suffix(switch)
+            row.set_activatable_widget(switch)
+            playing_group.add(row)
+            self._playing_rows[field_name] = (row, switch)
+        self.discord_id_row = Adw.EntryRow.new()
+        self.discord_id_row.set_title("Discord application ID")
+        self.discord_id_row.set_show_apply_button(True)
+        self.discord_id_row.set_input_purpose(Gtk.InputPurpose.DIGITS)
+        self.discord_id_row.connect("apply", self._discord_id_applied)
+        playing_group.add(self.discord_id_row)
+        self.playing_message = Gtk.Label(xalign=0, wrap=True)
+        self.playing_message.add_css_class("dim-label")
+        self.playing_message.set_visible(False)
+        playing.add(playing_group)
+        playing.add(self.playing_message)
+        self._show_while_playing(WhilePlaying())
+
         links = self._section(
             "links",
             "Roblox Links",
@@ -1630,6 +1698,7 @@ class SettingsPage(Gtk.Box):
             self._show_appearance(setup_state.appearance)
             self._describe_input()
             self._show_close_preferences(setup_state)
+            self._show_while_playing(setup_state.while_playing)
             self._show_skipped_versions(setup_state.skipped_versions)
         enabled = bool(setup_state and setup_state.url_handlers_enabled)
         self._url_switch_block = True
@@ -1764,6 +1833,68 @@ class SettingsPage(Gtk.Box):
         else:
             subtitle = "Closes after every launch."
         expander.set_subtitle(subtitle)
+
+    def _show_while_playing(self, settings: WhilePlaying) -> None:
+        self._playing_block = True
+        try:
+            for field_name, (_row, switch) in self._playing_rows.items():
+                switch.set_active(getattr(settings, field_name))
+            if self.discord_id_row.get_text() != settings.discord_application_id:
+                self.discord_id_row.set_text(settings.discord_application_id)
+        finally:
+            self._playing_block = False
+        has_id = valid_application_id(effective_application_id(settings.discord_application_id))
+        discord_row, discord_switch = self._playing_rows["discord_presence"]
+        discord_switch.set_sensitive(has_id or settings.discord_presence)
+        discord_row.set_subtitle(
+            "Shows the game you are in on your Discord profile, with a View Game button. "
+            "The Discord app must be running."
+            if has_id
+            else "Enter a Discord application ID below first."
+        )
+        join_row, join_switch = self._playing_rows["discord_join_button"]
+        join_switch.set_sensitive(settings.discord_presence)
+        join_row.set_subtitle("Lets your friends join your server from Discord. Never shown for private servers.")
+        self._playing_rows["server_location"][0].set_subtitle(
+            f"Says where the server is when you join one. The server's address, not yours, is looked up with "
+            f"{LOCATION_SERVICE}."
+        )
+        self._playing_rows["close_on_leave"][0].set_subtitle(
+            "Closes Roblox when you leave a game, instead of going back to the Roblox home screen."
+        )
+
+    def _current_while_playing(self) -> WhilePlaying:
+        return getattr(getattr(self.window, "setup_state", None), "while_playing", None) or WhilePlaying()
+
+    def _save_while_playing(self, settings: WhilePlaying) -> None:
+        if self.setup_store is None:
+            return
+        try:
+            state = self.setup_store.save_while_playing(settings)
+        except (SetupSettingsError, ValueError) as error:
+            self.playing_message.set_text(f"Not saved: {str(error)[:300]}")
+            self.playing_message.set_visible(True)
+            self._show_while_playing(self._current_while_playing())
+            return
+        self.window.setup_state = state
+        self.playing_message.set_visible(False)
+        self._show_while_playing(state.while_playing)
+
+    def _playing_changed(self, _switch, _pspec) -> None:
+        if self._playing_block:
+            return
+        values = {field_name: switch.get_active() for field_name, (_row, switch) in self._playing_rows.items()}
+        self._save_while_playing(replace(self._current_while_playing(), **values))
+
+    def _discord_id_applied(self, row) -> None:
+        text = row.get_text().strip()
+        if text and not valid_application_id(text):
+            self.playing_message.set_text(
+                "A Discord application ID is the long number under General Information in the Discord Developer Portal."
+            )
+            self.playing_message.set_visible(True)
+            return
+        self._save_while_playing(replace(self._current_while_playing(), discord_application_id=text))
 
     def _close_preference_changed(self, _widget, _pspec, app_type: str) -> None:
         if self._close_block or self.setup_store is None:

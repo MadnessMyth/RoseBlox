@@ -1,0 +1,143 @@
+"""Game joins and leaves, read from the Roblox Player's log output.
+
+Rosemary writes Roblox's log lines to the launch log Roseblox keeps (see
+``rosemary.default_log_directory``). The markers below are the ones Roblox has
+printed for years and that Bloxstrap's activity watcher also relies on.
+"""
+
+from __future__ import annotations
+
+import ipaddress
+import re
+from dataclasses import dataclass
+from pathlib import Path
+
+_JOIN = re.compile(
+    r"! Joining game '(?P<job>[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})'"
+    r" place (?P<place>\d{1,20}) at (?P<address>[0-9A-Fa-f.:]+)"
+)
+_SERVER_ADDRESS = re.compile(
+    r"(?:UDMUX Address = |Connected to server at |serverId: |Replicator created for player )"
+    r"(?P<address>[0-9A-Fa-f.:]+?)(?:[|,: ]|$)"
+)
+_PRIVATE_REFERRALS = ("RequestPrivateGame", "GameDetailPageJSHybridEvent")
+_MAX_LINE = 16 * 1024
+_MAX_READ = 4 * 1024 * 1024
+
+
+@dataclass(frozen=True)
+class GameJoined:
+    place_id: int
+    job_id: str
+    server_address: str | None
+    private: bool
+
+    @property
+    def game_url(self) -> str:
+        return f"https://www.roblox.com/games/{self.place_id}"
+
+    @property
+    def join_url(self) -> str | None:
+        """Roblox's own web link that opens this server; private servers cannot be joined this way."""
+        if self.private:
+            return None
+        return f"https://www.roblox.com/games/start?placeId={self.place_id}&gameInstanceId={self.job_id}"
+
+
+@dataclass(frozen=True)
+class GameLeft:
+    """``to_home`` is True when the player went back to the home screen rather than being disconnected."""
+
+    to_home: bool
+
+
+def public_address(text: str) -> str | None:
+    try:
+        address = ipaddress.ip_address(text)
+    except ValueError:
+        return None
+    if address.is_private or address.is_loopback or address.is_link_local or address.is_unspecified:
+        return None
+    if address.is_multicast or address.is_reserved:
+        return None
+    return str(address)
+
+
+class ActivityTracker:
+    """Turns log lines into ``GameJoined`` and ``GameLeft`` events.
+
+    A join is reported once the connection is up ("Replicator created:"), so the
+    public server address and whether the server is private are known by then.
+    """
+
+    def __init__(self) -> None:
+        self._pending: dict | None = None
+        self.in_game = False
+
+    def feed(self, line: str) -> list[GameJoined | GameLeft]:
+        if "! Joining game '" in line:
+            match = _JOIN.search(line)
+            if match:
+                self._pending = {
+                    "place_id": int(match["place"]),
+                    "job_id": match["job"].lower(),
+                    "server_address": public_address(match["address"]),
+                    "private": False,
+                }
+            return []
+        if "referral_page:" in line and any(marker in line for marker in _PRIVATE_REFERRALS):
+            if self._pending is not None:
+                self._pending["private"] = True
+            return []
+        if "Replicator created:" in line:
+            if self._pending is None:
+                return []
+            joined = GameJoined(**self._pending)
+            self._pending = None
+            self.in_game = True
+            return [joined]
+        match = _SERVER_ADDRESS.search(line)
+        if match:
+            address = public_address(match["address"])
+            if address and self._pending is not None:
+                self._pending["server_address"] = address
+            return []
+        if "returnToLuaApp: (stage:UGCGame)" in line:
+            return self._left(to_home=True)
+        if "Time to disconnect replication data:" in line or "leaveUGCGameInternal" in line:
+            return self._left(to_home=False)
+        return []
+
+    def _left(self, *, to_home: bool) -> list[GameLeft]:
+        self._pending = None
+        if not self.in_game and not to_home:
+            return []
+        self.in_game = False
+        return [GameLeft(to_home)]
+
+
+class LogFollower:
+    """Reads lines appended to a log file, tolerating truncation and invalid bytes."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = Path(path)
+        self.offset = 0
+        self._partial = b""
+
+    def read_lines(self) -> list[str]:
+        try:
+            with self.path.open("rb") as stream:
+                size = stream.seek(0, 2)
+                if size < self.offset:
+                    self.offset = 0
+                    self._partial = b""
+                stream.seek(self.offset)
+                data = stream.read(_MAX_READ)
+        except OSError:
+            return []
+        self.offset += len(data)
+        data = self._partial + data
+        *complete, self._partial = data.split(b"\n")
+        if len(self._partial) > _MAX_LINE:
+            self._partial = b""
+        return [line[:_MAX_LINE].decode("utf-8", errors="replace").rstrip("\r") for line in complete]
