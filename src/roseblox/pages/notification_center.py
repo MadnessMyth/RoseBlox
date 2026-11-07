@@ -48,9 +48,11 @@ class NotificationCenter(Gtk.MenuButton):
 
         icon_overlay = Gtk.Overlay()
         bell = Gtk.Image.new_from_icon_name("preferences-system-notifications-symbolic")
-        bell.set_margin_top(7)
-        bell.set_margin_end(11)
-        bell.set_margin_start(3)
+        # Equal side margins keep the bell centered in the button; the badge sits in the corner.
+        bell.set_margin_start(9)
+        bell.set_margin_end(9)
+        bell.set_margin_top(5)
+        bell.set_margin_bottom(5)
         icon_overlay.set_child(bell)
         self.badge = Gtk.Label()
         self.badge.add_css_class("notification-badge")
@@ -86,6 +88,8 @@ class NotificationCenter(Gtk.MenuButton):
         self.empty_label = Gtk.Label(label="Nothing right now. Downloads and Roblox updates show up here.")
         self.empty_label.add_css_class("dim-label")
         self.empty_label.set_wrap(True)
+        self.empty_label.set_justify(Gtk.Justification.CENTER)
+        self.empty_label.set_halign(Gtk.Align.CENTER)
         self.empty_label.set_max_width_chars(40)
         self.empty_label.set_margin_top(12)
         self.empty_label.set_margin_bottom(12)
