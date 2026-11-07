@@ -29,6 +29,8 @@ from .pages import PAGE_DEFINITIONS, create_page
 
 # Building the AUR package compiles Rosemary from source, which can take a long time.
 _ROSEMARY_INSTALL_WAIT_SECONDS = 2 * 60 * 60
+# Gives Rosemary time to fail visibly before the launcher closes behind Roblox.
+CLOSE_AFTER_LAUNCH_DELAY_SECONDS = 5
 
 
 def _scrolled_content(widget: Gtk.Widget) -> Gtk.Widget:
@@ -515,6 +517,27 @@ class RosebloxWindow(Adw.ApplicationWindow):
         self.onboarding_page.apply_rosemary_install_state(state)
         if self.settings_page is not None:
             self.settings_page.apply_rosemary_install_state(state)
+
+    def operation_in_progress(self) -> bool:
+        """Whether closing the window now would interrupt work the user started."""
+        return self.rosemary_install.waiting or any(
+            getattr(page, "operation_busy", False) for page in self.pages.values()
+        )
+
+    def application_started(self, app_type: str, session, from_link: bool) -> None:
+        try:
+            preference = self.setup_store.load().close_preference(app_type)
+        except SetupSettingsError:
+            return
+        if preference.applies(from_link):
+            GLib.timeout_add(
+                int(CLOSE_AFTER_LAUNCH_DELAY_SECONDS * 1000), self._close_after_launch, session
+            )
+
+    def _close_after_launch(self, session) -> bool:
+        if session.process.poll() is None and not self.operation_in_progress():
+            self.close()
+        return GLib.SOURCE_REMOVE
 
     def _show_window_error(self, title: str, message: str) -> None:
         dialog = Adw.MessageDialog.new(self, title, message[:1000])

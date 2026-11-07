@@ -247,6 +247,78 @@ class RealWindowTests(unittest.TestCase):
         player_id = next(record["id"] for record in records if record["app_type"] == "player")
         self.assertEqual([(player_id, "roblox://placeId=1")], launched)
 
+    def test_close_after_launch_follows_each_application_preference(self):
+        from roseblox.backend.setup import ClosePreference, SetupStore
+
+        store = SetupStore(self.config_home / "roseblox" / "setup.json")
+        store.save_close_after_launch("player", ClosePreference(True, only_from_link=True))
+        store.save_close_after_launch("studio", ClosePreference(True, only_from_link=False))
+        window = self._loaded_window()
+        window.close = Mock()
+        running = SimpleNamespace(process=SimpleNamespace(poll=lambda: None))
+        exited = SimpleNamespace(process=SimpleNamespace(poll=lambda: 1))
+
+        def closes(app_type, session, from_link):
+            window.close.reset_mock()
+            window.application_started(app_type, session, from_link)
+            self._wait_until(lambda: window.close.called, timeout=0.3)
+            return window.close.called
+
+        with patch("roseblox.window.CLOSE_AFTER_LAUNCH_DELAY_SECONDS", 0):
+            self.assertFalse(closes("player", running, from_link=False))
+            self.assertTrue(closes("player", running, from_link=True))
+            self.assertTrue(closes("studio", running, from_link=False))
+            self.assertFalse(closes("studio", exited, from_link=False))
+            window.pages["player"]._busy = True
+            self.assertFalse(closes("studio", running, from_link=True))
+            window.pages["player"]._busy = False
+            store.save_close_after_launch("studio", ClosePreference(False, False))
+            self.assertFalse(closes("studio", running, from_link=True))
+
+    def test_settings_switches_save_close_preferences_separately(self):
+        from roseblox.backend.setup import ClosePreference, SetupStore
+
+        window = self._loaded_window()
+        settings = window.settings_page
+        player_row, player_link = settings._close_rows["player"]
+        studio_row, _studio_link = settings._close_rows["studio"]
+        self.assertFalse(player_row.get_enable_expansion())
+        self.assertEqual("Roseblox stays open.", player_row.get_subtitle())
+
+        player_row.set_enable_expansion(True)
+        player_link.set_active(True)
+        studio_row.set_enable_expansion(True)
+        state = SetupStore(self.config_home / "roseblox" / "setup.json").load()
+        self.assertEqual(ClosePreference(True, True), state.close_preference("player"))
+        self.assertEqual(ClosePreference(True, False), state.close_preference("studio"))
+        self.assertEqual("Closes after opening a Roblox link.", player_row.get_subtitle())
+        self.assertEqual("Closes after every launch.", studio_row.get_subtitle())
+
+        # A later status refresh must not flip the switches back.
+        window._apply_rosemary_status(window.rosemary_status)
+        self.assertTrue(player_link.get_active())
+        self.assertTrue(studio_row.get_enable_expansion())
+
+    def test_launches_report_whether_they_came_from_a_link(self):
+        records = _write_library(self.data_home)
+        window = self._loaded_window()
+        page = window.pages["player"]
+        record = next(item for item in window.library_records if item.app_type == "player")
+        session = SimpleNamespace(process=SimpleNamespace(poll=lambda: None))
+        for guest_arguments, from_link in (((), False), (("roblox://placeId=1",), True)):
+            with self.subTest(from_link=from_link), patch(
+                "roseblox.pages.manager_page.launch_application", return_value=session
+            ) as launch, patch("roseblox.pages.manager_page.wait_for_running"), patch(
+                "roseblox.pages.manager_page.threading.Thread"
+            ), patch.object(window, "application_started") as started:
+                page._launching_ids.add(record.id)
+                page._launch_worker(record.id, record, guest_arguments)
+                self.assertTrue(self._wait_until(lambda: started.called))
+                started.assert_called_once_with("player", session, from_link)
+                self.assertEqual(guest_arguments, launch.call_args.kwargs["guest_arguments"])
+                page._sessions.pop(record.id)
+        self.assertTrue(records)
+
 
 class EntryPointTests(unittest.TestCase):
     def test_links_are_accepted_bare_or_after_the_option(self):

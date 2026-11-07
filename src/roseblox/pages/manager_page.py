@@ -24,6 +24,7 @@ from ..backend.library import (
 )
 from ..backend.preferences import PreferencesError
 from ..backend.rosemary_install import RosemaryInstallState
+from ..backend.setup import ClosePreference, SetupSettingsError
 from ..backend.rosemary import (
     LaunchSession,
     ProcessIdentityError,
@@ -721,6 +722,10 @@ class InstallationPage(Gtk.Box):
         """Start the same current-version installation flow used by this page."""
         self._on_download_clicked(self.download_button)
 
+    @property
+    def operation_busy(self) -> bool:
+        return self._busy
+
     def add_operation_listener(self, callback) -> None:
         """Call ``callback(app_type, OperationState)`` whenever an install operation changes."""
         self._operation_listeners.append(callback)
@@ -1015,9 +1020,17 @@ class InstallationPage(Gtk.Box):
         except Exception as error:
             GLib.idle_add(self._launch_failed, installation_id, str(error))
             return
-        GLib.idle_add(self._launch_ready, installation_id, session)
+        GLib.idle_add(
+            self._launch_ready, installation_id, session, record.app_type, bool(guest_arguments)
+        )
 
-    def _launch_ready(self, installation_id: str, session: LaunchSession) -> bool:
+    def _launch_ready(
+        self,
+        installation_id: str,
+        session: LaunchSession,
+        app_type: str | None = None,
+        from_link: bool = False,
+    ) -> bool:
         self._launching_ids.discard(installation_id)
         if session.process.poll() is not None:
             self._refresh_all(reload_library=False)
@@ -1033,6 +1046,9 @@ class InstallationPage(Gtk.Box):
             args=(installation_id, session),
             daemon=True,
         ).start()
+        started = getattr(self.window, "application_started", None)
+        if started is not None and app_type is not None:
+            started(app_type, session, from_link)
         return GLib.SOURCE_REMOVE
 
     def _launch_failed(self, installation_id: str, message: str) -> bool:
@@ -1320,6 +1336,36 @@ class SettingsPage(Gtk.Box):
         self._url_message: str | None = None
         self._render_rosemary()
 
+        close_group = Adw.PreferencesGroup.new()
+        close_group.set_title("After Launching")
+        close_group.set_description(
+            "Close Roseblox once Roblox has started so the launcher is not left open. "
+            "Roblox keeps running; open Roseblox again any time."
+        )
+        self._close_rows: dict[str, tuple[Adw.ExpanderRow, Gtk.Switch]] = {}
+        self._close_block = False
+        for app_type, title in (("player", "Roblox Player"), ("studio", "Roblox Studio")):
+            expander = Adw.ExpanderRow.new()
+            expander.set_title(f"Close after opening {title}")
+            expander.set_show_enable_switch(True)
+            expander.set_enable_expansion(False)
+            expander.set_expanded(False)
+            link_switch = Gtk.Switch()
+            link_switch.set_valign(Gtk.Align.CENTER)
+            link_row = Adw.ActionRow.new()
+            link_row.set_title("Only when opened from a link")
+            link_row.set_subtitle(
+                "Stay open when you start it from Roseblox; close only for links from a website."
+            )
+            link_row.add_suffix(link_switch)
+            link_row.set_activatable_widget(link_switch)
+            expander.add_row(link_row)
+            expander.connect("notify::enable-expansion", self._close_preference_changed, app_type)
+            link_switch.connect("notify::active", self._close_preference_changed, app_type)
+            close_group.add(expander)
+            self._close_rows[app_type] = (expander, link_switch)
+        self.append(close_group)
+
         settings = {app: default_version_source(app) for app in ("player", "studio")}
         self._source_widgets = {}
         for app_type, title in (("player", "Roblox Player"), ("studio", "Roblox Studio")):
@@ -1373,6 +1419,8 @@ class SettingsPage(Gtk.Box):
         threading.Thread(target=self._load_sources_worker, daemon=True).start()
 
     def apply_setup_snapshot(self, rosemary_status, setup_state, setup_error, handler_status) -> None:
+        if setup_state is not None:
+            self._show_close_preferences(setup_state)
         enabled = bool(setup_state and setup_state.url_handlers_enabled)
         self._url_switch_block = True
         self.url_switch.set_active(enabled)
@@ -1453,6 +1501,52 @@ class SettingsPage(Gtk.Box):
             message = "Available once Rosemary is detected."
         self.rosemary_input_row.set_subtitle(message)
         return GLib.SOURCE_REMOVE
+
+    def _show_close_preferences(self, setup_state) -> None:
+        self._close_block = True
+        try:
+            for app_type, (expander, link_switch) in self._close_rows.items():
+                preference = setup_state.close_preference(app_type)
+                expander.set_enable_expansion(preference.enabled)
+                link_switch.set_active(preference.only_from_link)
+                self._describe_close_preference(app_type, preference)
+        finally:
+            self._close_block = False
+
+    def _describe_close_preference(self, app_type: str, preference: ClosePreference, error: str | None = None) -> None:
+        expander, _link_switch = self._close_rows[app_type]
+        if error:
+            subtitle = error
+        elif not preference.enabled:
+            subtitle = "Roseblox stays open."
+        elif preference.only_from_link:
+            subtitle = "Closes after opening a Roblox link."
+        else:
+            subtitle = "Closes after every launch."
+        expander.set_subtitle(subtitle)
+
+    def _close_preference_changed(self, _widget, _pspec, app_type: str) -> None:
+        if self._close_block or self.setup_store is None:
+            return
+        expander, link_switch = self._close_rows[app_type]
+        preference = ClosePreference(expander.get_enable_expansion(), link_switch.get_active())
+        try:
+            state = self.setup_store.save_close_after_launch(app_type, preference)
+        except SetupSettingsError as error:
+            try:
+                saved = self.setup_store.load().close_preference(app_type)
+            except SetupSettingsError:
+                saved = ClosePreference()
+            self._close_block = True
+            expander.set_enable_expansion(saved.enabled)
+            link_switch.set_active(saved.only_from_link)
+            self._close_block = False
+            self._describe_close_preference(app_type, saved, f"Not saved: {str(error)[:300]}")
+            return
+        self.window.setup_state = state
+        if preference.enabled:
+            expander.set_expanded(True)
+        self._describe_close_preference(app_type, state.close_preference(app_type))
 
     def _url_switch_changed(self, switch, active) -> bool:
         if getattr(self, "_url_switch_block", False):
