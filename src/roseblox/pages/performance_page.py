@@ -34,6 +34,7 @@ from ..backend.flag_catalog import (
 )
 from ..backend import gamemode
 from ..backend.gpu import list_gpus
+from ..backend.rosemary import build_launch_arguments
 from ..backend.launch_config import (
     APP_TYPES,
     AppLaunchConfig,
@@ -599,7 +600,8 @@ class PerformancePage(Gtk.Box):
         status = getattr(self.window, "rosemary_status", None)
         rosemary = getattr(status, "executable", None) or "rosemary"
         bundle = self._bundle_path() or f"<{APP_TITLES[self.app_type]} bundle>"
-        command = [rosemary, bundle.rstrip("/") + "/", *(["<link, when opened from a link>"] if self.app_type == "player" else []), *arguments]
+        link = ["<link, when opened from a link>"] if self.app_type == "player" else []
+        command = build_launch_arguments(rosemary, bundle, [*link, *arguments])
         self.command_preview.set_text("Command:\n" + shlex.join(command))
 
     def _bundle_path(self) -> str | None:

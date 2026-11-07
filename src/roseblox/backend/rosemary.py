@@ -235,13 +235,17 @@ def build_launch_arguments(
     bundle_path: str | Path,
     guest_arguments: tuple[str, ...] | list[str] = (),
 ) -> list[str]:
-    """Build the Rosemary invocation without invoking a shell."""
+    """Build the Rosemary invocation without invoking a shell.
+
+    Rosemary reads its own flags (such as ``-n``) anywhere after the bundle, so
+    guest arguments always follow ``--`` and reach Roblox unchanged.
+    """
     absolute_bundle = os.path.abspath(os.fspath(bundle_path))
     if not absolute_bundle.endswith(os.sep):
         absolute_bundle += os.sep
     if any(not isinstance(argument, str) or "\0" in argument for argument in guest_arguments):
         raise ValueError("Rosemary arguments must be valid strings without NUL characters.")
-    return [rosemary_path, absolute_bundle, *guest_arguments]
+    return [rosemary_path, absolute_bundle, *(("--", *guest_arguments) if guest_arguments else ())]
 
 
 def validate_rosemary_executable(path: str | Path) -> str:

@@ -337,8 +337,11 @@ class URLHandlerTests(unittest.TestCase):
     def test_player_uri_is_passed_as_a_single_non_shell_launch_argument(self):
         uri = "roblox-player:1+launchmode:play+placeId:123"
         arguments = build_launch_arguments("/usr/bin/rosemary", "/tmp/RobloxPlayer.app", (uri,))
-        self.assertEqual("/tmp/RobloxPlayer.app/", arguments[1])
-        self.assertEqual(uri, arguments[2])
+        self.assertEqual(["/usr/bin/rosemary", "/tmp/RobloxPlayer.app/", "--", uri], arguments)
+
+    def test_guest_arguments_spelled_like_rosemary_flags_still_reach_roblox(self):
+        arguments = build_launch_arguments("/usr/bin/rosemary", "/tmp/RobloxStudio.app", ("-n", "--native"))
+        self.assertEqual(["/usr/bin/rosemary", "/tmp/RobloxStudio.app/", "--", "-n", "--native"], arguments)
 
     def test_rejects_unsupported_or_malformed_urls(self):
         for uri in ("https://roblox.com/", "file:///tmp/a", "roblox", "roblox-player:\nhello", "roblox-studio: bad"):
