@@ -45,6 +45,17 @@ from ..backend.launch_config import (
     validate_environment_name,
     validate_environment_value,
 )
+from ..backend.presets import (
+    CUSTOM,
+    GRASS_FLAGS,
+    MSAA_FLAG,
+    PRESETS,
+    QUALITY_FLAG,
+    TEXTURE_ENABLED_FLAG,
+    TEXTURE_LEVEL_FLAG,
+    matching_preset,
+    preset,
+)
 from .sections import CollapsibleSection
 
 APP_TITLES = {"player": "Roblox Player", "studio": "Roblox Studio"}
@@ -59,11 +70,7 @@ COMMON_REFRESH_RATES = (60, 75, 90, 120, 144, 165, 240, 360)
 MSAA_CHOICES = ((None, "Roblox default"), ("1", "Off"), ("2", "2×"), ("4", "4×"), ("8", "8×"))
 TEXTURE_CHOICES = ((None, "Roblox default"), ("0", "Lowest"), ("1", "Low"), ("2", "Medium"), ("3", "High"))
 QUALITY_CHOICES = ((None, "Automatic"), *((str(level), f"Level {level}") for level in range(1, 22)))
-MSAA_FLAG = "FIntDebugForceMSAASamples"
-TEXTURE_ENABLED_FLAG = "DFFlagTextureQualityOverrideEnabled"
-TEXTURE_LEVEL_FLAG = "DFIntTextureQualityOverride"
-QUALITY_FLAG = "DFIntDebugFRMQualityLevelOverride"
-GRASS_FLAGS = ("FIntFRMMinGrassDistance", "FIntFRMMaxGrassDistance")
+PRESET_CHOICES = (*((candidate.id, candidate.title) for candidate in PRESETS), (CUSTOM, "Custom"))
 GRAY_SKY_FLAG = "FFlagDebugSkyGray"
 DPI_FLAG = "DFFlagDisableDPIScale"
 BACKUPS_SHOWN = 10
@@ -263,6 +270,14 @@ class PerformancePage(Gtk.Box):
         section = self._section(
             "graphics", "Graphics & frame pacing", "How Rosemary presents frames and what Roblox renders."
         )
+        presets = Adw.PreferencesGroup.new()
+        self.preset_row = Adw.ComboRow.new()
+        self.preset_row.set_title("Preset")
+        self.preset_row.set_model(Gtk.StringList.new([label for _value, label in PRESET_CHOICES]))
+        self.preset_row.connect("notify::selected", self._preset_changed)
+        presets.add(self.preset_row)
+        section.add(presets)
+
         group = Adw.PreferencesGroup.new()
         renderer = Adw.ActionRow.new()
         renderer.set_title("Renderer")
@@ -451,6 +466,14 @@ class PerformancePage(Gtk.Box):
         self._updating = True
         try:
             config = self.draft
+            current = matching_preset(config, gamemode_available=self.gamemode_available)
+            self.preset_row.set_selected([value for value, _label in PRESET_CHOICES].index(current))
+            self.preset_row.set_subtitle(
+                preset(current).description
+                + " Your other flags, variables and arguments are kept; review the changes before applying."
+                if current != CUSTOM
+                else "These settings match no preset. Choosing one changes only the settings it lists."
+            )
             self.presentation_row.set_selected(
                 [value for value, _label in PRESENTATION_CHOICES].index(config.presentation_mode)
             )
@@ -591,6 +614,15 @@ class PerformancePage(Gtk.Box):
         if not self._updating:
             value = PRESENTATION_CHOICES[row.get_selected()][0]
             self._set_draft(replace(self.draft, presentation_mode=value))
+
+    def _preset_changed(self, row, _pspec) -> None:
+        if self._updating:
+            return
+        chosen = PRESET_CHOICES[row.get_selected()][0]
+        if chosen == CUSTOM:
+            self._show_draft()
+            return
+        self._set_draft(preset(chosen).apply(self.draft, gamemode_available=self.gamemode_available))
 
     def _gpu_changed(self, row, _pspec) -> None:
         if not self._updating and row.get_selected() < len(self._gpu_values):

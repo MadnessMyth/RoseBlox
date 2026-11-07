@@ -182,6 +182,27 @@ class PerformancePageTests(unittest.TestCase):
         self.assertIn("GPU: chosen by Rosemary → NVIDIA RTX 4070 Ti", page.changes)
         self.assertIn("MESA_VK_DEVICE_SELECT=10de:2782", page.environment_preview.get_text())
 
+    def test_presets_change_the_draft_and_unlisted_settings_survive(self):
+        self.gamemode_available = True
+        page = self._page()
+        self.assertEqual("Balanced", page.preset_row.get_model().get_string(page.preset_row.get_selected()))
+        page._add_flag("FFlagDebugSkyGray", "True")
+        page._add_argument("-task")
+        page.preset_row.set_selected(1)
+        self.assertEqual(1, page.msaa_row.get_selected())
+        self.assertTrue(page.grass_row.switch.get_active())
+        self.assertTrue(page.gamemode_row.switch.get_active())
+        self.assertEqual("True", page.draft.fast_flags["FFlagDebugSkyGray"])
+        self.assertEqual(("-task",), page.draft.arguments)
+        page.msaa_row.set_selected(3)
+        self.assertEqual("Custom", page.preset_row.get_model().get_string(page.preset_row.get_selected()))
+        page.preset_row.set_selected(2)
+        self.assertEqual("fifo", page.draft.presentation_mode)
+        self.assertEqual("21", page.draft.fast_flags["DFIntDebugFRMQualityLevelOverride"])
+        self.assertFalse(page.draft.gamemode)
+        page.preset_row.set_selected(0)
+        self.assertEqual({"FFlagDebugSkyGray": "True"}, page.draft.fast_flags)
+
     def test_a_saved_gpu_that_is_gone_stays_visible(self):
         self.store.save("player", AppLaunchConfig(gpu="0000:03:00.0"), "Old card")
         page = self._page()
