@@ -140,7 +140,12 @@ class DiagnosticsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             executable = root / "rosemary"
-            executable.write_text("#!/bin/sh\necho 'rosemary 0.5.0'\necho 'commit: abc'\necho 'built: today'\n")
+            executable.write_text(
+                "#!/bin/sh\nif [ \"$1\" = prefix ]; then\n"
+                "echo \"prefix:   $ROSEMARY_PREFIX\"\necho 'guest /:  /x/root'\n"
+                "echo 'made by:  rosemary 0.5.0'\necho 'base:     macOS 15.5'\nexit 0\nfi\n"
+                "echo 'rosemary 0.5.0'\necho 'commit: abc'\necho 'built: today'\n"
+            )
             executable.chmod(0o755)
             env = {"HOME": directory, "ROSEMARY_PREFIX": str(root / "prefix"), "WAYLAND_DISPLAY": "wayland-0"}
             items = dict(
@@ -153,6 +158,9 @@ class DiagnosticsTests(unittest.TestCase):
             )
         self.assertEqual("rosemary 0.5.0, commit: abc", items["Rosemary"])
         self.assertIn("not created yet", items["Prefix"])
+        self.assertEqual("rosemary 0.5.0", items["Prefix made by"])
+        self.assertEqual("macOS 15.5", items["Prefix base"])
+        self.assertNotIn("Prefix guest /", items)
         self.assertEqual("NVIDIA RTX (nvidia, 0000:01:00.0)", items["GPUs"])
         self.assertEqual("Not available", items["GameMode"])
         self.assertEqual("Wayland", items["Session"])
@@ -163,6 +171,18 @@ class DiagnosticsTests(unittest.TestCase):
     def test_missing_rosemary_is_reported(self):
         self.assertEqual("Not found", diagnostics.rosemary_version(None))
         self.assertIn("Could not run", diagnostics.rosemary_version("/nonexistent/rosemary"))
+
+    def test_prefix_info_failures_and_a_disabled_prefix(self):
+        self.assertEqual([], diagnostics.prefix_info("/bin/true", {"ROSEMARY_PREFIX": "off"}))
+        self.assertEqual([], diagnostics.prefix_info(None, {"HOME": "/home/me"}))
+        with tempfile.TemporaryDirectory() as directory:
+            executable = Path(directory) / "rosemary"
+            executable.write_text("#!/bin/sh\necho 'rosemary: no prefix at /p' >&2\nexit 1\n")
+            executable.chmod(0o755)
+            self.assertEqual(
+                [("Prefix info", "rosemary: no prefix at /p")],
+                diagnostics.prefix_info(str(executable), {"ROSEMARY_PREFIX": "/p"}),
+            )
 
     def test_vulkan_drivers_come_from_icd_files(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -40,6 +40,36 @@ def rosemary_version(executable: str | None) -> str:
     return ", ".join(lines[:2]) if lines else f"{executable} printed no version"
 
 
+PREFIX_INFO_SHOWN_ELSEWHERE = {"prefix", "guest /"}
+
+
+def prefix_info(executable: str | None, env: Mapping[str, str]) -> list[tuple[str, str]]:
+    """What ``rosemary prefix info`` says about the prefix, minus the paths shown separately."""
+    if not executable or prefix_directory(env) is None:
+        return []
+    try:
+        result = subprocess.run(
+            [executable, "prefix", "info"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            stdin=subprocess.DEVNULL,
+            env=dict(env),
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        return [("Prefix info", f"Could not run rosemary prefix info: {error}")]
+    if result.returncode != 0:
+        message = (result.stderr or result.stdout).strip().splitlines()
+        return [("Prefix info", message[-1] if message else f"rosemary prefix info exited with {result.returncode}")]
+    items = []
+    for line in result.stdout.splitlines()[:20]:
+        key, separator, value = line.partition(":")
+        key = key.strip()
+        if separator and key and key not in PREFIX_INFO_SHOWN_ELSEWHERE:
+            items.append((f"Prefix {key}", value.strip()[:300]))
+    return items
+
+
 def vulkan_drivers(directories=VULKAN_ICD_DIRECTORIES) -> list[str]:
     names = set()
     for directory in directories:
@@ -114,6 +144,7 @@ def collect(
         ("Rosemary", rosemary_version(rosemary_executable)),
         ("Rosemary executable", rosemary_executable or "Not found"),
         ("Prefix", "Turned off" if prefix is None else f"{prefix}{'' if prefix.is_dir() else ' (not created yet)'}"),
+        *prefix_info(rosemary_executable, env),
         ("Roblox home", str(home) if home is not None else "None"),
         ("Shader cache", shader_text),
         ("Roblox frame rate cap", cap_text),
