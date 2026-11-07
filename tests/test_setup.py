@@ -15,7 +15,7 @@ from roseblox.backend.rosemary import (
     rosemary_supports_plain_ctrl_click,
     save_rosemary_executable,
 )
-from roseblox.backend.setup import SetupSettingsError, SetupStore
+from roseblox.backend.setup import ClosePreference, SetupSettingsError, SetupStore
 from roseblox.backend.url_handlers import (
     APP_DESKTOP_ID,
     DESKTOP_ID,
@@ -54,6 +54,91 @@ class SetupStoreTests(unittest.TestCase):
             with self.assertRaises(SetupSettingsError):
                 SetupStore(path).complete_onboarding()
             self.assertEqual("{broken", path.read_text(encoding="utf-8"))
+
+    def test_launch_and_update_preferences_default_off(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = SetupStore(Path(directory) / "setup.json").load()
+        for app_type in ("player", "studio"):
+            self.assertEqual(ClosePreference(), state.close_preference(app_type))
+        self.assertFalse(state.update_checks_enabled)
+        self.assertEqual({}, state.skipped_versions)
+
+    def test_close_preferences_are_separate_per_application(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = SetupStore(Path(directory) / "setup.json")
+            store.save_url_handlers(True, {"x-scheme-handler/roblox": "sober.desktop"})
+            store.save_close_after_launch("player", ClosePreference(True, True))
+            store.save_close_after_launch("studio", ClosePreference(True, False))
+            loaded = SetupStore(store.path).load()
+        self.assertEqual(ClosePreference(True, True), loaded.close_preference("player"))
+        self.assertEqual(ClosePreference(True, False), loaded.close_preference("studio"))
+        self.assertTrue(loaded.url_handlers_enabled)
+        with self.assertRaises(ValueError):
+            store.save_close_after_launch("roblox", ClosePreference(True))
+
+    def test_close_preference_respects_link_only_option(self):
+        self.assertFalse(ClosePreference(False, False).applies(from_link=True))
+        self.assertTrue(ClosePreference(True, False).applies(from_link=False))
+        self.assertTrue(ClosePreference(True, False).applies(from_link=True))
+        self.assertFalse(ClosePreference(True, True).applies(from_link=False))
+        self.assertTrue(ClosePreference(True, True).applies(from_link=True))
+
+    def test_update_checks_and_skipped_versions_persist(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = SetupStore(Path(directory) / "setup.json")
+            store.save_update_checks(True)
+            store.skip_version("player", "version-0123456789abcdef")
+            store.skip_version("player", "version-1111111111111111")
+            store.skip_version("studio", "version-2222222222222222")
+            loaded = SetupStore(store.path).load()
+            self.assertTrue(loaded.update_checks_enabled)
+            self.assertEqual(
+                {"player": "version-1111111111111111", "studio": "version-2222222222222222"},
+                loaded.skipped_versions,
+            )
+            self.assertEqual({}, store.clear_skipped_versions().skipped_versions)
+            self.assertTrue(store.load().update_checks_enabled)
+
+    def test_invalid_new_preferences_are_reported_without_overwriting(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "setup.json"
+            for document in (
+                {"version": 1, "close_after_launch": {"player": {"enabled": "yes"}}},
+                {"version": 1, "close_after_launch": {"phone": {"enabled": True}}},
+                {"version": 1, "update_checks_enabled": 1},
+                {"version": 1, "skipped_versions": {"player": 5}},
+            ):
+                with self.subTest(document=document):
+                    text = json.dumps(document)
+                    path.write_text(text, encoding="utf-8")
+                    with self.assertRaises(SetupSettingsError):
+                        SetupStore(path).load()
+                    self.assertEqual(text, path.read_text(encoding="utf-8"))
+
+    def test_writes_from_two_processes_do_not_lose_updates(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "setup.json"
+            script = (
+                "import sys\n"
+                "from roseblox.backend.setup import SetupStore\n"
+                "store = SetupStore(sys.argv[1])\n"
+                "for index in range(40):\n"
+                "    store.skip_version(sys.argv[2], f'version-{index:016x}')\n"
+            )
+            environment = {**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src")}
+            workers = [
+                subprocess.Popen(["python3", "-c", script, str(path), app_type], env=environment)
+                for app_type in ("player", "studio")
+            ]
+            store = SetupStore(path)
+            for _ in range(40):
+                store.save_update_checks(True)
+            self.assertEqual([0, 0], [worker.wait(timeout=60) for worker in workers])
+            state = store.load()
+        self.assertTrue(state.update_checks_enabled)
+        self.assertEqual(
+            {"player": f"version-{39:016x}", "studio": f"version-{39:016x}"}, state.skipped_versions
+        )
 
 
 class URLHandlerTests(unittest.TestCase):

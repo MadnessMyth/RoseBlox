@@ -1,13 +1,17 @@
-"""Persistent onboarding and URL-handler preferences."""
+"""Persistent onboarding, URL-handler, launch, and update preferences."""
 
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import json
 import os
 import tempfile
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+
+APP_TYPES = ("player", "studio")
 
 
 class SetupSettingsError(RuntimeError):
@@ -20,10 +24,27 @@ def default_setup_path() -> Path:
 
 
 @dataclass(frozen=True)
+class ClosePreference:
+    """Whether Roseblox closes itself once an application has started."""
+
+    enabled: bool = False
+    only_from_link: bool = False
+
+    def applies(self, from_link: bool) -> bool:
+        return self.enabled and (from_link or not self.only_from_link)
+
+
+@dataclass(frozen=True)
 class SetupState:
     onboarding_completed: bool = False
     url_handlers_enabled: bool = False
     previous_url_defaults: dict[str, str | None] | None = None
+    close_after_launch: dict[str, ClosePreference] = field(default_factory=dict)
+    update_checks_enabled: bool = False
+    skipped_versions: dict[str, str] = field(default_factory=dict)
+
+    def close_preference(self, app_type: str) -> ClosePreference:
+        return self.close_after_launch.get(app_type, ClosePreference())
 
 
 _LOCKS: dict[Path, threading.RLock] = {}
@@ -57,7 +78,14 @@ class SetupStore:
             for key, value in previous.items()
         ):
             raise SetupSettingsError("Saved URL-handler defaults are invalid; the file was not changed.")
-        return SetupState(completed, enabled, dict(previous))
+        return SetupState(
+            completed,
+            enabled,
+            dict(previous),
+            close_after_launch=self._close_preferences(document.get("close_after_launch", {})),
+            update_checks_enabled=self._boolean(document, "update_checks_enabled"),
+            skipped_versions=self._skipped_versions(document.get("skipped_versions", {})),
+        )
 
     def complete_onboarding(self) -> SetupState:
         return self._update(onboarding_completed=True)
@@ -74,13 +102,103 @@ class SetupStore:
             previous_url_defaults=dict(previous_defaults or {}),
         )
 
+    def save_close_after_launch(self, app_type: str, preference: ClosePreference) -> SetupState:
+        self._require_app_type(app_type)
+        if not isinstance(preference.enabled, bool) or not isinstance(preference.only_from_link, bool):
+            raise ValueError("Close-after-launch preferences must be enabled or disabled.")
+
+        def change(document: dict) -> None:
+            preferences = dict(document.get("close_after_launch") or {})
+            preferences[app_type] = {
+                "enabled": preference.enabled,
+                "only_from_link": preference.only_from_link,
+            }
+            document["close_after_launch"] = preferences
+
+        return self._modify(change)
+
+    def save_update_checks(self, enabled: bool) -> SetupState:
+        if not isinstance(enabled, bool):
+            raise ValueError("The update-check preference must be enabled or disabled.")
+        return self._update(update_checks_enabled=enabled)
+
+    def skip_version(self, app_type: str, version: str) -> SetupState:
+        self._require_app_type(app_type)
+        if not isinstance(version, str) or not version:
+            raise ValueError("A Roblox version is required.")
+
+        def change(document: dict) -> None:
+            skipped = dict(document.get("skipped_versions") or {})
+            skipped[app_type] = version
+            document["skipped_versions"] = skipped
+
+        return self._modify(change)
+
+    def clear_skipped_versions(self) -> SetupState:
+        return self._update(skipped_versions={})
+
+    @staticmethod
+    def _require_app_type(app_type: str) -> None:
+        if app_type not in APP_TYPES:
+            raise ValueError(f"Unknown Roblox application type: {app_type!r}")
+
+    @staticmethod
+    def _boolean(document: dict, key: str) -> bool:
+        value = document.get(key, False)
+        if not isinstance(value, bool):
+            raise SetupSettingsError("Roseblox setup settings have an invalid format; the file was not changed.")
+        return value
+
+    @staticmethod
+    def _close_preferences(value: object) -> dict[str, ClosePreference]:
+        invalid = SetupSettingsError("Saved close-after-launch settings are invalid; the file was not changed.")
+        if not isinstance(value, dict):
+            raise invalid
+        preferences = {}
+        for app_type, entry in value.items():
+            if app_type not in APP_TYPES or not isinstance(entry, dict):
+                raise invalid
+            enabled = entry.get("enabled", False)
+            only_from_link = entry.get("only_from_link", False)
+            if not isinstance(enabled, bool) or not isinstance(only_from_link, bool):
+                raise invalid
+            preferences[app_type] = ClosePreference(enabled, only_from_link)
+        return preferences
+
+    @staticmethod
+    def _skipped_versions(value: object) -> dict[str, str]:
+        if not isinstance(value, dict) or any(
+            key not in APP_TYPES or not isinstance(version, str) for key, version in value.items()
+        ):
+            raise SetupSettingsError("Saved skipped Roblox versions are invalid; the file was not changed.")
+        return dict(value)
+
     def _update(self, **updates: object) -> SetupState:
-        with self._lock:
+        return self._modify(lambda document: document.update(updates))
+
+    def _modify(self, change) -> SetupState:
+        # The update checker runs as a separate process and writes skipped versions,
+        # so read-modify-write cycles are serialized across processes too.
+        with self._lock, self._file_lock():
             document = self._read()
-            document.update(updates)
+            change(document)
             document["version"] = 1
             self._write(document)
         return self.load()
+
+    @contextlib.contextmanager
+    def _file_lock(self):
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            stream = open(self.path.with_name(self.path.name + ".lock"), "a")
+        except OSError as error:
+            raise SetupSettingsError(f"Could not lock Roseblox setup settings: {error}") from error
+        with stream:
+            fcntl.flock(stream, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(stream, fcntl.LOCK_UN)
 
     def _read(self) -> dict:
         try:
