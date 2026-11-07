@@ -40,9 +40,23 @@ On first launch, Roseblox opens a full-window setup with four steps, each marked
 
 **Updates** (in Settings, and step 4 of setup) turns on a small background checker, `roseblox --update-service`. It starts with your desktop session through `~/.config/autostart/io.github.roseblox.Roseblox.Updater.desktop`, checks the installed Player and Studio versions one minute after login and every three hours, and sends a desktop notification when a newer version is available. **Update** opens Roseblox, installs the latest version with progress, and makes it the preferred installation; **Skip This Version** stays quiet until a newer version comes out. An ignored notification is repeated after a day. **Check Now** asks for a notification right away, and **Ask Again** forgets skipped versions. Older versions stay installed until you remove them. Turning the switch off stops the checker and removes its login entry. Output from a window opened by a notification goes to `$XDG_STATE_HOME/roseblox/logs/roseblox.log`.
 
+**Settings** is split into sections that open and close with a click on their heading: Appearance, Rosemary, After Launching, Roblox Links, Updates, and Advanced. Advanced (the Rosemary executable path and the Player and Studio version sources) starts closed because wrong values there stop Roseblox from finding Rosemary or new Roblox versions. Roseblox remembers which sections you left open.
+
+**Appearance** has three choices. **Colors** picks Roseblox's own pink and purple tones or your desktop's standard window colors. **Style** picks Dark, Light, or Follow system. **Accent color** picks Roseblox pink, your desktop's accent color, or one of nine fixed colors (blue, teal, green, yellow, orange, red, pink, purple, slate). The desktop accent color needs libadwaita 1.6 or later and a desktop that shares its accent color with apps through the settings portal (for example GNOME 47 or later, or a recent KDE Plasma); otherwise blue is used, and Settings says so.
+
+The **notification center** is the bell at the top right of the window. A badge counts the items in it. It lists:
+
+- Downloads in progress, with progress, speed, time left, and Cancel.
+- Available Player and Studio updates, with **Update** and **Skip**, as in the desktop notification.
+- Recently finished or failed installs, with **Clear**.
+
+While **Notify me about Roblox updates** is on, it also checks for updates when Roseblox opens and every three hours while it stays open. **Check for Updates** in the center always works.
+
+Download bars show the percentage, the current speed, and the time left, for example `37% · 12.4 MiB/s · 1 min 20 s left`. Speed is averaged over the last five seconds, and a resumed download counts only newly received data.
+
 The setup choices are stored at `$XDG_CONFIG_HOME/roseblox/setup.json`. URL registrations are per-user XDG desktop data; disabling URL handling does not remove other applications' handlers or Roseblox itself.
 
-Roseblox passes `ROSEMARY_PLAIN_CTRL_CLICK=1` only to Player or Studio launches when the selected Rosemary executable contains the supported option marker. Supported Rosemary builds deliver Ctrl + left-click as a normal left-click. Other builds retain their default behavior; Roseblox does not alter global keyboard or desktop settings. The actual mouse behavior should be checked with the installed Rosemary build.
+**Ctrl + left-click compatibility** (Settings → Rosemary, on by default) passes `ROSEMARY_PLAIN_CTRL_CLICK=1` to Player and Studio launches, so supported Rosemary builds deliver Ctrl + left-click as a normal left-click. Turn it off to keep Rosemary's default behavior. The switch is greyed out when the selected Rosemary executable does not contain the supported option marker; such builds always keep their default behavior. Roseblox does not alter global keyboard or desktop settings.
 
 Player and Studio pages can register existing `RobloxPlayer.app` and `RobloxStudio.app` bundles, launch them through Rosemary, check the current Roblox versions, and download and install versioned archives. The Library page can import existing application bundles or ZIP archives, list managed and external registrations, and remove registrations. Managed bundles can be deleted only after explicit confirmation; external bundles are never deleted by Roseblox. Completed downloads remain in the managed archives directory after installation.
 

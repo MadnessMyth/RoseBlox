@@ -7,3 +7,5 @@
 - Preserve user-owned archives and external application bundles during import and library operations.
 - Rosemary must keep running when Roseblox exits: launch it in its own session with output to a log file, never through pipes Roseblox reads.
 - The update checker (`roseblox --update-service`) runs for the whole desktop session; keep it free of GTK imports.
+- Colors come from `roseblox/theme.py`, which prepends `@define-color` (and, on libadwaita 1.6+, CSS variable) definitions to `resources/style.css`. Use the `@rb_*` and libadwaita named colors in the stylesheet instead of hard-coded colors, so every Appearance choice keeps working.
+- Use icon names that current Adwaita still ships (for example `object-select-symbolic`, not `emblem-ok-symbolic`).

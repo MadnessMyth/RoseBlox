@@ -74,6 +74,35 @@ Open **Roseblox** from your application menu, or run `roseblox` in a terminal. T
 
 Click **Finish Setup**. You can reopen setup at any time from **Settings → First-time setup → Open Setup**.
 
+## Settings
+
+![Settings](screenshots/05-settings.png)
+
+Click a section heading in **Settings** to open or close it; Roseblox remembers your choice.
+
+- **Appearance**: **Colors** (Roseblox or System), **Style** (Dark, Light, or Follow system), and **Accent color** (Roseblox pink, your desktop's accent color, or a fixed color). Changes apply immediately.
+- **Rosemary**: Rosemary status, **Ctrl + left-click compatibility** (turn it off if you want Rosemary's default Ctrl + click behavior), and **First-time setup**.
+- **After Launching**: close Roseblox after Player or Studio starts. See [Closing Roseblox after launching](#closing-roseblox-after-launching).
+- **Roblox Links**: open `roblox://` links with Roseblox.
+- **Updates**: update notifications, **Check Now**, and skipped versions.
+- **Advanced** (closed by default): the Rosemary executable path and the Player and Studio version sources. You normally do not need to change these.
+
+![Light style with System colors and a teal accent](screenshots/12-system-colors-teal.png)
+
+### Notification center
+
+![Notification center](screenshots/10-notification-center.png)
+
+Click the bell at the top right. The badge counts the items in the center:
+
+- **Downloads**: what is downloading or installing, with progress, speed, time left, and **Cancel**. The arrow opens the Player or Studio page.
+- **Updates**: new Player and Studio versions, with **Update** and **Skip**, the same as the desktop notification.
+- **Recent**: installs that finished or failed. Use **Clear** to remove them.
+
+**Check for Updates** looks for new versions right away.
+
+![Download with speed and time left](screenshots/13-download-speed.png)
+
 ## Update
 
 ### Roseblox
@@ -111,12 +140,11 @@ With **Settings → Updates → Notify me about Roblox updates** on, Roseblox ch
 - **Update** opens Roseblox, downloads and installs the new version with a progress bar, and makes it the version that Home and Roblox links open.
 - **Skip This Version** hides that version; you are notified again when a newer one is released. **Settings → Updates → Ask Again** undoes skips.
 - If you ignore the notification, it comes back after a day. **Check Now** in Settings checks immediately.
+- The same updates are listed in the [notification center](#notification-center) while Roseblox is open.
 
 To update by hand, open the **Player** or **Studio** page, click **Refresh Version** to see the latest Roblox version, then click **Download and Install Latest**. To make the new version the default on Home, click **Set as preferred** on its row. Either way, older versions stay installed until you click **Remove**.
 
 ### Closing Roseblox after launching
-
-![After Launching and Updates in Settings](screenshots/09-settings-after-launching-and-updates.png)
 
 **Settings → After Launching** has a separate switch for Player and for Studio. With **Close after opening Roblox Player** on, Roseblox closes itself five seconds after Player starts; Roblox keeps running. Turn on **Only when opened from a link** to close only when you join a game from the website, and stay open when you press **Play** in Roseblox. Roseblox stays open if the app exits during those five seconds (so you can read the error) or while a download is running.
 
