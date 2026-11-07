@@ -1,6 +1,6 @@
 pkgbase = roseblox
 	pkgdesc = Native GTK launcher and installation manager for Roblox through Rosemary
-	pkgver = 0.2.1
+	pkgver = 0.2.2
 	pkgrel = 1
 	url = https://github.com/MadnessMyth/RoseBlox
 	arch = any
@@ -15,10 +15,10 @@ pkgbase = roseblox
 	depends = python-gobject
 	depends = xdg-utils
 	optdepends = libarchive: required for importing or extracting Roblox ZIP archives (bsdtar)
-	source = roseblox-0.2.1.tar.gz::https://github.com/MadnessMyth/RoseBlox/archive/refs/tags/v0.2.1.tar.gz
+	source = roseblox-0.2.2.tar.gz::https://github.com/MadnessMyth/RoseBlox/archive/refs/tags/v0.2.2.tar.gz
 	source = io.github.roseblox.Roseblox.desktop
 	source = io.github.roseblox.Roseblox.svg
-	sha256sums = e736e83e8d46d9feb48e597b8fd2c5390ca50a466144ae2377defb02c1679325
+	sha256sums = 9b0b4ef68d4bf3df3aab0dffc40fcc22c1d73bc1ce7c7aeea509e463cfd49626
 	sha256sums = cd9e1e127ca6ccb21056d185527be2ca2bbf45ebe44540020ca8438ea579045d
 	sha256sums = d95259e28df1478d01c8555180e83dc2d8064b8fc95110a03104152d3278a863
 
