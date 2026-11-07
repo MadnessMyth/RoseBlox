@@ -5,9 +5,9 @@
 - [x] Bump the version in `pyproject.toml`, `src/roseblox/__init__.py`, and `packaging/arch-git/PKGBUILD`.
 - [x] Review the release notes and the installation guide in `docs/INSTALL.md`.
 - [x] Run the full unittest suite, Python compilation, and `git diff --check`.
-- [ ] Create the annotated `v0.2.0` Git tag on the release commit.
-- [ ] Point `packaging/arch/PKGBUILD` at the `v0.2.0` tag, record the archive checksum, and regenerate `.SRCINFO` with `makepkg --printsrcinfo`. The checksum is committed after the tag because the tagged archive cannot contain its own checksum.
-- [ ] Build `packaging/arch/PKGBUILD` and `packaging/arch-git/PKGBUILD` with `makepkg` on Arch Linux and install each package.
+- [x] Create the annotated `v0.2.0` Git tag on the release commit.
+- [x] Point `packaging/arch/PKGBUILD` at the `v0.2.0` tag, record the archive checksum, and regenerate `.SRCINFO` with `makepkg --printsrcinfo`. The checksum is committed after the tag because the tagged archive cannot contain its own checksum.
+- [x] Build `packaging/arch/PKGBUILD` and `packaging/arch-git/PKGBUILD` with `makepkg` on Arch Linux and install each package.
 - [ ] Create the GitHub release for `v0.2.0` from these notes.
 - [ ] Manually launch the installed package from a desktop menu and verify Player and Studio through Rosemary on hardware with a Vulkan driver.
 - [ ] Publish the AUR recipe manually after the release metadata is complete.
