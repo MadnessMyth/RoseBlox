@@ -32,6 +32,8 @@ from ..backend.flag_catalog import (
     flag_info,
     load_cached_allowlist,
 )
+from ..backend import gamemode
+from ..backend.gpu import list_gpus
 from ..backend.launch_config import (
     APP_TYPES,
     AppLaunchConfig,
@@ -194,6 +196,9 @@ class PerformancePage(Gtk.Box):
         self.saving = False
         self.allowlist = Allowlist(BUILT_IN_ALLOWLIST, None)
         self.backups = []
+        self.gpus = []
+        self.gamemode_available = False
+        self._gpu_values: list[str | None] = []
         self._updating = False
 
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
@@ -261,11 +266,12 @@ class PerformancePage(Gtk.Box):
         group = Adw.PreferencesGroup.new()
         renderer = Adw.ActionRow.new()
         renderer.set_title("Renderer")
-        renderer.set_subtitle(
-            "Metal, translated to Vulkan by Rosemary. Roblox for macOS has no other renderer, "
-            "and Rosemary picks the GPU itself, preferring a dedicated one."
-        )
+        renderer.set_subtitle("Metal, translated to Vulkan by Rosemary. Roblox for macOS has no other renderer.")
         group.add(renderer)
+        self.gpu_row = Adw.ComboRow.new()
+        self.gpu_row.set_title("GPU")
+        self.gpu_row.connect("notify::selected", self._gpu_changed)
+        group.add(self.gpu_row)
         self.presentation_row = Adw.ComboRow.new()
         self.presentation_row.set_title("Presentation mode")
         self.presentation_row.set_subtitle("Rosemary uses FIFO when the GPU does not offer the chosen mode.")
@@ -278,6 +284,8 @@ class PerformancePage(Gtk.Box):
         self.refresh_row.connect("notify::selected", self._refresh_changed)
         self._refresh_values: list[int | None] = []
         group.add(self.refresh_row)
+        self.gamemode_row = self._switch_row("GameMode", self._gamemode_changed)
+        group.add(self.gamemode_row)
         section.add(group)
 
         quality = Adw.PreferencesGroup.new()
@@ -425,7 +433,7 @@ class PerformancePage(Gtk.Box):
 
     @property
     def changes(self) -> list[str]:
-        return describe_changes(self.saved[self.app_type], self.draft)
+        return describe_changes(self.saved[self.app_type], self.draft, {gpu.slot: gpu.name for gpu in self.gpus})
 
     def _set_draft(self, config: AppLaunchConfig) -> None:
         self.drafts[self.app_type] = config
@@ -456,6 +464,14 @@ class PerformancePage(Gtk.Box):
                     Gtk.StringList.new(["Display default", *(f"{rate} Hz" for rate in sorted(rates))])
                 )
             self.refresh_row.set_selected(self._refresh_values.index(config.refresh_rate))
+            self._show_gpu(config)
+            self.gamemode_row.switch.set_active(config.gamemode)
+            self.gamemode_row.switch.set_sensitive(self.gamemode_available or config.gamemode)
+            self.gamemode_row.set_subtitle(
+                "Asks Feral GameMode to tune the system while the application runs."
+                if self.gamemode_available
+                else "GameMode is not installed or its daemon cannot be reached."
+            )
             flags = config.fast_flags
             self._select(self.msaa_row, MSAA_CHOICES, flags.get(MSAA_FLAG))
             texture = flags.get(TEXTURE_LEVEL_FLAG) if flags.get(TEXTURE_ENABLED_FLAG) == "True" else None
@@ -470,6 +486,25 @@ class PerformancePage(Gtk.Box):
         self._show_environment()
         self._show_arguments()
         self._show_status()
+
+    def _show_gpu(self, config: AppLaunchConfig) -> None:
+        values: list[str | None] = [None, *(gpu.slot for gpu in self.gpus)]
+        labels = ["Chosen by Rosemary (prefers a dedicated GPU)", *(gpu.name for gpu in self.gpus)]
+        if config.gpu is not None and config.gpu not in values:
+            values.append(config.gpu)
+            labels.append(f"{config.gpu} (not found; Rosemary chooses)")
+        if values != self._gpu_values:
+            self._gpu_values = values
+            self.gpu_row.set_model(Gtk.StringList.new(labels))
+        self.gpu_row.set_selected(values.index(config.gpu))
+        choosable = len(self.gpus) > 1 or config.gpu is not None
+        self.gpu_row.set_sensitive(choosable)
+        if choosable:
+            self.gpu_row.set_subtitle("Pins one card through the Vulkan loader, for computers with several GPUs.")
+        elif self.gpus:
+            self.gpu_row.set_subtitle(f"Only one GPU was found: {self.gpus[0].name}.")
+        else:
+            self.gpu_row.set_subtitle("No GPU was found through /sys/class/drm.")
 
     @staticmethod
     def _select(row: Adw.ComboRow, choices, value: str | None) -> None:
@@ -526,7 +561,7 @@ class PerformancePage(Gtk.Box):
         self.guest_env_editor.show(
             [(name, name, value, False) for name, value in sorted(config.guest_environment.items())]
         )
-        changes = environment_changes(config, os.environ)
+        changes = environment_changes(config, os.environ, self.gpus)
         if changes:
             text = "Roseblox sets for this application:\n" + "\n".join(
                 f"{name}={value!r}" if "\n" in value else f"{name}={value}" for name, value in sorted(changes.items())
@@ -556,6 +591,14 @@ class PerformancePage(Gtk.Box):
         if not self._updating:
             value = PRESENTATION_CHOICES[row.get_selected()][0]
             self._set_draft(replace(self.draft, presentation_mode=value))
+
+    def _gpu_changed(self, row, _pspec) -> None:
+        if not self._updating and row.get_selected() < len(self._gpu_values):
+            self._set_draft(replace(self.draft, gpu=self._gpu_values[row.get_selected()]))
+
+    def _gamemode_changed(self, switch, _pspec) -> None:
+        if not self._updating:
+            self._set_draft(replace(self.draft, gamemode=switch.get_active()))
 
     def _refresh_changed(self, row, _pspec) -> None:
         if not self._updating and row.get_selected() < len(self._refresh_values):
@@ -768,19 +811,22 @@ class PerformancePage(Gtk.Box):
         self.reload()
         return GLib.SOURCE_REMOVE
 
-    def reload(self) -> None:
-        threading.Thread(target=self._load_worker, daemon=True).start()
+    def reload(self, *, detect: bool = False) -> None:
+        threading.Thread(target=self._load_worker, args=(detect or not self.loaded,), daemon=True).start()
 
-    def _load_worker(self) -> None:
+    def _load_worker(self, detect: bool) -> None:
         configs, error = {}, None
         try:
             for app_type in APP_TYPES:
                 configs[app_type] = self.store.load(app_type)
         except LaunchConfigError as failure:
             error = str(failure)
-        GLib.idle_add(self._loaded, configs, error, self.store.backups())
+        hardware = (list_gpus(), gamemode.available()) if detect else None
+        GLib.idle_add(self._loaded, configs, error, self.store.backups(), hardware)
 
-    def _loaded(self, configs: dict[str, AppLaunchConfig], error: str | None, backups) -> bool:
+    def _loaded(self, configs: dict[str, AppLaunchConfig], error: str | None, backups, hardware=None) -> bool:
+        if hardware is not None:
+            self.gpus, self.gamemode_available = hardware
         for app_type, config in configs.items():
             unchanged = self.drafts[app_type] == self.saved[app_type]
             self.saved[app_type] = config

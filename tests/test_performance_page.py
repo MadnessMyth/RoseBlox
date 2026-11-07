@@ -147,10 +147,47 @@ class PerformancePageTests(unittest.TestCase):
             library_records=[SimpleNamespace(id="player-1", bundle_path=str(self.bundle))],
         )
         self.fetches = []
+        self.gpus = []
+        self.gamemode_available = False
+        for target, replacement in (
+            ("roseblox.pages.performance_page.list_gpus", lambda: list(self.gpus)),
+            ("roseblox.pages.performance_page.gamemode.available", lambda: self.gamemode_available),
+        ):
+            patcher = patch(target, side_effect=replacement)
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def tearDown(self):
         self.environment.stop()
         self._directory.cleanup()
+
+    def test_gpu_choice_is_offered_only_with_several_cards(self):
+        from roseblox.backend.gpu import Gpu
+
+        self.gpus = [Gpu("0000:00:02.0", 0x8086, 0x4680, "i915", "Intel UHD", True)]
+        page = self._page()
+        self.assertFalse(page.gpu_row.get_sensitive())
+        self.assertIn("Only one GPU was found: Intel UHD", page.gpu_row.get_subtitle())
+        self.assertFalse(page.gamemode_row.switch.get_sensitive())
+
+        self.gpus.append(Gpu("0000:01:00.0", 0x10DE, 0x2782, "nvidia", "NVIDIA RTX 4070 Ti"))
+        self.gamemode_available = True
+        page.reload(detect=True)
+        self.assertTrue(self._wait_until(lambda: len(page.gpus) == 2))
+        self.assertTrue(page.gpu_row.get_sensitive())
+        page.gpu_row.set_selected(2)
+        page.gamemode_row.switch.set_active(True)
+        self.assertEqual("0000:01:00.0", page.draft.gpu)
+        self.assertTrue(page.draft.gamemode)
+        self.assertIn("GPU: chosen by Rosemary → NVIDIA RTX 4070 Ti", page.changes)
+        self.assertIn("MESA_VK_DEVICE_SELECT=10de:2782", page.environment_preview.get_text())
+
+    def test_a_saved_gpu_that_is_gone_stays_visible(self):
+        self.store.save("player", AppLaunchConfig(gpu="0000:03:00.0"), "Old card")
+        page = self._page()
+        self.assertTrue(page.gpu_row.get_sensitive())
+        self.assertEqual("0000:03:00.0", page._gpu_values[page.gpu_row.get_selected()])
+        self.assertNotIn("MESA_VK_DEVICE_SELECT", page.environment_preview.get_text())
 
     def _fetcher(self, *, force):
         self.fetches.append(force)

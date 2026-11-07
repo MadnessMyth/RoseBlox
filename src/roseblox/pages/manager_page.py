@@ -1075,6 +1075,10 @@ class InstallationPage(Gtk.Box):
             return GLib.SOURCE_REMOVE
         self._sessions[installation_id] = session
         self._refresh_all(reload_library=False)
+        center = getattr(self.window, "notification_center", None)
+        gamemode_error = getattr(session, "gamemode_error", None)
+        if gamemode_error and center is not None and app_type is not None:
+            center.notify(app_type, f"GameMode was not started: {gamemode_error}", "failed")
         threading.Thread(
             target=self._watch_worker,
             args=(installation_id, session),

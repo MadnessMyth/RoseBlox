@@ -20,6 +20,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from .fast_flags import FastFlagError, normalize_flags
+from .gpu import Gpu, find_gpu
 
 APP_TYPES = ("player", "studio")
 PRESENTATION_MODES = ("mailbox", "fifo", "fifo_relaxed", "immediate")
@@ -34,6 +35,7 @@ MAX_TEXT_LENGTH = 4096
 MAX_BACKUPS = 30
 
 _NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_PCI_SLOT = re.compile(r"^[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]$")
 _CREDENTIAL_NAME = re.compile(
     r"ROBLOSECURITY|TOKEN|PASSWORD|PASSWD|SECRET|COOKIE|CREDENTIAL|API_?KEY|SESSION", re.IGNORECASE
 )
@@ -121,6 +123,8 @@ class AppLaunchConfig:
     fast_flags: dict[str, str] = field(default_factory=dict)
     presentation_mode: str | None = None
     refresh_rate: int | None = None
+    gpu: str | None = None
+    gamemode: bool = False
 
     def problems(self) -> list[str]:
         found: list[str] = []
@@ -154,6 +158,10 @@ class AppLaunchConfig:
             or not MIN_REFRESH_RATE <= self.refresh_rate <= MAX_REFRESH_RATE
         ):
             found.append(f"Refresh rate must be between {MIN_REFRESH_RATE} and {MAX_REFRESH_RATE} Hz.")
+        if self.gpu is not None and (not isinstance(self.gpu, str) or not _PCI_SLOT.match(self.gpu)):
+            found.append("The GPU must be a PCI address such as 0000:01:00.0.")
+        if not isinstance(self.gamemode, bool):
+            found.append("The GameMode setting must be true or false.")
         return found
 
     def validated(self) -> "AppLaunchConfig":
@@ -180,6 +188,8 @@ class AppLaunchConfig:
             "fast_flags": dict(self.fast_flags),
             "presentation_mode": self.presentation_mode,
             "refresh_rate": self.refresh_rate,
+            "gpu": self.gpu,
+            "gamemode": self.gamemode,
         }
 
     @classmethod
@@ -194,12 +204,23 @@ class AppLaunchConfig:
             fast_flags=document.get("fast_flags", {}),
             presentation_mode=document.get("presentation_mode"),
             refresh_rate=document.get("refresh_rate"),
+            gpu=document.get("gpu"),
+            gamemode=document.get("gamemode", False),
         ).validated()
 
 
-def effective_environment(config: AppLaunchConfig, base: Mapping[str, str]) -> dict[str, str]:
-    """Return the environment Rosemary starts with for this configuration."""
+def effective_environment(
+    config: AppLaunchConfig, base: Mapping[str, str], gpus: list[Gpu] | tuple[Gpu, ...] = ()
+) -> dict[str, str]:
+    """Return the environment Rosemary starts with for this configuration.
+
+    A chosen GPU that is no longer installed is skipped, so the launch still uses
+    whichever card Rosemary picks.
+    """
     environment = dict(base)
+    gpu = find_gpu(config.gpu, list(gpus))
+    if gpu is not None:
+        environment.update(gpu.vulkan_environment())
     environment.update(config.rosemary_environment)
     if config.presentation_mode is not None:
         environment[PRESENTATION_MODE_VARIABLE] = config.presentation_mode
@@ -216,15 +237,20 @@ def effective_environment(config: AppLaunchConfig, base: Mapping[str, str]) -> d
     return environment
 
 
-def environment_changes(config: AppLaunchConfig, base: Mapping[str, str]) -> dict[str, str]:
+def environment_changes(
+    config: AppLaunchConfig, base: Mapping[str, str], gpus: list[Gpu] | tuple[Gpu, ...] = ()
+) -> dict[str, str]:
     """Return only the variables this configuration adds or changes."""
-    environment = effective_environment(config, base)
+    environment = effective_environment(config, base, gpus)
     return {name: value for name, value in environment.items() if base.get(name) != value}
 
 
-def describe_changes(old: AppLaunchConfig, new: AppLaunchConfig) -> list[str]:
+def describe_changes(
+    old: AppLaunchConfig, new: AppLaunchConfig, gpu_names: Mapping[str, str] | None = None
+) -> list[str]:
     """Return one readable line per difference, for review before saving."""
     lines: list[str] = []
+    gpu_names = gpu_names or {}
 
     def setting(label: str, before: object, after: object, unset: str) -> None:
         if before != after:
@@ -237,6 +263,8 @@ def describe_changes(old: AppLaunchConfig, new: AppLaunchConfig) -> list[str]:
         None if new.refresh_rate is None else f"{new.refresh_rate} Hz",
         "display default",
     )
+    setting("GPU", gpu_names.get(old.gpu, old.gpu), gpu_names.get(new.gpu, new.gpu), "chosen by Rosemary")
+    setting("GameMode", "on" if old.gamemode else "off", "on" if new.gamemode else "off", "off")
     for label, before, after in (
         ("FastFlag", old.fast_flags, new.fast_flags),
         ("Rosemary variable", old.rosemary_environment, new.rosemary_environment),

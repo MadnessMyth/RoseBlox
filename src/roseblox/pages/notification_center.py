@@ -171,6 +171,10 @@ class NotificationCenter(Gtk.MenuButton):
             return
         self._render()
 
+    def notify(self, app_type: str, message: str, outcome: str = "done") -> None:
+        self._add_recent(RecentEntry(app_type, message, outcome, time.time()))
+        self._render()
+
     def _add_recent(self, entry: RecentEntry) -> None:
         self.recent.insert(0, entry)
         del self.recent[RECENT_LIMIT:]

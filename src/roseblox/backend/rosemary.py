@@ -15,7 +15,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
 
+from . import gamemode
 from .fast_flags import FastFlagError, write_bundle_flags
+from .gpu import list_gpus
 from .launch_config import AppLaunchConfig, effective_environment
 from .library import InstallationRecord, validate_bundle
 
@@ -56,6 +58,7 @@ class LaunchSession:
     output_done: threading.Event | None = None
     plain_ctrl_click_active: bool = False
     log_path: Path | None = None
+    gamemode_error: str | None = None
 
     def output_text(self) -> str:
         """Rosemary's output so far: the end of its log file, or captured pipe output."""
@@ -397,7 +400,8 @@ def launch_application(
         # Turned off in Settings means Rosemary's default, even if the variable is set globally.
         environment.pop(PLAIN_CTRL_CLICK_VARIABLE, None)
     if launch_config is not None:
-        environment = effective_environment(launch_config, environment)
+        gpus = list_gpus() if launch_config.gpu else []
+        environment = effective_environment(launch_config, environment, gpus)
         guest_arguments = (*guest_arguments, *launch_config.arguments)
         try:
             write_bundle_flags(
@@ -423,6 +427,12 @@ def launch_application(
         )
     done = threading.Event()
     done.set()
+    gamemode_error = None
+    if launch_config is not None and launch_config.gamemode:
+        try:
+            gamemode.register(process.pid)
+        except gamemode.GameModeError as error:
+            gamemode_error = str(error)
     return LaunchSession(
         process=process,
         rosemary_path=status.executable,
@@ -430,4 +440,5 @@ def launch_application(
         output_done=done,
         plain_ctrl_click_active=plain_ctrl_click_active,
         log_path=log_path,
+        gamemode_error=gamemode_error,
     )
