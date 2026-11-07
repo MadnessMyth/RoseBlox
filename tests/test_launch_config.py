@@ -277,6 +277,23 @@ class LaunchConfigStoreTests(unittest.TestCase):
     def tearDown(self):
         self._directory.cleanup()
 
+    def test_manual_backup_and_whole_configuration_export(self):
+        self.store.save("studio", AppLaunchConfig(disable_user_plugins=True), "Studio plugins")
+        before = len(self.store.backups())
+        self.store.back_up_now()
+        self.assertEqual(before + 1, len(self.store.backups()))
+        self.assertEqual("Manual backup", self.store.backups()[0].reason)
+        configs = LaunchConfigStore.parse_export(self.store.export_text())
+        self.assertTrue(configs["studio"].disable_user_plugins)
+        self.assertTrue(configs["player"].is_default)
+        for text in ("{broken", json.dumps({"version": 1, "apps": {"other": {}}}), " " * (2 * 1024 * 1024)):
+            with self.assertRaises(LaunchConfigError):
+                LaunchConfigStore.parse_export(text)
+        with self.assertRaises(LaunchConfigError):
+            LaunchConfigStore.parse_export(json.dumps(
+                {"version": 1, "apps": {"player": {"rosemary_environment": {"LD_PRELOAD": "/x.so"}}}}
+            ))
+
     def test_player_and_studio_are_configured_separately(self):
         self.store.save("player", AppLaunchConfig(presentation_mode="fifo"), "Player pacing")
         self.store.save("studio", AppLaunchConfig(arguments=("-task", "EditFile")), "Studio arguments")

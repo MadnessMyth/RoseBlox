@@ -31,6 +31,7 @@ MANGOHUD_VARIABLE = "MANGOHUD"
 COMMAND_KEY_VARIABLE = "ROSEMARY_COMMAND_KEY"
 DECORATIONS_VARIABLE = "ROSEMARY_DECORATIONS"
 DISABLE_USER_PLUGINS_ARGUMENT = "-disableLoadUserPlugins"
+MAX_IMPORT_SIZE = 1024 * 1024
 COMMAND_KEYS = ("super", "ctrl", "alt", "super+ctrl:edit")
 DECORATIONS = ("client", "server")
 MIN_REFRESH_RATE = 24
@@ -383,6 +384,25 @@ class LaunchConfigStore:
             document["apps"][app_type] = config.to_document()
             self._write(self.path, document)
         return config
+
+    def back_up_now(self, reason: str = "Manual backup") -> None:
+        with self._lock, self._file_lock():
+            self._snapshot(self._read(), reason)
+
+    def export_text(self) -> str:
+        """The saved configuration of both applications, in the format ``parse_export`` reads."""
+        return json.dumps(self._read(), indent=2, sort_keys=True) + "\n"
+
+    @classmethod
+    def parse_export(cls, text: str) -> dict[str, AppLaunchConfig]:
+        if len(text) > MAX_IMPORT_SIZE:
+            raise LaunchConfigError("That file is too large to be a Roseblox configuration.")
+        try:
+            document = json.loads(text)
+        except ValueError as error:
+            raise LaunchConfigError(f"That file is not valid JSON: {error}") from error
+        apps = cls._validated_document(document)["apps"]
+        return {app_type: AppLaunchConfig.from_document(apps.get(app_type, {})) for app_type in APP_TYPES}
 
     def backups(self) -> list[Backup]:
         entries: list[Backup] = []

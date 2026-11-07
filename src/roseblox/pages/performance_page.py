@@ -13,7 +13,7 @@ import gi
 gi.require_version("Adw", "1")
 gi.require_version("Gdk", "4.0")
 gi.require_version("Gtk", "4.0")
-from gi.repository import Adw, Gdk, GLib, Gtk, Pango
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango
 
 from ..backend.fast_flags import (
     FastFlagError,
@@ -34,7 +34,7 @@ from ..backend.flag_catalog import (
 )
 from ..backend import diagnostics, gamemode, mangohud
 from ..backend.gpu import list_gpus
-from ..backend.rosemary import build_launch_arguments
+from ..backend.rosemary import build_launch_arguments, default_log_directory
 from ..backend.rosemary_paths import (
     CacheError,
     cache_entries,
@@ -50,6 +50,7 @@ from ..backend.launch_config import (
     effective_environment,
     LaunchConfigError,
     LaunchConfigStore,
+    MAX_IMPORT_SIZE,
     describe_changes,
     environment_changes,
     validate_argument,
@@ -515,11 +516,29 @@ class PerformancePage(Gtk.Box):
         self.backups_group = Adw.PreferencesGroup.new()
         self._backup_rows: list[Gtk.Widget] = []
         section.add(self.backups_group)
+        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self.back_up_button = Gtk.Button(label="Back Up Now")
+        self.back_up_button.set_tooltip_text("Keep a copy of the saved configuration of both applications")
+        self.back_up_button.connect("clicked", self._back_up_clicked)
+        actions.append(self.back_up_button)
+        self.export_config_button = Gtk.Button(label="Export…")
+        self.export_config_button.set_tooltip_text("Save the configuration of both applications to a file")
+        self.export_config_button.connect("clicked", self._export_config_clicked)
+        actions.append(self.export_config_button)
+        self.import_config_button = Gtk.Button(label="Import…")
+        self.import_config_button.set_tooltip_text(
+            "Load a configuration exported by Roseblox; you review it before it applies"
+        )
+        self.import_config_button.connect("clicked", self._import_config_clicked)
+        actions.append(self.import_config_button)
         self.defaults_button = Gtk.Button(label="Reset to Defaults…")
-        self.defaults_button.set_halign(Gtk.Align.START)
         self.defaults_button.set_tooltip_text("Clear this application's configuration; you review it before it applies")
         self.defaults_button.connect("clicked", self._defaults_clicked)
-        section.add(self.defaults_button)
+        actions.append(self.defaults_button)
+        section.add(actions)
+        self.backup_message = Gtk.Label(xalign=0, wrap=True, visible=False, selectable=True)
+        self.backup_message.add_css_class("dim-label")
+        section.add(self.backup_message)
 
     def _build_caches(self) -> None:
         section = self._section(
@@ -545,6 +564,10 @@ class PerformancePage(Gtk.Box):
         self.copy_report_button = Gtk.Button(label="Copy Report")
         self.copy_report_button.connect("clicked", self._copy_report)
         actions.append(self.copy_report_button)
+        self.logs_button = Gtk.Button(label="Open Logs")
+        self.logs_button.set_tooltip_text("Rosemary's output from the last two runs of Player and Studio")
+        self.logs_button.connect("clicked", lambda _button: self.open_logs())
+        actions.append(self.logs_button)
         self.diagnostics_refresh = Gtk.Button(label="Refresh")
         self.diagnostics_refresh.connect("clicked", lambda _button: self.scan())
         actions.append(self.diagnostics_refresh)
@@ -789,6 +812,23 @@ class PerformancePage(Gtk.Box):
         self.get_clipboard().set(text)
         self.diagnostics_message.set_text("Copied the report to the clipboard.")
         self.diagnostics_message.set_visible(True)
+
+    def open_logs(self) -> None:
+        folder = default_log_directory()
+        if not folder.is_dir():
+            self.diagnostics_message.set_text(f"No logs yet. Roseblox saves Rosemary's output in {folder}.")
+            self.diagnostics_message.set_visible(True)
+            return
+        launcher = Gtk.FileLauncher.new(Gio.File.new_for_path(str(folder)))
+
+        def finished(launcher, result) -> None:
+            try:
+                launcher.launch_finish(result)
+            except GLib.Error as error:
+                self.diagnostics_message.set_text(f"Could not open {folder}: {error.message}")
+                self.diagnostics_message.set_visible(True)
+
+        launcher.launch(self.window if isinstance(self.window, Gtk.Window) else None, None, finished)
 
     def _trash_clicked(self, _button, entry) -> None:
         dialog = Adw.MessageDialog.new(
@@ -1105,6 +1145,80 @@ class PerformancePage(Gtk.Box):
     def _discard_clicked(self, _button) -> None:
         self._set_draft(self.saved[self.app_type])
         self._flag_note("")
+
+    def _backup_note(self, text: str) -> None:
+        self.backup_message.set_text(text)
+        self.backup_message.set_visible(bool(text))
+
+    def _back_up_clicked(self, _button) -> None:
+        self.back_up_button.set_sensitive(False)
+        threading.Thread(target=self._back_up_worker, daemon=True).start()
+
+    def _back_up_worker(self) -> None:
+        try:
+            self.store.back_up_now()
+            error = None
+        except LaunchConfigError as failure:
+            error = str(failure)
+        GLib.idle_add(self._backed_up, error)
+
+    def _backed_up(self, error: str | None) -> bool:
+        self.back_up_button.set_sensitive(True)
+        self._backup_note(f"Could not back up: {error}" if error else "Backed up the saved configuration.")
+        self.reload()
+        return GLib.SOURCE_REMOVE
+
+    def _export_config_clicked(self, _button) -> None:
+        dialog = Gtk.FileDialog(title="Export Configuration", modal=True, initial_name="roseblox-launch-config.json")
+        dialog.save(self.window, None, self._export_config_chosen)
+
+    def _export_config_chosen(self, dialog, result) -> None:
+        try:
+            file = dialog.save_finish(result)
+        except GLib.Error:
+            return
+        self.export_to(Path(file.get_path()))
+
+    def export_to(self, path: Path) -> None:
+        try:
+            text = self.store.export_text()
+            path.write_text(text, encoding="utf-8")
+        except (LaunchConfigError, OSError) as error:
+            self._backup_note(f"Could not export the configuration: {error}")
+            return
+        unapplied = " Unapplied changes are not included." if any(
+            self.drafts[app_type] != self.saved[app_type] for app_type in APP_TYPES
+        ) else ""
+        self._backup_note(f"Exported the saved Player and Studio configuration to {path.name}.{unapplied}")
+
+    def _import_config_clicked(self, _button) -> None:
+        dialog = Gtk.FileDialog(title="Import Configuration", modal=True)
+        dialog.open(self.window, None, self._import_config_chosen)
+
+    def _import_config_chosen(self, dialog, result) -> None:
+        try:
+            file = dialog.open_finish(result)
+        except GLib.Error:
+            return
+        self.import_from(Path(file.get_path()))
+
+    def import_from(self, path: Path) -> None:
+        try:
+            with path.open("r", encoding="utf-8") as stream:
+                configs = LaunchConfigStore.parse_export(stream.read(MAX_IMPORT_SIZE + 1))
+        except (OSError, UnicodeError, LaunchConfigError) as error:
+            self._backup_note(f"Could not import {path.name}: {error}")
+            return
+        self.drafts.update(configs)
+        changed = [APP_TITLES[app_type] for app_type in APP_TYPES if configs[app_type] != self.saved[app_type]]
+        self._show_draft()
+        if changed:
+            self._backup_note(
+                f"Loaded {path.name}. Review and apply the changes for {' and '.join(changed)}; "
+                "nothing is saved until you do."
+            )
+        else:
+            self._backup_note(f"{path.name} matches the saved configuration.")
 
     def _defaults_clicked(self, _button) -> None:
         self._set_draft(AppLaunchConfig())

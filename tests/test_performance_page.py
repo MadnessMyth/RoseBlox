@@ -227,6 +227,33 @@ class PerformancePageTests(unittest.TestCase):
         self.assertIn("-disableLoadUserPlugins", page.command_preview.get_text())
         self.assertIn("Studio user plugins: loaded → not loaded", page.changes)
 
+    def test_back_up_export_and_import_the_whole_configuration(self):
+        page = self._page()
+        page.back_up_button.emit("clicked")
+        self.assertTrue(self._wait_until(lambda: page.backups and page.back_up_button.get_sensitive()))
+        self.assertEqual("Manual backup", page.backups[0].reason)
+        with tempfile.TemporaryDirectory() as directory:
+            exported = Path(directory) / "config.json"
+            page.export_to(exported)
+            self.assertIn("Exported the saved Player and Studio configuration", page.backup_message.get_text())
+            document = json.loads(exported.read_text())
+            document["apps"]["studio"] = {"disable_user_plugins": True}
+            exported.write_text(json.dumps(document))
+            page.import_from(exported)
+            self.assertIn("Roblox Studio", page.backup_message.get_text())
+            self.assertTrue(page.drafts["studio"].disable_user_plugins)
+            self.assertTrue(self.store.load("studio").is_default)
+            broken = Path(directory) / "broken.json"
+            broken.write_text("{")
+            page.import_from(broken)
+            self.assertIn("Could not import broken.json", page.backup_message.get_text())
+
+    def test_open_logs_explains_when_there_are_none(self):
+        page = self._page()
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"XDG_STATE_HOME": directory}):
+            page.open_logs()
+        self.assertIn("No logs yet", page.diagnostics_message.get_text())
+
     def test_mangohud_is_offered_when_its_layer_is_installed(self):
         page = self._page()
         self.assertFalse(page.mangohud_row.switch.get_sensitive())
