@@ -555,6 +555,19 @@ class RosebloxWindow(Adw.ApplicationWindow):
             getattr(page, "operation_busy", False) for page in self.pages.values()
         )
 
+    def running_session(self, app_type: str):
+        """The ``(record, session)`` of a running Player or Studio that Roseblox started, if any."""
+        records = {record.id: record for record in self.library_records}
+        for page in self.pages.values():
+            sessions = getattr(page, "_sessions", None)
+            if sessions is None and isinstance(page, Gtk.ScrolledWindow):
+                sessions = getattr(_scrolled_content(page), "_sessions", None)
+            for installation_id, session in dict(sessions or {}).items():
+                record = records.get(installation_id)
+                if record is not None and record.app_type == app_type and session.process.poll() is None:
+                    return record, session
+        return None
+
     def application_started(self, app_type: str, session, from_link: bool) -> None:
         try:
             preference = self.setup_store.load().close_preference(app_type)

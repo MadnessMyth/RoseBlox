@@ -67,6 +67,7 @@ from ..backend.presets import (
     matching_preset,
     preset,
 )
+from .measure_section import MeasureSection
 from .sections import CollapsibleSection
 
 APP_TITLES = {"player": "Roblox Player", "studio": "Roblox Studio"}
@@ -217,7 +218,9 @@ class _ListEditor:
 class PerformancePage(Gtk.Box):
     """Edit each application's launch configuration, review it, then save it with a backup."""
 
-    def __init__(self, window, *, store: LaunchConfigStore | None = None, allowlist_fetcher=None) -> None:
+    def __init__(
+        self, window, *, store: LaunchConfigStore | None = None, allowlist_fetcher=None, measurement_store=None
+    ) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=24)
         self.set_hexpand(True)
         self.set_margin_top(28)
@@ -289,6 +292,8 @@ class PerformancePage(Gtk.Box):
         self._build_backups()
         self._build_caches()
         self._build_diagnostics()
+        self.measure_section = MeasureSection(self.window, self._measure_context, store=measurement_store)
+        self.append(self.measure_section)
 
         self.app_buttons["player"].set_active(True)
         self.allowlist = load_cached_allowlist()
@@ -547,6 +552,30 @@ class PerformancePage(Gtk.Box):
         self.diagnostics_message = Gtk.Label(xalign=0, visible=False)
         self.diagnostics_message.add_css_class("dim-label")
         section.add(self.diagnostics_message)
+
+    def _measure_context(self) -> tuple[str, dict[str, str]]:
+        """The saved settings of the selected application, recorded with each measurement."""
+        config = self.saved[self.app_type]
+        flags = config.fast_flags
+        gpu_names = {gpu.slot: gpu.name for gpu in self.gpus}
+        quality = flags.get(QUALITY_FLAG)
+        msaa = flags.get(MSAA_FLAG)
+        settings = {
+            "Preset": dict(PRESET_CHOICES)[matching_preset(config, gamemode_available=self.gamemode_available)],
+            "Renderer": "Metal, through Rosemary's Vulkan translation",
+            "GPU": gpu_names.get(config.gpu, config.gpu) if config.gpu else "Chosen by Rosemary",
+            "Presentation mode": dict(PRESENTATION_CHOICES)[config.presentation_mode],
+            "Refresh rate": f"{config.refresh_rate} Hz" if config.refresh_rate else "Display default",
+            "Graphics quality": dict(QUALITY_CHOICES).get(quality, f"Level {quality}"),
+            "Anti-aliasing": dict(MSAA_CHOICES).get(msaa, f"{msaa}×"),
+            "GameMode": "On" if config.gamemode else "Off",
+            "MangoHud": "On" if config.mangohud else "Off",
+            "FastFlags": str(len(flags)),
+        }
+        cap = self.framerate_caps.get(self.app_type)
+        if cap is not None:
+            settings["Roblox frame rate cap"] = "Default" if cap <= 0 else f"{cap} FPS"
+        return self.app_type, settings
 
     @property
     def draft(self) -> AppLaunchConfig:

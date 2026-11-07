@@ -120,6 +120,8 @@ Click the bell at the top right. The badge counts the items in the center:
 
 On the **Studio** page, click **Open Place…** next to an installation and choose a `.rbxl` or `.rbxlx` file. Studio opens it directly, the same as double-clicking it on a Mac. The file can be anywhere in your home folder.
 
+![Open Place… on the Studio page](screenshots/20-studio-open-place.png)
+
 ## Performance
 
 ![Performance](screenshots/14-performance.png)
@@ -145,9 +147,15 @@ The **Performance** page holds launch settings for **Player** and **Studio** sep
 - **Caches** (closed by default): Rosemary's Metal shader cache and Roblox's caches, with their sizes. **Move to Trash…** moves one to your desktop's trash, so you can still get it back. Roblox and Rosemary rebuild them by themselves, so the first start afterwards can be slower. Your Roblox login and settings are never touched.
 - **Diagnostics** (closed by default): Rosemary's version, what `rosemary prefix info` reports about the prefix, your GPUs and Vulkan drivers, whether GameMode and MangoHud are installed, and other details for bug reports. **Copy Report** copies them as text.
 
+- **Measure & compare** (closed by default): measures the running Player or Studio for 30 seconds to 5 minutes. It records CPU use (100% is one core), the busiest thread, memory, and GPU load and memory where the driver reports them (AMD's `amdgpu`, or NVIDIA's `nvidia-smi`; GPU figures cover the whole GPU). Each measurement is saved with the settings in use, such as the preset, presentation mode, graphics quality, Roblox and Rosemary versions, and your notes. Tick two and click **Compare Selected** to see them side by side with the differences highlighted, and a cautious note on whether the CPU or the GPU was the limit. Roblox does not report its frame rate, so use the MangoHud overlay for FPS and frame times. Measurements are kept in `~/.local/state/roseblox/measurements.json` (the 50 newest).
+
 The settings are saved in `~/.config/roseblox/launch-config.json`.
 
 ![Every Performance section open](screenshots/15-performance-all-sections.png)
+
+![Measure & compare](screenshots/18-measure.png)
+
+![Comparing two measurements](screenshots/19-measure-compare.png)
 
 ## Mods
 
