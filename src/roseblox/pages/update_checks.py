@@ -42,6 +42,7 @@ class UpdateCheckRow(Adw.ActionRow):
             self._message = message
         self._block = True
         self.switch.set_active(status.enabled)
+        self.switch.set_state(status.enabled)
         self._block = False
         self.switch.set_sensitive(not self.busy)
         if not self.busy:
@@ -51,7 +52,10 @@ class UpdateCheckRow(Adw.ActionRow):
             self.set_subtitle(details)
 
     def _switch_changed(self, _switch, active: bool) -> bool:
-        if self._block or self.busy:
+        # Returning True leaves the switch's drawn state alone until apply_status() sets it.
+        if self._block:
+            return False
+        if self.busy:
             return True
         self.busy = True
         self._message = None

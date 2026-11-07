@@ -345,6 +345,7 @@ class OnboardingPage(Gtk.Box):
         enabled = bool(state and state.url_handlers_enabled)
         self._url_switch_block = True
         self.url_switch.set_active(enabled)
+        self.url_switch.set_state(enabled)
         self._url_switch_block = False
         self.url_switch.set_sensitive(not self._url_busy)
         if self._url_busy:

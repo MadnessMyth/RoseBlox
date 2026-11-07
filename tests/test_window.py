@@ -237,6 +237,22 @@ class RealWindowTests(unittest.TestCase):
         self.assertTrue(self._wait_until(lambda: page.url_handlers.enable.called and not page._url_busy))
         page.url_handlers.disable.assert_not_called()
 
+    def test_link_switches_look_on_once_links_are_enabled(self):
+        from roseblox.backend.url_handlers import URLHandlerStatus
+
+        window = self._loaded_window()
+        window.url_handlers.check = lambda: URLHandlerStatus(True, True, "Enabled")
+        for page in (window.settings_page, window.onboarding_page):
+            page.url_handlers = Mock()
+            page.url_handlers.enable.return_value = URLHandlerStatus(True, True, "Enabled")
+        window.setup_store.save_url_handlers(True, {})
+        window.settings_page.url_switch.set_active(True)
+        self.assertTrue(self._wait_until(
+            lambda: not window.settings_page._url_busy and not window._refresh_in_progress
+            and window.settings_page.url_switch.get_state()
+        ))
+        self.assertTrue(window.onboarding_page.url_switch.get_state())
+
     def test_link_received_during_startup_waits_for_the_library(self):
         records = _write_library(self.data_home)
         window = self._build_window()
@@ -347,6 +363,9 @@ class RealWindowTests(unittest.TestCase):
         window.update_checker.enable.return_value = UpdateCheckerStatus(True, "On.")
         setup_row.switch.set_active(True)
         self.assertTrue(self._wait_until(lambda: settings_row.switch.get_active() and not setup_row.busy))
+        # The drawn state must follow too, or the switch shows a grey track while on.
+        self.assertTrue(setup_row.switch.get_state())
+        self.assertTrue(settings_row.switch.get_state())
         window.update_checker.enable.assert_called_once_with()
         self.assertTrue(window.settings_page.check_now_row.get_visible())
 

@@ -1473,6 +1473,7 @@ class SettingsPage(Gtk.Box):
         enabled = bool(setup_state and setup_state.url_handlers_enabled)
         self._url_switch_block = True
         self.url_switch.set_active(enabled)
+        self.url_switch.set_state(enabled)
         self._url_switch_block = False
         if not self._url_busy:
             if self._url_message:
