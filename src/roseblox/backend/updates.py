@@ -153,14 +153,25 @@ def _default_data_home() -> Path:
     return Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share")
 
 
-def _spawn_detached(arguments: list[str]) -> None:
-    subprocess.Popen(
-        arguments,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
+def _spawn_detached(arguments: list[str], log_path: Path | None = None) -> None:
+    output = subprocess.DEVNULL
+    if log_path is not None:
+        try:
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            output = log_path.open("ab")
+        except OSError:
+            output = subprocess.DEVNULL
+    try:
+        subprocess.Popen(
+            arguments,
+            stdin=subprocess.DEVNULL,
+            stdout=output,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+    finally:
+        if output is not subprocess.DEVNULL:
+            output.close()
 
 
 class UpdateCheckerService:

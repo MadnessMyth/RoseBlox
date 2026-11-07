@@ -204,7 +204,7 @@ class UpdateNotifierTests(unittest.TestCase):
             version_cache=Mock(),
             notification_log=NotificationLog(root / "log.json"),
             executable_lookup=lambda name: "/usr/bin/roseblox",
-            spawn=self.spawned.append,
+            spawn=lambda arguments, log_path=None: self.spawned.append(arguments),
         )
         self.sent = []
         self.withdrawn = []

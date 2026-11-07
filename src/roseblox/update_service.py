@@ -10,6 +10,7 @@ import threading
 from gi.repository import Gio, GLib
 
 from .backend.library import LibraryStore
+from .backend.rosemary import default_log_directory
 from .command_line import print_error
 from .backend.setup import APP_TYPES, SetupSettingsError, SetupStore
 from .backend.updates import (
@@ -188,7 +189,7 @@ class UpdateNotifierApplication(Gio.Application):
             print("roseblox update check: the `roseblox` command is not in PATH", file=sys.stderr)
             return
         try:
-            self.spawn([os.path.abspath(executable), *arguments])
+            self.spawn([os.path.abspath(executable), *arguments], default_log_directory() / "roseblox.log")
         except OSError as error:
             print(f"roseblox update check: could not open Roseblox: {error}", file=sys.stderr)
 
@@ -213,4 +214,5 @@ class UpdateNotifierApplication(Gio.Application):
 
 
 def main(argv: list[str]) -> int:
+    GLib.set_application_name("Roseblox")
     return UpdateNotifierApplication().run(argv)
