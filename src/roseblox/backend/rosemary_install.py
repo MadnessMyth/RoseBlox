@@ -13,6 +13,10 @@ from typing import Callable, Mapping
 ROSEMARY_AUR_PACKAGE = "rosemary"
 ROSEMARY_AUR_URL = f"https://aur.archlinux.org/packages/{ROSEMARY_AUR_PACKAGE}"
 ROSEMARY_PROJECT_URL = "https://github.com/microlift/rosemary"
+# The AUR package lists these as optional, but Rosemary needs SDL 3 for any GUI app and
+# Vulkan for Metal, so Roblox cannot start without them. Both come from Arch's repositories.
+ROSEMARY_RUNTIME_PACKAGES = ("sdl3", "vulkan-icd-loader")
+ROSEMARY_INSTALL_PACKAGES = (ROSEMARY_AUR_PACKAGE, *ROSEMARY_RUNTIME_PACKAGES)
 AUR_HELPERS = ("paru", "yay")
 
 # Each entry maps a terminal command to the arguments that run a program in a new window.
@@ -33,12 +37,21 @@ _TERMINALS: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 _TERMINAL_PREFIXES = dict(_TERMINALS)
 
-# Runs inside the terminal: "$1" is the helper, "$2" the package. The window stays open
-# so the result can be read, and the helper's exit status is preserved.
+# Runs inside the terminal: "$1" is the helper and the remaining arguments are packages.
+# After installing, Rosemary's default prefix gets its macOS base system; without a display
+# Rosemary cannot show its own download prompt, and "prefix create" is a no-op once the
+# prefix exists. The window stays open so the result can be read, and the helper's exit
+# status is preserved.
 _INSTALL_SCRIPT = (
-    'printf "Roseblox is installing the %s package from the AUR with %s.\\n\\n" "$2" "${1##*/}"; '
-    '"$1" -S --needed "$2"; status=$?; echo; '
-    'if [ "$status" -eq 0 ]; then echo "Rosemary is installed. You can return to Roseblox."; '
+    'helper=$1; shift; '
+    'printf "Roseblox is installing %s with %s.\\n\\n" "$*" "${helper##*/}"; '
+    '"$helper" -S --needed "$@"; status=$?; echo; '
+    'if [ "$status" -eq 0 ]; then '
+    'echo "Setting up the Rosemary prefix (downloads the macOS base system once)."; '
+    'if ROSEMARY_PREFIX_SETUP=download rosemary prefix create; then '
+    'echo; echo "Rosemary is installed. You can return to Roseblox."; '
+    'else echo; echo "Rosemary is installed, but its prefix is not set up yet. Rosemary offers to '
+    'download the base system when it first runs, or run: rosemary prefix create"; fi; '
     'else echo "Installation did not finish (exit status $status)."; fi; '
     'printf "Press Enter to close this window. "; read -r _; exit "$status"'
 )
@@ -67,7 +80,11 @@ class RosemaryInstallPlan:
 
     @property
     def display_command(self) -> str:
-        return f"{self.helper_name} -S --needed {ROSEMARY_AUR_PACKAGE}"
+        return _helper_command(self.helper_name)
+
+
+def _helper_command(helper_name: str) -> str:
+    return f"{helper_name} -S --needed {' '.join(ROSEMARY_INSTALL_PACKAGES)}"
 
 
 def find_aur_helper(lookup: Callable[[str], str | None] = shutil.which) -> str | None:
@@ -103,7 +120,7 @@ def build_install_command(terminal: str, prefix: tuple[str, ...], helper: str) -
         _INSTALL_SCRIPT,
         "roseblox-install-rosemary",
         helper,
-        ROSEMARY_AUR_PACKAGE,
+        *ROSEMARY_INSTALL_PACKAGES,
     )
 
 
@@ -127,7 +144,7 @@ def plan_rosemary_install(
     if terminal is None:
         raise RosemaryInstallError(
             "No supported terminal emulator was found to run the installation. Run "
-            f"“{Path(helper).name} -S --needed {ROSEMARY_AUR_PACKAGE}” in a terminal, then check again."
+            f"“{_helper_command(Path(helper).name)}” in a terminal, then check again."
         )
     terminal_path, prefix = terminal
     return RosemaryInstallPlan(helper, terminal_path, build_install_command(terminal_path, prefix, helper))

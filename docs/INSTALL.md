@@ -20,7 +20,17 @@ cd /tmp/paru-bin
 makepkg -si
 ```
 
-### 3. Download Roseblox
+### 3. Make sure you have a Vulkan driver
+
+Roblox draws through Vulkan. Most desktops already have one; if not, install the one for your GPU:
+
+```sh
+sudo pacman -S --needed vulkan-radeon    # AMD
+sudo pacman -S --needed vulkan-intel     # Intel
+sudo pacman -S --needed nvidia-utils     # NVIDIA (proprietary driver)
+```
+
+### 4. Download Roseblox
 
 ```sh
 git clone https://github.com/MadnessMyth/RoseBlox.git ~/RoseBlox
@@ -28,7 +38,7 @@ git clone https://github.com/MadnessMyth/RoseBlox.git ~/RoseBlox
 
 Keep this folder; you will use it to update.
 
-### 4. Build and install
+### 5. Build and install
 
 ```sh
 cd ~/RoseBlox/packaging/arch-git
@@ -43,13 +53,13 @@ Check that it worked:
 pacman -Q roseblox-git
 ```
 
-### 5. Run first-time setup
+### 6. Run first-time setup
 
 Open **Roseblox** from your application menu, or run `roseblox` in a terminal. The setup page has three steps:
 
 ![First-time setup on a fresh system](screenshots/01-setup-fresh.png)
 
-1. **Rosemary** – click **Install Rosemary**. A terminal opens and runs `paru -S --needed rosemary` (or `yay`). Review the package, confirm, and enter your password. Rosemary compiles from source, so this takes a few minutes. Press Enter to close the terminal when it finishes. Roseblox detects Rosemary on its own and marks the step **Ready**. If you already have a Rosemary build or AppImage, use **Choose…** instead.
+1. **Rosemary** – click **Install Rosemary**. A terminal opens and runs `paru -S --needed rosemary sdl3 vulkan-icd-loader` (or `yay`). Review the package, confirm, and enter your password. Rosemary compiles from source, which took about 20 minutes on a test machine. The terminal then runs `rosemary prefix create`, which downloads Rosemary's macOS base system once (about 180 MB). Press Enter to close the terminal when it finishes. Roseblox detects Rosemary on its own and marks the step **Ready**. If you already have a Rosemary build or AppImage, use **Choose…** instead.
 2. **Roblox Links** (optional) – turn on **Open Roblox links with Roseblox** so that **Play** buttons on roblox.com and Studio sign-in links open through Roseblox.
 3. **Player and Studio** – click **Install** for Roblox Player, Roblox Studio, or both. The download runs on the page with a progress bar.
 
