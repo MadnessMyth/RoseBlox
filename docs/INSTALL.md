@@ -144,6 +144,18 @@ The settings are saved in `~/.config/roseblox/launch-config.json`.
 
 ![Every Performance section open](screenshots/15-performance-all-sections.png)
 
+## Mods
+
+![Mods](screenshots/17-mods.png)
+
+The **Mods** page changes Roblox's fonts, cursor, sounds and textures, separately for **Player** and **Studio**. Mods are applied to installations Roseblox installed, right before they start. Roblox's own files are backed up the first time, so turning a mod off puts them back. Installations you added from an existing app bundle are never changed.
+
+- **Font**: choose a `.ttf` or `.otf` file to use it for all text. Monospace fonts and the fallback fonts for other scripts (such as Chinese, Japanese and Korean) are kept.
+- **Mouse cursor**: choose a PNG image, up to 256 × 256 pixels, for the arrow cursor.
+- **Classic death sound** (Player): the classic "oof", which Roblox still ships as `oof.ogg`.
+- **Classic avatar editor background** (Player): the avatar editor scene from before 2024, from [Bloxstrap](https://github.com/bloxstraplabs/bloxstrap) (MIT). Roseblox downloads one reviewed copy and uses it only if it matches that copy exactly.
+- **Mods folder**: your own files, for example skyboxes or textures. **Open Folder** opens `~/.local/share/roseblox/mods/player` (or `studio`). Put files there at the same path they have in the app's `Contents/Resources` folder, for example `PlatformContent/pc/textures/sky/sky512_bk.tex` for a skybox side or `content/sounds/ouch.ogg`. Only images, textures, sounds, fonts and meshes are used; anything else (such as scripts) is listed with the reason it is not used. Quick mods win over files in the folder.
+
 ## Update
 
 ### Roseblox
@@ -232,6 +244,7 @@ To update after a new release, run `git pull` in `~/RoseBlox`, then `makepkg -si
 | Roblox stopped starting after you changed Performance settings | Open **Performance → Backups** and **Restore…** the backup from before the change, or click **Reset to Defaults…**. |
 | "GameMode was not started" | Install GameMode (`sudo pacman -S gamemode`) and log out and back in. The app still runs, only without GameMode. |
 | The MangoHud overlay does not appear | Check that **Performance → Diagnostics** says the MangoHud layer is installed, and that the overlay is not hidden in `~/.config/MangoHud/MangoHud.conf` (MangoHud's toggle key is Right Shift + F12). With Rosemary's AppImage, also add `ROSEMARY_GLIBC` = `host` under **Performance → Environment → Rosemary**. |
+| A mod has no effect | Mods apply only to installations Roseblox installed, and only from the next start. Check the notification center after starting Roblox; it says if a mod could not be applied. |
 | Discord does not show the game | Make sure the Discord desktop app is running (Roseblox tries again every 30 seconds while you are in a game), and that sharing your detected activities is on in Discord's **Activity Privacy** settings. The browser version of Discord cannot show Rich Presence. See `~/.local/state/roseblox/logs/activity.log`. |
 | No server location notification | Make sure notifications for "Roseblox" are allowed in your desktop's settings. If ipwho.is cannot be reached, the reason is in `~/.local/state/roseblox/logs/activity.log`. |
 | Clicking **Update** in a notification does nothing | See `~/.local/state/roseblox/logs/roseblox.log` for the window it opened. |
