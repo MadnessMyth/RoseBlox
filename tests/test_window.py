@@ -61,6 +61,7 @@ class RealWindowTests(unittest.TestCase):
             "HOME": str(root),
             "XDG_DATA_HOME": str(self.data_home),
             "XDG_CONFIG_HOME": str(self.config_home),
+            "XDG_STATE_HOME": str(root / "state"),
             "PATH": str(root / "bin"),
         }
         self.environment = patch.dict(os.environ, environment)
@@ -367,8 +368,12 @@ class RealWindowTests(unittest.TestCase):
         settings = window.settings_page
         self.assertIn("Roblox Player version-0123456789abcdef", settings.skipped_row.get_subtitle())
         self.assertTrue(settings.ask_again_button.get_sensitive())
+        log = Path(self.temporary.name) / "state" / "roseblox" / "update-notifications.json"
+        log.parent.mkdir(parents=True)
+        log.write_text("{}", encoding="utf-8")
         settings.ask_again_button.emit("clicked")
         self.assertEqual({}, store.load().skipped_versions)
+        self.assertFalse(log.exists())
         self.assertEqual("None", settings.skipped_row.get_subtitle())
 
     def test_launches_report_whether_they_came_from_a_link(self):

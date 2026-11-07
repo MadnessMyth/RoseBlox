@@ -92,6 +92,15 @@ class NotificationLogTests(unittest.TestCase):
             self.assertTrue(log.should_notify(AvailableUpdate("player", NEWER, OLD), now=1001))
             self.assertTrue(log.should_notify(AvailableUpdate("studio", NEW, OLD), now=1001))
 
+    def test_clearing_the_log_allows_an_immediate_reminder(self):
+        with tempfile.TemporaryDirectory() as directory:
+            log = NotificationLog(Path(directory) / "updates.json")
+            update = AvailableUpdate("player", NEW)
+            log.record(update)
+            log.clear()
+            log.clear()
+            self.assertTrue(log.should_notify(update))
+
     def test_unreadable_log_means_notify_again(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "updates.json"
@@ -247,6 +256,8 @@ class UpdateNotifierTests(unittest.TestCase):
         self.assertEqual(["update-studio"], self.withdrawn)
         self.application.check()
         self.assertEqual(["update-player"], self.sent)
+        self.application.check(force=True)
+        self.assertEqual(["update-player", "update-player"], self.sent)
         self.records = [_record("player", NEW), _record("studio", OLD)]
         self.application.check()
         self.assertIn("update-player", self.withdrawn)

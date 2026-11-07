@@ -63,6 +63,8 @@ class UpdateNotifierApplication(Gio.Application):
         self.last_errors: dict[str, str] = {}
         self._running = False
         self._checking = False
+        self._force = False
+        self._force_pending = False
         self._timer_id = 0
         self.connect("command-line", self._on_command_line)
 
@@ -95,10 +97,13 @@ class UpdateNotifierApplication(Gio.Application):
         if not self._running:
             self._running = True
             self.hold()
-            delay = 0 if options else self.first_check_delay
-            self._timer_id = GLib.timeout_add(int(delay * 1000), self._scheduled_check)
+            if options:
+                self._timer_id = GLib.timeout_add(int(self.check_interval * 1000), self._scheduled_check)
+                self.check(force=True)
+            else:
+                self._timer_id = GLib.timeout_add(int(self.first_check_delay * 1000), self._scheduled_check)
         elif options:
-            self.check()
+            self.check(force=True)
         return 0
 
     def stop(self) -> None:
@@ -120,13 +125,16 @@ class UpdateNotifierApplication(Gio.Application):
         self.check()
         return GLib.SOURCE_REMOVE
 
-    def check(self) -> None:
+    def check(self, *, force: bool = False) -> None:
+        """Look for updates; ``force`` (Check Now) notifies even if reminded recently."""
         if self._checking:
+            self._force_pending = self._force_pending or force
             return
         if not self._enabled():
             self.stop()
             return
         self._checking = True
+        self._force = force
         threading.Thread(target=self._check_worker, daemon=True).start()
 
     def _check_worker(self) -> None:
@@ -141,6 +149,7 @@ class UpdateNotifierApplication(Gio.Application):
 
     def _check_finished(self, updates: list[AvailableUpdate], errors: dict[str, str]) -> bool:
         self._checking = False
+        force, self._force = self._force, False
         self.last_errors = errors
         for message in errors.values():
             print(f"roseblox update check: {message}", file=sys.stderr)
@@ -149,9 +158,12 @@ class UpdateNotifierApplication(Gio.Application):
             if app_type not in offered and app_type not in errors:
                 self.withdraw_notification(_notification_id(app_type))
         for update in updates:
-            if self.notification_log.should_notify(update):
+            if force or self.notification_log.should_notify(update):
                 self.send_notification(_notification_id(update.app_type), self.build_notification(update))
                 self.notification_log.record(update)
+        if self._force_pending:
+            self._force_pending = False
+            self.check(force=True)
         return GLib.SOURCE_REMOVE
 
     @staticmethod

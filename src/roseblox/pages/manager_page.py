@@ -25,7 +25,7 @@ from ..backend.library import (
 from ..backend.preferences import PreferencesError
 from ..backend.rosemary_install import RosemaryInstallState
 from ..backend.setup import ClosePreference, SetupSettingsError
-from ..backend.updates import APP_TITLES, UpdateCheckerError
+from ..backend.updates import APP_TITLES, NotificationLog, UpdateCheckerError
 from .update_checks import UpdateCheckRow
 from ..backend.rosemary import (
     LaunchSession,
@@ -1578,6 +1578,7 @@ class SettingsPage(Gtk.Box):
         except SetupSettingsError as error:
             self.skipped_row.set_subtitle(f"Not changed: {str(error)[:300]}")
             return
+        NotificationLog().clear()
         self.window.setup_state = state
         self._show_skipped_versions(state.skipped_versions)
 

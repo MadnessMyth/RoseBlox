@@ -131,6 +131,12 @@ class NotificationLog:
             if temporary_path is not None:
                 temporary_path.unlink(missing_ok=True)
 
+    def clear(self) -> None:
+        try:
+            self.path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
     def _read(self) -> dict:
         try:
             document = json.loads(self.path.read_text(encoding="utf-8"))
