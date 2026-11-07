@@ -1,5 +1,23 @@
 # Roseblox release preparation
 
+## Release checklist — v0.4.1
+
+- [x] Bump the version in `pyproject.toml`, `src/roseblox/__init__.py`, and `packaging/arch-git/PKGBUILD`.
+- [x] Run the full unittest suite, Python compilation, and `git diff --check`, on the host and on Arch Linux.
+- [ ] Create the annotated `v0.4.1` Git tag on the release commit.
+- [ ] Point `packaging/arch/PKGBUILD` at the `v0.4.1` tag, record the archive checksum, and regenerate `.SRCINFO`.
+- [ ] Build `packaging/arch/PKGBUILD` with `makepkg` on Arch Linux and install it.
+- [ ] Create the GitHub release for `v0.4.1` from these notes.
+
+## Release notes — v0.4.1
+
+### New
+
+- **Performance → Measure & compare**: measure the running Player or Studio for 30 seconds to 5 minutes. It records CPU use, the busiest thread and memory, and GPU load and memory where the driver reports them (AMD `amdgpu`, or NVIDIA `nvidia-smi`). Each measurement is saved with the settings in use and your notes, and two can be compared side by side. Roblox does not report its frame rate, so use the MangoHud overlay for FPS.
+- **Performance → Studio startup → Don't load my plugins** starts Studio with `-disableLoadUserPlugins`.
+- **Performance → Backups**: **Back Up Now**, and **Export…** and **Import…** for the whole Player and Studio configuration. An imported file is loaded as unapplied changes for you to review.
+- **Diagnostics → Open Logs** opens the folder with Rosemary's output from the last two runs.
+
 ## Release checklist — v0.4.0
 
 - [x] Bump the version in `pyproject.toml`, `src/roseblox/__init__.py`, and `packaging/arch-git/PKGBUILD`.
