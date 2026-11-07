@@ -14,6 +14,12 @@ PAGE_DEFINITIONS = (
     ("player", "Player", "applications-games-symbolic", "Manage and launch Roblox Player."),
     ("studio", "Studio", "applications-graphics-symbolic", "Manage and launch Roblox Studio."),
     ("library", "Library", "folder-symbolic", "View your registered Player and Studio installations."),
+    (
+        "performance",
+        "Performance",
+        "power-profile-performance-symbolic",
+        "Graphics, frame pacing, FastFlags, environment and launch arguments for Player and Studio.",
+    ),
     ("settings", "Settings", "emblem-system-symbolic", "Configure Roseblox and its Rosemary integration."),
 )
 
@@ -48,6 +54,15 @@ def create_page(
             rosemary_status=rosemary_status,
             library_error=library_error,
         )
+    if page_id == "performance":
+        from .performance_page import PerformancePage
+
+        scroller = Gtk.ScrolledWindow()
+        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroller.set_child(PerformancePage(window))
+        scroller.set_hexpand(True)
+        scroller.set_vexpand(True)
+        return scroller
     if page_id == "settings":
         settings_page = SettingsPage(
             rosemary_status,

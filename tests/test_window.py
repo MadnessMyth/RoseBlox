@@ -67,6 +67,7 @@ class RealWindowTests(unittest.TestCase):
             "XDG_DATA_HOME": str(self.data_home),
             "XDG_CONFIG_HOME": str(self.config_home),
             "XDG_STATE_HOME": str(root / "state"),
+            "XDG_CACHE_HOME": str(root / "cache"),
             "PATH": str(root / "bin"),
         }
         self.environment = patch.dict(os.environ, environment)

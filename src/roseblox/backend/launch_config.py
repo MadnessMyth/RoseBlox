@@ -222,6 +222,41 @@ def environment_changes(config: AppLaunchConfig, base: Mapping[str, str]) -> dic
     return {name: value for name, value in environment.items() if base.get(name) != value}
 
 
+def describe_changes(old: AppLaunchConfig, new: AppLaunchConfig) -> list[str]:
+    """Return one readable line per difference, for review before saving."""
+    lines: list[str] = []
+
+    def setting(label: str, before: object, after: object, unset: str) -> None:
+        if before != after:
+            lines.append(f"{label}: {unset if before is None else before} → {unset if after is None else after}")
+
+    setting("Presentation mode", old.presentation_mode, new.presentation_mode, "Rosemary default")
+    setting(
+        "Refresh rate",
+        None if old.refresh_rate is None else f"{old.refresh_rate} Hz",
+        None if new.refresh_rate is None else f"{new.refresh_rate} Hz",
+        "display default",
+    )
+    for label, before, after in (
+        ("FastFlag", old.fast_flags, new.fast_flags),
+        ("Rosemary variable", old.rosemary_environment, new.rosemary_environment),
+        ("Roblox variable", old.guest_environment, new.guest_environment),
+    ):
+        for name in sorted(set(before) | set(after)):
+            if name not in after:
+                lines.append(f"Remove {label} {name}")
+            elif name not in before:
+                lines.append(f"Add {label} {name} = {after[name]}")
+            elif before[name] != after[name]:
+                lines.append(f"{label} {name}: {before[name]} → {after[name]}")
+    if tuple(old.arguments) != tuple(new.arguments):
+        lines.append(
+            "Launch arguments: "
+            f"{' '.join(old.arguments) or '(none)'} → {' '.join(new.arguments) or '(none)'}"
+        )
+    return lines
+
+
 @dataclass(frozen=True)
 class Backup:
     id: str
