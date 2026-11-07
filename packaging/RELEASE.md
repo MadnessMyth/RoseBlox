@@ -1,5 +1,42 @@
 # Roseblox release preparation
 
+## Release checklist — v0.3.0
+
+- [x] Bump the version in `pyproject.toml`, `src/roseblox/__init__.py`, and `packaging/arch-git/PKGBUILD`.
+- [x] Run the full unittest suite, Python compilation, and `git diff --check`.
+- [x] Launch Player through the installed `roseblox-git` package and the real Rosemary 0.5.0 on Arch Linux, and check that FastFlags, environment variables, MangoHud and launch arguments reach Rosemary.
+- [ ] Create the annotated `v0.3.0` Git tag on the release commit.
+- [ ] Point `packaging/arch/PKGBUILD` at the `v0.3.0` tag, record the archive checksum, and regenerate `.SRCINFO`.
+- [ ] Build `packaging/arch/PKGBUILD` with `makepkg` on Arch Linux and install it.
+- [ ] Create the GitHub release for `v0.3.0` from these notes.
+
+## Release notes — v0.3.0
+
+### New
+
+- **Performance** page, with separate settings for Player and Studio. Every change is listed for review before it is saved, and the previous settings are kept as a backup you can restore.
+  - **Presets**: Balanced, Performance and Visual Quality. A preset changes only the settings it lists.
+  - **GPU** choice on computers with more than one graphics card.
+  - **Presentation mode** (Mailbox, FIFO, FIFO relaxed, Immediate) and **refresh rate**. Roblox's in-game Maximum Frame Rate menu follows the refresh rate, and the page shows what that menu is set to.
+  - **GameMode** (Feral `gamemoded`) and the **MangoHud overlay**, when they are installed.
+  - **Roblox graphics**: anti-aliasing, texture quality, graphics quality level, hide grass, gray sky and DPI scaling, using flags from Roblox's allowlist.
+  - **FastFlags** editor. Player flags are checked against the allowlist Roblox publishes, with import, export, and copying the flags already in an installation.
+  - **Keyboard & window**: which key acts as Command (including Ctrl for copy, paste and undo in Studio), and Rosemary's or your desktop's titlebar.
+  - **Environment** variables for Rosemary and for Roblox, and extra **launch arguments**, with a preview of the command.
+  - **Caches**: Rosemary's shader cache and Roblox's caches with their sizes, moved to the trash when cleared.
+  - **Diagnostics**: Rosemary version, GPUs, Vulkan drivers, GameMode, MangoHud and system details, with **Copy Report**.
+- The Arch packages list `gamemode` and `mangohud` as optional dependencies.
+
+### Fixed
+
+- Launch arguments such as `-n` were read by Rosemary itself instead of reaching Roblox. Arguments for Roblox now always follow `--`.
+
+### Safety
+
+- Variables that look like passwords, tokens or cookies, library injection variables (`LD_PRELOAD`, `DYLD_*` and similar), and login arguments are refused.
+- Roseblox never adds FastFlags you did not choose, and presets never touch networking, physics or security flags. A `ClientAppSettings.json` that Roseblox did not write is backed up before it is replaced.
+- Cache cleanup never touches your Roblox login, cookies or settings.
+
 ## Release checklist — v0.2.3
 
 - [x] Bump the version in `pyproject.toml`, `src/roseblox/__init__.py`, and `packaging/arch-git/PKGBUILD`.
