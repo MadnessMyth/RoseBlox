@@ -1,5 +1,6 @@
 """GTK application setup for Roseblox."""
 
+import sys
 from pathlib import Path
 
 import gi
@@ -11,6 +12,15 @@ from gi.repository import Gio, GLib
 
 from .window import RosebloxWindow
 from .backend.url_handlers import parse_roblox_url
+
+
+def _print_error(command_line, message: str) -> None:
+    """Print on the invoking terminal; g_application_command_line_printerr is variadic."""
+    printerr = getattr(command_line, "printerr_literal", None)
+    if printerr is not None:
+        printerr(message)
+    else:
+        sys.stderr.write(message)
 
 
 class RosebloxApplication(Adw.Application):
@@ -51,12 +61,12 @@ class RosebloxApplication(Adw.Application):
         uri = None
         if arguments:
             if len(arguments) != 2 or arguments[0] != "--roblox-url":
-                command_line.print("Usage: roseblox [--roblox-url URI]\\n")
+                _print_error(command_line, "Usage: roseblox [--roblox-url URI]\n")
                 return 2
             try:
                 uri = parse_roblox_url(arguments[1]).uri
             except ValueError as error:
-                command_line.print(f"Invalid Roblox link: {error}\\n")
+                _print_error(command_line, f"Invalid Roblox link: {error}\n")
                 return 2
         self.activate()
         if uri is not None:

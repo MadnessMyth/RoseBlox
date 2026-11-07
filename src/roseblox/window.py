@@ -21,6 +21,14 @@ from .backend.version_settings import VersionSettingsStore
 from .pages import PAGE_DEFINITIONS, create_page
 
 
+def _scrolled_content(widget: Gtk.Widget) -> Gtk.Widget:
+    """Return the page inside a ScrolledWindow, past the Viewport GTK may insert."""
+    child = widget.get_child() if isinstance(widget, Gtk.ScrolledWindow) else widget
+    if isinstance(child, Gtk.Viewport):
+        child = child.get_child()
+    return child
+
+
 class RosebloxWindow(Adw.ApplicationWindow):
     """Main Roseblox window with a native stack sidebar."""
 
@@ -58,6 +66,7 @@ class RosebloxWindow(Adw.ApplicationWindow):
         self._refresh_pending_preferences = False
         self._refresh_pending_setup = False
         self._snapshot_generation = 0
+        self._pending_roblox_url: str | None = None
 
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.set_content(root)
@@ -97,7 +106,7 @@ class RosebloxWindow(Adw.ApplicationWindow):
             self.pages[page_id] = page
             self._stack.add_titled(page, page_id, title)
             if page_id == "settings":
-                self.settings_page = page.get_child()
+                self.settings_page = _scrolled_content(page)
 
         from .pages.onboarding import OnboardingPage
         self.onboarding_page = OnboardingPage(self, self.setup_store, self.url_handlers)
@@ -297,6 +306,10 @@ class RosebloxWindow(Adw.ApplicationWindow):
                 )
         self._refresh_in_progress = False
         self._apply_shared_state()
+        pending_url = getattr(self, "_pending_roblox_url", None)
+        if pending_url is not None and not self.library_loading:
+            self._pending_roblox_url = None
+            GLib.idle_add(self.handle_roblox_url, pending_url)
         if (
             self._refresh_pending_library
             or self._refresh_pending_recovery
@@ -384,14 +397,13 @@ class RosebloxWindow(Adw.ApplicationWindow):
             for page in self.pages.values():
                 if hasattr(page, "rosemary_status"):
                     page.rosemary_status = status
-                elif hasattr(page, "get_child") and hasattr(page.get_child(), "apply_setup_snapshot"):
-                    page.get_child().apply_setup_snapshot(
-                        status,
-                        getattr(self, "setup_state", None),
-                        None,
-                        getattr(self, "url_handler_status", None),
-                    )
-            self.onboarding_page._status = status
+            if self.settings_page is not None:
+                self.settings_page.apply_setup_snapshot(
+                    status,
+                    getattr(self, "setup_state", None),
+                    None,
+                    getattr(self, "url_handler_status", None),
+                )
             self.onboarding_page.apply_snapshot(
                 status, getattr(self, "setup_state", None), None,
                 getattr(self, "url_handler_status", None), self.library_records, self.library_validation,
@@ -406,6 +418,9 @@ class RosebloxWindow(Adw.ApplicationWindow):
 
     def handle_roblox_url(self, uri: str) -> bool:
         from .backend.url_handlers import parse_roblox_url
+        if self.library_loading:
+            self._pending_roblox_url = uri
+            return GLib.SOURCE_REMOVE
         try:
             parsed = parse_roblox_url(uri)
         except ValueError as error:

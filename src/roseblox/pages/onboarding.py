@@ -157,12 +157,12 @@ class OnboardingPage(Gtk.Box):
             self.error_label.set_visible(True)
         elif not self._busy:
             self.error_label.set_visible(False)
-        if handler_status.error:
-            self.url_status.set_text(f"Unable to verify · {handler_status.error}")
-        elif handler_status is not None:
-            self.url_status.set_text(handler_status.message)
-        else:
+        if handler_status is None:
             self.url_status.set_text("Unable to verify URL-handler status. Open Settings to retry.")
+        elif handler_status.error:
+            self.url_status.set_text(f"Unable to verify · {handler_status.error}")
+        else:
+            self.url_status.set_text(handler_status.message)
         self.url_button.set_label(
             ("Disable URL handling" if handler_status and handler_status.enabled else "Repair URL handling")
             if setup_state and setup_state.url_handlers_enabled else "Enable URL handling"
