@@ -28,6 +28,7 @@ class UpdateCheckRow(Adw.ActionRow):
         self.add_suffix(self.switch)
         self.set_activatable_widget(self.switch)
         self._block = False
+        self._message: str | None = None
         self.busy = False
         self.status: UpdateCheckerStatus | None = None
         window.update_check_rows.append(self)
@@ -35,14 +36,17 @@ class UpdateCheckRow(Adw.ActionRow):
             self.apply_status(window.update_checker_status)
 
     def apply_status(self, status: UpdateCheckerStatus, message: str | None = None) -> None:
+        """Show ``status``; a failure ``message`` stays visible until the switch is used again."""
         self.status = status
+        if message is not None:
+            self._message = message
         self._block = True
         self.switch.set_active(status.enabled)
         self._block = False
         self.switch.set_sensitive(not self.busy)
         if not self.busy:
-            details = message or status.message
-            if status.error and not message:
+            details = self._message or status.message
+            if status.error and not self._message:
                 details = f"{details} ({status.error})"
             self.set_subtitle(details)
 
@@ -50,6 +54,7 @@ class UpdateCheckRow(Adw.ActionRow):
         if self._block or self.busy:
             return True
         self.busy = True
+        self._message = None
         self.switch.set_sensitive(False)
         self.set_subtitle("Turning update checks on…" if active else "Turning update checks off…")
         threading.Thread(target=self._worker, args=(bool(active),), daemon=True).start()

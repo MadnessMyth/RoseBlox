@@ -358,6 +358,9 @@ class RealWindowTests(unittest.TestCase):
         self.assertTrue(self._wait_until(lambda: not settings_row.busy))
         self.assertTrue(settings_row.switch.get_active())
         self.assertEqual("disk full", settings_row.get_subtitle())
+        window.refresh_pages(reload_library=False, reload_preferences=True)
+        self.assertTrue(self._wait_until(lambda: not window._refresh_in_progress))
+        self.assertEqual("disk full", settings_row.get_subtitle())
 
     def test_skipped_versions_can_be_asked_again(self):
         from roseblox.backend.setup import SetupStore
