@@ -28,6 +28,10 @@ PRESENTATION_MODE_VARIABLE = "ROSEMARY_METAL_PRESENTATION_MODE"
 REFRESH_RATE_VARIABLE = "ROSEMARY_SCREEN_REFRESH_RATE"
 GUEST_ENVIRONMENT_VARIABLE = "ROSEMARY_ENVIRON"
 MANGOHUD_VARIABLE = "MANGOHUD"
+COMMAND_KEY_VARIABLE = "ROSEMARY_COMMAND_KEY"
+DECORATIONS_VARIABLE = "ROSEMARY_DECORATIONS"
+COMMAND_KEYS = ("super", "ctrl", "alt", "super+ctrl:edit")
+DECORATIONS = ("client", "server")
 MIN_REFRESH_RATE = 24
 MAX_REFRESH_RATE = 1000
 MAX_ENTRIES = 100
@@ -49,6 +53,8 @@ _DEDICATED_CONTROLS = {
     GUEST_ENVIRONMENT_VARIABLE: "the Roblox environment list",
     "ROSEMARY_PLAIN_CTRL_CLICK": "the Ctrl+click setting",
     MANGOHUD_VARIABLE: "the MangoHud setting",
+    COMMAND_KEY_VARIABLE: "the Command key setting",
+    DECORATIONS_VARIABLE: "the titlebar setting",
 }
 _BLOCKED_ARGUMENTS = {
     "ticket",
@@ -128,6 +134,8 @@ class AppLaunchConfig:
     gpu: str | None = None
     gamemode: bool = False
     mangohud: bool = False
+    command_key: str | None = None
+    decorations: str | None = None
 
     def problems(self) -> list[str]:
         found: list[str] = []
@@ -167,6 +175,10 @@ class AppLaunchConfig:
             found.append("The GameMode setting must be true or false.")
         if not isinstance(self.mangohud, bool):
             found.append("The MangoHud setting must be true or false.")
+        if self.command_key is not None and self.command_key not in COMMAND_KEYS:
+            found.append(f"The Command key must be one of {', '.join(COMMAND_KEYS)}.")
+        if self.decorations is not None and self.decorations not in DECORATIONS:
+            found.append(f"The titlebar must be one of {', '.join(DECORATIONS)}.")
         return found
 
     def validated(self) -> "AppLaunchConfig":
@@ -196,6 +208,8 @@ class AppLaunchConfig:
             "gpu": self.gpu,
             "gamemode": self.gamemode,
             "mangohud": self.mangohud,
+            "command_key": self.command_key,
+            "decorations": self.decorations,
         }
 
     @classmethod
@@ -213,6 +227,8 @@ class AppLaunchConfig:
             gpu=document.get("gpu"),
             gamemode=document.get("gamemode", False),
             mangohud=document.get("mangohud", False),
+            command_key=document.get("command_key"),
+            decorations=document.get("decorations"),
         ).validated()
 
 
@@ -230,6 +246,10 @@ def effective_environment(
         environment.update(gpu.vulkan_environment())
     if config.mangohud:
         environment[MANGOHUD_VARIABLE] = "1"
+    if config.command_key is not None:
+        environment[COMMAND_KEY_VARIABLE] = config.command_key
+    if config.decorations is not None:
+        environment[DECORATIONS_VARIABLE] = config.decorations
     environment.update(config.rosemary_environment)
     if config.presentation_mode is not None:
         environment[PRESENTATION_MODE_VARIABLE] = config.presentation_mode
@@ -275,6 +295,8 @@ def describe_changes(
     setting("GPU", gpu_names.get(old.gpu, old.gpu), gpu_names.get(new.gpu, new.gpu), "chosen by Rosemary")
     setting("GameMode", "on" if old.gamemode else "off", "on" if new.gamemode else "off", "off")
     setting("MangoHud", "on" if old.mangohud else "off", "on" if new.mangohud else "off", "off")
+    setting("Command key", old.command_key, new.command_key, "Rosemary default")
+    setting("Titlebar", old.decorations, new.decorations, "Rosemary default")
     for label, before, after in (
         ("FastFlag", old.fast_flags, new.fast_flags),
         ("Rosemary variable", old.rosemary_environment, new.rosemary_environment),

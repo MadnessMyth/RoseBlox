@@ -211,6 +211,22 @@ class EffectiveEnvironmentTests(unittest.TestCase):
         ])
 
 
+class KeyboardAndWindowTests(unittest.TestCase):
+    def test_command_key_and_titlebar_set_rosemary_variables(self):
+        config = AppLaunchConfig(command_key="super+ctrl:edit", decorations="server")
+        environment = effective_environment(config, {})
+        self.assertEqual("super+ctrl:edit", environment["ROSEMARY_COMMAND_KEY"])
+        self.assertEqual("server", environment["ROSEMARY_DECORATIONS"])
+        self.assertNotIn("ROSEMARY_COMMAND_KEY", effective_environment(AppLaunchConfig(), {}))
+        self.assertEqual(config, AppLaunchConfig.from_document(config.to_document()))
+        self.assertEqual(2, len(AppLaunchConfig(command_key="meta", decorations="none").problems()))
+        self.assertIn("instead", validate_environment_name("ROSEMARY_COMMAND_KEY", guest=False))
+        self.assertEqual(
+            ["Command key: Rosemary default → ctrl", "Titlebar: Rosemary default → server"],
+            launch_config.describe_changes(AppLaunchConfig(), AppLaunchConfig(command_key="ctrl", decorations="server")),
+        )
+
+
 class LaunchConfigStoreTests(unittest.TestCase):
     def setUp(self):
         self._directory = tempfile.TemporaryDirectory()

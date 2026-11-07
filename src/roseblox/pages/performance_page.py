@@ -83,6 +83,17 @@ QUALITY_CHOICES = ((None, "Automatic"), *((str(level), f"Level {level}") for lev
 PRESET_CHOICES = (*((candidate.id, candidate.title) for candidate in PRESETS), (CUSTOM, "Custom"))
 GRAY_SKY_FLAG = "FFlagDebugSkyGray"
 DPI_FLAG = "DFFlagDisableDPIScale"
+COMMAND_KEY_CHOICES = (
+    (None, "Rosemary default: Super acts as Command"),
+    ("ctrl", "Ctrl acts as Command, and Super as Ctrl"),
+    ("super+ctrl:edit", "Ctrl also works for copy, paste, cut, undo, redo and select all"),
+    ("alt", "Alt acts as Command, and Super as Option"),
+)
+DECORATION_CHOICES = (
+    (None, "Rosemary default: Mac-style titlebar with menus"),
+    ("client", "Mac-style titlebar with menus"),
+    ("server", "Your desktop's titlebar, menus in a row below it"),
+)
 BACKUPS_SHOWN = 10
 
 
@@ -260,6 +271,7 @@ class PerformancePage(Gtk.Box):
 
         self._build_graphics()
         self._build_flags()
+        self._build_input()
         self._build_environment()
         self._build_arguments()
         self._build_backups()
@@ -402,6 +414,21 @@ class PerformancePage(Gtk.Box):
         self.flag_message = Gtk.Label(xalign=0, wrap=True, visible=False)
         self.flag_message.add_css_class("dim-label")
         section.add(self.flag_message)
+
+    def _build_input(self) -> None:
+        section = self._section(
+            "input", "Keyboard & window", "How Mac shortcuts map to your keyboard, and who draws the titlebar.",
+            expanded=False,
+        )
+        group = Adw.PreferencesGroup.new()
+        self.command_key_row = self._choice_row("Command key", COMMAND_KEY_CHOICES, self._command_key_changed)
+        self.command_key_row.set_subtitle(
+            "Mac shortcuts use Command. Desktops that keep Super's shortcuts for themselves can make Ctrl work instead."
+        )
+        group.add(self.command_key_row)
+        self.decorations_row = self._choice_row("Titlebar", DECORATION_CHOICES, self._decorations_changed)
+        group.add(self.decorations_row)
+        section.add(group)
 
     def _build_environment(self) -> None:
         section = self._section(
@@ -548,6 +575,8 @@ class PerformancePage(Gtk.Box):
                 )
             self.refresh_row.set_selected(self._refresh_values.index(config.refresh_rate))
             self._show_gpu(config)
+            self._select(self.command_key_row, COMMAND_KEY_CHOICES, config.command_key, describe=False)
+            self._select(self.decorations_row, DECORATION_CHOICES, config.decorations, describe=False)
             self._show_framerate_cap()
             self.gamemode_row.switch.set_active(config.gamemode)
             self.gamemode_row.switch.set_sensitive(self.gamemode_available or config.gamemode)
@@ -746,10 +775,11 @@ class PerformancePage(Gtk.Box):
         return GLib.SOURCE_REMOVE
 
     @staticmethod
-    def _select(row: Adw.ComboRow, choices, value: str | None) -> None:
+    def _select(row: Adw.ComboRow, choices, value: str | None, *, describe: bool = True) -> None:
         values = [choice for choice, _label in choices]
         row.set_selected(values.index(value) if value in values else 0)
-        row.set_subtitle("" if value in values else f"Custom value {value} set in the FastFlag list")
+        if describe:
+            row.set_subtitle("" if value in values else f"Custom value {value} set in the FastFlag list")
 
     def _show_status(self) -> None:
         title = APP_TITLES[self.app_type]
@@ -844,6 +874,14 @@ class PerformancePage(Gtk.Box):
     def _gpu_changed(self, row, _pspec) -> None:
         if not self._updating and row.get_selected() < len(self._gpu_values):
             self._set_draft(replace(self.draft, gpu=self._gpu_values[row.get_selected()]))
+
+    def _command_key_changed(self, row, _pspec) -> None:
+        if not self._updating:
+            self._set_draft(replace(self.draft, command_key=COMMAND_KEY_CHOICES[row.get_selected()][0]))
+
+    def _decorations_changed(self, row, _pspec) -> None:
+        if not self._updating:
+            self._set_draft(replace(self.draft, decorations=DECORATION_CHOICES[row.get_selected()][0]))
 
     def _mangohud_changed(self, switch, _pspec) -> None:
         if not self._updating:
