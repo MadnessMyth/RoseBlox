@@ -360,13 +360,19 @@ class RealWindowTests(unittest.TestCase):
         self.assertFalse(window.setup_state.plain_ctrl_click)
         self.assertIn("Off.", settings.rosemary_input_row.get_subtitle())
 
-        settings._show_rosemary_input_status(False, settings._input_check_generation)
-        self.assertFalse(settings.input_switch.get_sensitive())
-        self.assertIn("Not supported", settings.rosemary_input_row.get_subtitle())
-
         # A refresh keeps the saved choice instead of switching it back on.
         window._apply_rosemary_status(window.rosemary_status)
+        settings._show_rosemary_input_status(True, settings._input_check_generation)
         self.assertFalse(settings.input_switch.get_active())
+
+        settings.input_switch.set_active(True)
+        settings._show_rosemary_input_status(False, settings._input_check_generation)
+        self.assertFalse(settings.input_switch.get_sensitive())
+        self.assertFalse(settings.input_switch.get_active())
+        self.assertIn("Not supported", settings.rosemary_input_row.get_subtitle())
+        self.assertTrue(store.load().plain_ctrl_click)
+        settings._show_rosemary_input_status(True, settings._input_check_generation)
+        self.assertTrue(settings.input_switch.get_active())
 
     def test_appearance_choices_are_saved_and_applied(self):
         from roseblox.backend.setup import ACCENT_CHOICES, COLOR_STYLES, COLOR_THEMES, Appearance, SetupStore
@@ -411,8 +417,8 @@ class RealWindowTests(unittest.TestCase):
         self.assertFalse(center.empty_label.get_visible())
         self.assertEqual("1", center.badge.get_text())
         row = center.downloads_list.get_row_at_index(0)
-        self.assertEqual("Installing Roblox Player", row.get_title())
-        self.assertEqual("Downloaded 1.0 MiB of 4.0 MiB", row.get_subtitle())
+        self.assertEqual("Installing Roblox Player", row.title_label.get_text())
+        self.assertEqual("Downloaded 1.0 MiB of 4.0 MiB", row.message_label.get_text())
         with patch.object(controller, "cancel_operation") as cancel_operation:
             center._cancel_clicked(None, "player")
         cancel_operation.assert_called_once_with()

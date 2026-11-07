@@ -1601,6 +1601,8 @@ class SettingsPage(Gtk.Box):
 
     def _describe_input(self) -> None:
         supported = self._input_supported
+        saved = getattr(getattr(self.window, "setup_state", None), "plain_ctrl_click", True)
+        self._set_input_switch(saved and supported is not False)
         self.input_switch.set_sensitive(supported is True)
         if supported is None:
             message = "Available once Rosemary is detected."
@@ -1616,7 +1618,6 @@ class SettingsPage(Gtk.Box):
         if setup_state is not None:
             self._restore_sections(setup_state)
             self._show_appearance(setup_state.appearance)
-            self._set_input_switch(setup_state.plain_ctrl_click)
             self._describe_input()
             self._show_close_preferences(setup_state)
             self._show_skipped_versions(setup_state.skipped_versions)
