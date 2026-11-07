@@ -13,7 +13,7 @@ class ArchPackagingTests(unittest.TestCase):
             "https://github.com/MadnessMyth/RoseBlox/archive/refs/tags/v${pkgver}.tar.gz",
             recipe,
         )
-        self.assertIn("ca38a19d92ab2443d063aa76a385b62a14f774fa477694ca713b522723ef75c2", recipe)
+        self.assertIn("ec65a90e1892c2d3484cad535ccbf92b5494bdc2ec466b168d5841885c07105e", recipe)
         self.assertNotIn("makedepends=('git'", recipe)
         self.assertIn("depends=('gtk4' 'libadwaita' 'python' 'python-gobject' 'xdg-utils')", recipe)
         self.assertIn("libarchive", recipe)
