@@ -49,6 +49,13 @@ class RosemaryInstallError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class RosemaryInstallState:
+    waiting: bool = False
+    message: str | None = None
+    error: bool = False
+
+
+@dataclass(frozen=True)
 class RosemaryInstallPlan:
     helper: str
     terminal: str

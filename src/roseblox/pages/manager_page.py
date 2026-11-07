@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 import threading
+from dataclasses import dataclass
 from pathlib import Path
 
 import gi
@@ -22,6 +23,7 @@ from ..backend.library import (
     LibraryDataError,
 )
 from ..backend.preferences import PreferencesError
+from ..backend.rosemary_install import RosemaryInstallState
 from ..backend.rosemary import (
     LaunchSession,
     ProcessIdentityError,
@@ -37,6 +39,17 @@ from ..backend.version_settings import (
     VersionSource,
     default_version_source,
 )
+
+
+_NOT_CHECKED = object()
+
+
+@dataclass(frozen=True)
+class OperationState:
+    busy: bool
+    message: str
+    fraction: float | None
+    cancellable: bool
 
 
 class InstallationPage(Gtk.Box):
@@ -78,6 +91,7 @@ class InstallationPage(Gtk.Box):
         self._version_error: str | None = None
         self._action_buttons: list[Gtk.Button] = []
         self._recovery_buttons: list[Gtk.Button] = []
+        self._operation_listeners: list = []
         self._add_button: Gtk.Button | None = None
         self.set_hexpand(True)
         self.set_vexpand(True)
@@ -702,6 +716,25 @@ class InstallationPage(Gtk.Box):
         """Start the same current-version installation flow used by this page."""
         self._on_download_clicked(self.download_button)
 
+    def add_operation_listener(self, callback) -> None:
+        """Call ``callback(app_type, OperationState)`` whenever an install operation changes."""
+        self._operation_listeners.append(callback)
+
+    def cancel_operation(self) -> None:
+        self._on_cancel_clicked(self.cancel_button)
+
+    def _emit_operation(self, message: str | None = None) -> None:
+        if message is None:
+            message = self.workflow_status.get_text() if self.workflow_status.get_visible() else ""
+        state = OperationState(
+            busy=self._busy,
+            message=message,
+            fraction=self.progress_bar.get_fraction() if self.progress_bar.get_visible() else None,
+            cancellable=self.cancel_button.get_visible() and self.cancel_button.get_sensitive(),
+        )
+        for callback in list(self._operation_listeners):
+            callback(self.app_type, state)
+
     def _load_recovery_jobs(self) -> None:
         if not self.app_type:
             return
@@ -840,6 +873,7 @@ class InstallationPage(Gtk.Box):
             button.set_sensitive(False)
         for button in self._recovery_buttons:
             button.set_sensitive(False)
+        self._emit_operation()
 
     def _post_progress(self, progress: InstallProgress) -> None:
         GLib.idle_add(self._show_progress, progress)
@@ -882,6 +916,7 @@ class InstallationPage(Gtk.Box):
         else:
             message = progress.phase.replace("-", " ").capitalize() + "…"
         self.workflow_status.set_text(message)
+        self._emit_operation()
         return GLib.SOURCE_REMOVE
 
     def _on_cancel_clicked(self, _button: Gtk.Button) -> None:
@@ -889,6 +924,7 @@ class InstallationPage(Gtk.Box):
             self._cancel_event.set()
             self.cancel_button.set_label("Canceling…")
             self.cancel_button.set_sensitive(False)
+            self._emit_operation()
 
     def _operation_finished(self, result: InstallResult | None, error: Exception | None) -> bool:
         self._busy = False
@@ -901,8 +937,10 @@ class InstallationPage(Gtk.Box):
             if isinstance(error, DownloadCancelled):
                 self.workflow_status.set_text(str(error))
                 self.workflow_status.set_visible(True)
+                self._emit_operation()
             else:
                 self.workflow_status.set_visible(False)
+                self._emit_operation(message=f"Installation failed: {error}")
                 self._show_error("Installation failed", str(error))
             return GLib.SOURCE_REMOVE
         if result is not None:
@@ -916,6 +954,7 @@ class InstallationPage(Gtk.Box):
             self._refresh_all(reload_library=True, reload_recovery=True)
         else:
             self._refresh_all(reload_library=False, reload_recovery=True)
+        self._emit_operation()
         return GLib.SOURCE_REMOVE
 
     @staticmethod
@@ -1188,93 +1227,93 @@ class SettingsPage(Gtk.Box):
         heading.set_halign(Gtk.Align.START)
         self.append(heading)
 
-        status_label = Gtk.Label()
-        status_label.set_wrap(True)
-        status_label.set_justify(Gtk.Justification.CENTER)
-        if status.available:
-            status_label.set_markup("<b>Rosemary detected</b>")
-            path_label = Gtk.Label(label=status.executable)
-            path_label.set_selectable(True)
-            path_label.set_wrap(True)
-            path_label.add_css_class("dim-label")
-            rosemary_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
-            rosemary_box.append(status_label)
-            rosemary_box.append(path_label)
-            self.rosemary_status_label = status_label
-            self.rosemary_detail_label = path_label
-        else:
-            status_label.set_markup("<b>Rosemary not found</b>")
-            message = "Rosemary is required to launch Roblox. Install it separately or choose an existing executable below."
-            if status.error:
-                message += f"\n{status.error}"
-            detail = Gtk.Label(label=message)
-            detail.set_wrap(True)
-            detail.set_justify(Gtk.Justification.CENTER)
-            detail.set_max_width_chars(60)
-            detail.add_css_class("dim-label")
-            rosemary_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
-            rosemary_box.append(status_label)
-            rosemary_box.append(detail)
-            self.rosemary_status_label = status_label
-            self.rosemary_detail_label = detail
-        rosemary_heading = Gtk.Label(label="Rosemary")
-        rosemary_heading.set_xalign(0)
-        rosemary_heading.add_css_class("title-3")
-        self.append(rosemary_heading)
-        self.append(rosemary_box)
+        rosemary_group = Adw.PreferencesGroup.new()
+        rosemary_group.set_title("Rosemary")
+        rosemary_group.set_description("Roseblox launches Player and Studio through Rosemary.")
+        self.rosemary_row = Adw.ActionRow.new()
+        self.rosemary_row.set_title("Rosemary")
+        self.rosemary_row.set_subtitle_selectable(True)
+        self.rosemary_icon = Gtk.Image.new_from_icon_name("content-loading-symbolic")
+        self.rosemary_row.add_prefix(self.rosemary_icon)
+        recheck = Gtk.Button.new_with_label("Check Again")
+        recheck.set_valign(Gtk.Align.CENTER)
+        recheck.connect("clicked", lambda *_: self.window.recheck_rosemary())
+        self.rosemary_row.add_suffix(recheck)
+        rosemary_group.add(self.rosemary_row)
 
-        rosemary_actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        choose_rosemary = Gtk.Button.new_with_label("Choose executable…")
-        choose_rosemary.connect("clicked", lambda *_: self.window.choose_rosemary_executable())
-        rosemary_actions.append(choose_rosemary)
-        use_path = Gtk.Button.new_with_label("Use PATH detection")
+        self.install_rosemary_row = Adw.ActionRow.new()
+        self.install_rosemary_row.set_title("Install from the AUR")
+        self.rosemary_spinner = Gtk.Spinner()
+        self.rosemary_spinner.set_visible(False)
+        self.install_rosemary_row.add_suffix(self.rosemary_spinner)
+        self.stop_waiting_button = Gtk.Button.new_with_label("Stop Waiting")
+        self.stop_waiting_button.set_valign(Gtk.Align.CENTER)
+        self.stop_waiting_button.set_visible(False)
+        self.stop_waiting_button.connect("clicked", lambda *_: self.window.stop_waiting_for_rosemary())
+        self.install_rosemary_row.add_suffix(self.stop_waiting_button)
+        self.install_rosemary_button = Gtk.Button.new_with_label("Install Rosemary")
+        self.install_rosemary_button.set_valign(Gtk.Align.CENTER)
+        self.install_rosemary_button.add_css_class("suggested-action")
+        self.install_rosemary_button.connect("clicked", lambda *_: self.window.install_rosemary())
+        self.install_rosemary_row.add_suffix(self.install_rosemary_button)
+        rosemary_group.add(self.install_rosemary_row)
+        self._rosemary_install_state = RosemaryInstallState()
+        self._rosemary_status = status
+
+        executable_row = Adw.ActionRow.new()
+        executable_row.set_title("Executable")
+        executable_row.set_subtitle("Choose a specific build, or find “rosemary” in PATH automatically.")
+        use_path = Gtk.Button.new_with_label("Use PATH")
+        use_path.set_valign(Gtk.Align.CENTER)
         use_path.connect("clicked", self._use_rosemary_path)
-        rosemary_actions.append(use_path)
-        setup_button = Gtk.Button.new_with_label("Open first-time setup")
+        executable_row.add_suffix(use_path)
+        choose_rosemary = Gtk.Button.new_with_label("Choose…")
+        choose_rosemary.set_valign(Gtk.Align.CENTER)
+        choose_rosemary.connect("clicked", lambda *_: self.window.choose_rosemary_executable())
+        executable_row.add_suffix(choose_rosemary)
+        rosemary_group.add(executable_row)
+
+        self.rosemary_input_row = Adw.ActionRow.new()
+        self.rosemary_input_row.set_title("Ctrl + left-click compatibility")
+        self.rosemary_input_row.set_subtitle("Checking this Rosemary build…")
+        rosemary_group.add(self.rosemary_input_row)
+
+        setup_row = Adw.ActionRow.new()
+        setup_row.set_title("First-time setup")
+        setup_row.set_subtitle("Review Rosemary, Roblox links, and installations in one place.")
+        setup_button = Gtk.Button.new_with_label("Open Setup")
+        setup_button.set_valign(Gtk.Align.CENTER)
         setup_button.connect("clicked", lambda *_: self.window.navigate_to("setup"))
-        rosemary_actions.append(setup_button)
-        self.append(rosemary_actions)
-        self.rosemary_input_status = Gtk.Label(label="Checking Rosemary input compatibility…")
-        self.rosemary_input_status.set_xalign(0)
-        self.rosemary_input_status.set_wrap(True)
-        self.rosemary_input_status.add_css_class("dim-label")
-        self.append(self.rosemary_input_status)
-        self._input_check_path = None
+        setup_row.add_suffix(setup_button)
+        rosemary_group.add(setup_row)
+        self.append(rosemary_group)
+        self._input_check_path: object = _NOT_CHECKED
         self._input_check_generation = 0
 
         url_group = Adw.PreferencesGroup.new()
-        url_group.set_title("Roblox URL handling")
-        url_group.set_description("Open supported Roblox Player and Studio links through Roseblox.")
+        url_group.set_title("Roblox Links")
+        url_group.set_description(
+            "Open roblox://, roblox-player://, roblox-studio:// and roblox-studio-auth:// links with Roseblox. "
+            "Turning this off restores the previous default application."
+        )
         self.url_switch = Gtk.Switch()
         self.url_switch.set_valign(Gtk.Align.CENTER)
         self.url_switch.connect("state-set", self._url_switch_changed)
-        url_row = Adw.ActionRow.new()
-        url_row.set_title("Handle Roblox URLs")
-        url_row.set_subtitle("Enabling this registers supported links for your user account.")
-        url_row.add_suffix(self.url_switch)
-        url_row.set_activatable_widget(self.url_switch)
-        url_group.add(url_row)
-        self.url_status_label = Gtk.Label(label="Checking desktop registration…")
-        self.url_status_label.set_xalign(0)
-        self.url_status_label.set_wrap(True)
-        status_row = Adw.ActionRow.new()
-        status_row.set_title("Registration status")
-        status_row.add_suffix(self.url_status_label)
-        url_group.add(status_row)
-        url_actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        self.url_repair_button = Gtk.Button.new_with_label("Repair registration")
+        self.url_row = Adw.ActionRow.new()
+        self.url_row.set_title("Open Roblox links with Roseblox")
+        self.url_row.set_subtitle("Checking desktop registration…")
+        self.url_repair_button = Gtk.Button.new_with_label("Repair")
+        self.url_repair_button.set_valign(Gtk.Align.CENTER)
+        self.url_repair_button.set_visible(False)
         self.url_repair_button.connect("clicked", lambda *_: self._run_url_change(True))
-        url_actions.append(self.url_repair_button)
-        self.url_notice = Gtk.Label()
-        self.url_notice.set_xalign(0)
-        self.url_notice.set_wrap(True)
-        url_actions.append(self.url_notice)
-        url_action_row = Adw.ActionRow.new()
-        url_action_row.set_title("Actions")
-        url_action_row.add_suffix(url_actions)
-        url_group.add(url_action_row)
+        self.url_row.add_suffix(self.url_repair_button)
+        self.url_row.add_suffix(self.url_switch)
+        self.url_row.set_activatable_widget(self.url_switch)
+        url_group.add(self.url_row)
         self.append(url_group)
         self._url_busy = False
+        self._url_message: str | None = None
+        self._render_rosemary()
 
         settings = {app: default_version_source(app) for app in ("player", "studio")}
         self._source_widgets = {}
@@ -1329,37 +1368,66 @@ class SettingsPage(Gtk.Box):
         threading.Thread(target=self._load_sources_worker, daemon=True).start()
 
     def apply_setup_snapshot(self, rosemary_status, setup_state, setup_error, handler_status) -> None:
-        if hasattr(self, "url_switch"):
-            self._url_switch_block = True
-            self.url_switch.set_active(bool(setup_state and setup_state.url_handlers_enabled))
-            self._url_switch_block = False
-            if setup_error:
-                self.url_status_label.set_text(f"Unable to load setup settings: {setup_error}")
-            elif handler_status is not None:
-                self.url_status_label.set_text(handler_status.message if not handler_status.error else handler_status.error)
-            self.url_repair_button.set_visible(bool(setup_state and setup_state.url_handlers_enabled and handler_status and not handler_status.registered))
-            self.url_switch.set_sensitive(not self._url_busy)
-            self.url_repair_button.set_sensitive(not self._url_busy)
-        if hasattr(self, "rosemary_status_label"):
-            if rosemary_status.available:
-                self.rosemary_status_label.set_markup("<b>Rosemary detected</b>")
-                self.rosemary_detail_label.set_text(rosemary_status.executable)
-            elif rosemary_status.error:
-                self.rosemary_status_label.set_markup("<b>Rosemary could not be verified</b>")
-                self.rosemary_detail_label.set_text(rosemary_status.error)
+        enabled = bool(setup_state and setup_state.url_handlers_enabled)
+        self._url_switch_block = True
+        self.url_switch.set_active(enabled)
+        self._url_switch_block = False
+        if not self._url_busy:
+            if self._url_message:
+                subtitle = self._url_message
+            elif setup_error:
+                subtitle = f"Unable to load setup settings: {setup_error}"
+            elif handler_status is None:
+                subtitle = "Registration status is unavailable."
             else:
-                self.rosemary_status_label.set_markup("<b>Rosemary not found</b>")
-                self.rosemary_detail_label.set_text(
-                    "Rosemary is required to launch Roblox. Install it separately or choose an existing executable below."
-                )
-            if rosemary_status.executable != self._input_check_path:
-                self._input_check_path = rosemary_status.executable
-                self._input_check_generation += 1
-                generation = self._input_check_generation
-                threading.Thread(
-                    target=self._check_rosemary_input_worker,
-                    args=(rosemary_status.executable, generation), daemon=True,
-                ).start()
+                subtitle = handler_status.error or handler_status.message
+            self.url_row.set_subtitle(subtitle)
+        self._url_message = None
+        self.url_repair_button.set_visible(
+            enabled and handler_status is not None and not handler_status.registered
+        )
+        self.url_switch.set_sensitive(not self._url_busy)
+        self.url_repair_button.set_sensitive(not self._url_busy)
+        self._rosemary_status = rosemary_status
+        self._render_rosemary()
+        if rosemary_status.executable != self._input_check_path:
+            self._input_check_path = rosemary_status.executable
+            self._input_check_generation += 1
+            generation = self._input_check_generation
+            threading.Thread(
+                target=self._check_rosemary_input_worker,
+                args=(rosemary_status.executable, generation), daemon=True,
+            ).start()
+
+    def apply_rosemary_install_state(self, state: RosemaryInstallState) -> None:
+        self._rosemary_install_state = state
+        self._render_rosemary()
+
+    def _render_rosemary(self) -> None:
+        status = self._rosemary_status
+        install = self._rosemary_install_state
+        if status.available:
+            self.rosemary_icon.set_from_icon_name("emblem-ok-symbolic")
+            self.rosemary_row.set_subtitle(status.executable)
+        elif status.error:
+            self.rosemary_icon.set_from_icon_name("dialog-warning-symbolic")
+            self.rosemary_row.set_subtitle(status.error)
+        else:
+            self.rosemary_icon.set_from_icon_name("dialog-warning-symbolic")
+            self.rosemary_row.set_subtitle("Not installed. Rosemary is required to launch Roblox.")
+        self.install_rosemary_row.set_visible(not status.available or install.waiting or bool(install.message))
+        self.install_rosemary_row.set_subtitle(
+            install.message or "Build the “rosemary” package with paru or yay in a terminal window."
+        )
+        if install.error:
+            self.install_rosemary_row.add_css_class("error-row")
+        else:
+            self.install_rosemary_row.remove_css_class("error-row")
+        self.rosemary_spinner.set_visible(install.waiting)
+        self.rosemary_spinner.set_spinning(install.waiting)
+        self.stop_waiting_button.set_visible(install.waiting)
+        self.install_rosemary_button.set_visible(not install.waiting and not status.available)
+        self.install_rosemary_button.set_label("Try Again" if install.error else "Install Rosemary")
 
     def _check_rosemary_input_worker(self, executable, generation) -> None:
         if not executable:
@@ -1373,12 +1441,12 @@ class SettingsPage(Gtk.Box):
         if generation != self._input_check_generation:
             return GLib.SOURCE_REMOVE
         if supported is True:
-            message = "Ctrl + left-click compatibility is enabled for Roseblox-launched apps."
+            message = "Enabled. Ctrl + left-click acts as a normal left-click in Roseblox-launched apps."
         elif supported is False:
-            message = "This Rosemary build does not advertise the Ctrl + left-click compatibility option; default input behavior is retained."
+            message = "Not supported by this Rosemary build; default input behavior is kept."
         else:
-            message = "Ctrl + left-click compatibility is unavailable until Rosemary is detected."
-        self.rosemary_input_status.set_text(message)
+            message = "Available once Rosemary is detected."
+        self.rosemary_input_row.set_subtitle(message)
         return GLib.SOURCE_REMOVE
 
     def _url_switch_changed(self, switch, active) -> bool:
@@ -1393,30 +1461,27 @@ class SettingsPage(Gtk.Box):
         self._url_busy = True
         self.url_switch.set_sensitive(False)
         self.url_repair_button.set_sensitive(False)
-        self.url_notice.set_text("Updating per-user desktop registration…")
+        self.url_row.set_subtitle("Updating desktop registration…")
         threading.Thread(target=self._url_worker, args=(enable,), daemon=True).start()
 
     def _url_worker(self, enable: bool) -> None:
         try:
             status = self.url_handlers.enable() if enable else self.url_handlers.disable()
-            message = status.message
+            message = None
         except Exception as error:
             status = None
-            message = f"URL handling was not changed successfully: {str(error)[:500]}"
+            message = f"Roblox link handling was not changed: {str(error)[:500]}"
         GLib.idle_add(self._url_done, enable, status, message)
 
     def _url_done(self, enable, status, message) -> bool:
         self._url_busy = False
-        self.url_notice.set_text(message)
-        if status is not None and status.enabled:
-            self._url_switch_block = True
-            self.url_switch.set_active(True)
-            self._url_switch_block = False
-        elif status is not None and not enable:
-            self._url_switch_block = True
-            self.url_switch.set_active(False)
-            self._url_switch_block = False
+        self._url_message = message
+        if message:
+            self.url_row.set_subtitle(message)
+        elif status is not None:
+            self.url_row.set_subtitle(status.message)
         self.url_switch.set_sensitive(True)
+        self.url_repair_button.set_sensitive(True)
         self.window.refresh_pages(reload_library=False, reload_preferences=True)
         return GLib.SOURCE_REMOVE
 

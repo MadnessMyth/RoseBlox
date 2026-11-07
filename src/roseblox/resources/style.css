@@ -88,3 +88,44 @@ window {
 .home-card-status {
   font-weight: 600;
 }
+
+.setup-page {
+  background-color: @view_bg_color;
+  background-image: radial-gradient(ellipse at 50% 0%, alpha(@accent_bg_color, 0.30), transparent 55%);
+}
+
+.setup-hero {
+  margin-bottom: 4px;
+}
+
+.setup-badge {
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 0.85em;
+  font-weight: 700;
+}
+
+.setup-badge.badge-done {
+  color: #8ff0a4;
+  background-color: alpha(#2ec27e, 0.18);
+}
+
+.setup-badge.badge-attention {
+  color: #ffbe6f;
+  background-color: alpha(#e66100, 0.20);
+}
+
+.setup-badge.badge-optional {
+  color: alpha(@window_fg_color, 0.75);
+  background-color: alpha(@window_fg_color, 0.10);
+}
+
+.setup-badge.badge-working {
+  color: @accent_color;
+  background-color: alpha(@accent_color, 0.18);
+}
+
+row.error-row .subtitle {
+  color: #ff938c;
+  opacity: 1;
+}

@@ -36,6 +36,9 @@ class RosebloxApplication(Adw.Application):
 
     def do_startup(self) -> None:
         Adw.Application.do_startup(self)
+        # The stylesheet defines a dark palette; a light system scheme would otherwise
+        # draw libadwaita's white lists and entries on top of it.
+        Adw.StyleManager.get_default().set_color_scheme(Adw.ColorScheme.FORCE_DARK)
         display = Gdk.Display.get_default()
         if display is None:
             return

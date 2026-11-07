@@ -1,6 +1,7 @@
 """Main application window and sidebar navigation."""
 
 import threading
+import time
 
 import gi
 gi.require_version("Adw", "1")
@@ -14,11 +15,20 @@ from .backend.preferences import (
     PreferencesStore,
     resolve_preferred_installation,
 )
-from .backend.rosemary import detect_rosemary, save_rosemary_executable
-from .backend.setup import SetupState, SetupStore
+from .backend.rosemary import RosemaryStatus, detect_rosemary, save_rosemary_executable
+from .backend.rosemary_install import (
+    RosemaryInstallError,
+    RosemaryInstallState,
+    plan_rosemary_install,
+    start_rosemary_install,
+)
+from .backend.setup import SetupSettingsError, SetupState, SetupStore
 from .backend.url_handlers import URLHandlerService, URLHandlerStatus
 from .backend.version_settings import VersionSettingsStore
 from .pages import PAGE_DEFINITIONS, create_page
+
+# Building the AUR package compiles Rosemary from source, which can take a long time.
+_ROSEMARY_INSTALL_WAIT_SECONDS = 2 * 60 * 60
 
 
 def _scrolled_content(widget: Gtk.Widget) -> Gtk.Widget:
@@ -67,13 +77,17 @@ class RosebloxWindow(Adw.ApplicationWindow):
         self._refresh_pending_setup = False
         self._snapshot_generation = 0
         self._pending_roblox_url: str | None = None
+        self.rosemary_install = RosemaryInstallState()
+        self._rosemary_install_process = None
+        self._rosemary_install_deadline = 0.0
 
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.set_content(root)
 
         header = Adw.HeaderBar()
         header.add_css_class("main-header")
-        header.set_title_widget(Adw.WindowTitle(title="Roseblox", subtitle="Roblox through Rosemary"))
+        self._window_title = Adw.WindowTitle(title="Roseblox", subtitle="Roblox through Rosemary")
+        header.set_title_widget(self._window_title)
         root.append(header)
 
         content = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
@@ -115,13 +129,27 @@ class RosebloxWindow(Adw.ApplicationWindow):
         setup_scroller.set_child(self.onboarding_page)
         self._stack.add_named(setup_scroller, "setup")
 
-        sidebar = Gtk.StackSidebar()
-        sidebar.set_stack(self._stack)
-        sidebar.set_size_request(200, -1)
-        sidebar.add_css_class("navigation-sidebar")
-        content.append(sidebar)
+        self._sidebar = Gtk.StackSidebar()
+        self._sidebar.set_stack(self._stack)
+        self._sidebar.set_size_request(200, -1)
+        self._sidebar.add_css_class("navigation-sidebar")
+        content.append(self._sidebar)
         content.append(self._stack)
+        self._stack.connect("notify::visible-child-name", self._visible_page_changed)
+        try:
+            self.setup_state = self.setup_store.load()
+        except SetupSettingsError:
+            pass
+        else:
+            self._initial_page_chosen = True
+            self._stack.set_visible_child_name("home" if self.setup_state.onboarding_completed else "setup")
+        self._visible_page_changed(self._stack)
         self.refresh_pages(reload_library=True, reload_recovery=True, reload_preferences=True)
+
+    def _visible_page_changed(self, stack, _pspec=None) -> None:
+        in_setup = stack.get_visible_child_name() == "setup"
+        self._sidebar.set_visible(not in_setup)
+        self._window_title.set_subtitle("First-time setup" if in_setup else "Roblox through Rosemary")
 
     def refresh_pages(
         self,
@@ -393,22 +421,96 @@ class RosebloxWindow(Adw.ApplicationWindow):
         if error:
             self._show_window_error("Could not configure Rosemary", error)
         else:
-            self.rosemary_status = status
-            for page in self.pages.values():
-                if hasattr(page, "rosemary_status"):
-                    page.rosemary_status = status
-            if self.settings_page is not None:
-                self.settings_page.apply_setup_snapshot(
-                    status,
-                    getattr(self, "setup_state", None),
-                    None,
-                    getattr(self, "url_handler_status", None),
-                )
-            self.onboarding_page.apply_snapshot(
-                status, getattr(self, "setup_state", None), None,
-                getattr(self, "url_handler_status", None), self.library_records, self.library_validation,
-            )
+            self._apply_rosemary_status(status)
         return GLib.SOURCE_REMOVE
+
+    def _apply_rosemary_status(self, status: RosemaryStatus) -> None:
+        self.rosemary_status = status
+        for page in self.pages.values():
+            if hasattr(page, "rosemary_status"):
+                page.rosemary_status = status
+        if self.settings_page is not None:
+            self.settings_page.apply_setup_snapshot(
+                status,
+                getattr(self, "setup_state", None),
+                None,
+                getattr(self, "url_handler_status", None),
+            )
+        self.onboarding_page.apply_snapshot(
+            status, getattr(self, "setup_state", None), None,
+            getattr(self, "url_handler_status", None), self.library_records, self.library_validation,
+        )
+        if status.available and self.rosemary_install.waiting:
+            self._finish_rosemary_install(RosemaryInstallState(False, f"Rosemary is ready at {status.executable}."))
+
+    def recheck_rosemary(self) -> None:
+        threading.Thread(target=self._recheck_rosemary_worker, daemon=True).start()
+
+    def _recheck_rosemary_worker(self) -> None:
+        status = detect_rosemary()
+        GLib.idle_add(self._rosemary_rechecked, status)
+
+    def _rosemary_rechecked(self, status: RosemaryStatus) -> bool:
+        if status != self.rosemary_status or self.rosemary_install.waiting:
+            self._apply_rosemary_status(status)
+        return GLib.SOURCE_REMOVE
+
+    def install_rosemary(self) -> None:
+        """Open a terminal running the AUR helper, then watch for Rosemary to appear."""
+        if self.rosemary_install.waiting:
+            return
+        try:
+            plan = plan_rosemary_install()
+            self._rosemary_install_process = start_rosemary_install(plan)
+        except RosemaryInstallError as error:
+            self._set_rosemary_install_state(RosemaryInstallState(False, str(error), error=True))
+            return
+        self._rosemary_install_deadline = time.monotonic() + _ROSEMARY_INSTALL_WAIT_SECONDS
+        self._set_rosemary_install_state(
+            RosemaryInstallState(
+                True,
+                f"Continue in the terminal running “{plan.display_command}”. "
+                "Roseblox will detect Rosemary as soon as the installation finishes.",
+            )
+        )
+        GLib.timeout_add_seconds(2, self._poll_rosemary_install)
+
+    def stop_waiting_for_rosemary(self) -> None:
+        if self.rosemary_install.waiting:
+            self._finish_rosemary_install(
+                RosemaryInstallState(False, "Stopped waiting. Use Check Again after the installation finishes.")
+            )
+
+    def _poll_rosemary_install(self) -> bool:
+        if not self.rosemary_install.waiting:
+            return GLib.SOURCE_REMOVE
+        process = self._rosemary_install_process
+        exit_status = process.poll() if process is not None else None
+        if exit_status not in (None, 0):
+            self._finish_rosemary_install(
+                RosemaryInstallState(
+                    False,
+                    "The installation did not finish. Review the terminal output, then try again.",
+                    error=True,
+                )
+            )
+            self.recheck_rosemary()
+            return GLib.SOURCE_REMOVE
+        if time.monotonic() > self._rosemary_install_deadline:
+            self.stop_waiting_for_rosemary()
+            return GLib.SOURCE_REMOVE
+        self.recheck_rosemary()
+        return GLib.SOURCE_CONTINUE
+
+    def _finish_rosemary_install(self, state: "RosemaryInstallState") -> None:
+        self._rosemary_install_process = None
+        self._set_rosemary_install_state(state)
+
+    def _set_rosemary_install_state(self, state: "RosemaryInstallState") -> None:
+        self.rosemary_install = state
+        self.onboarding_page.apply_rosemary_install_state(state)
+        if self.settings_page is not None:
+            self.settings_page.apply_rosemary_install_state(state)
 
     def _show_window_error(self, title: str, message: str) -> None:
         dialog = Adw.MessageDialog.new(self, title, message[:1000])
