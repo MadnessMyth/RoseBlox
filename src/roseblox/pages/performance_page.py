@@ -32,7 +32,7 @@ from ..backend.flag_catalog import (
     flag_info,
     load_cached_allowlist,
 )
-from ..backend import diagnostics, gamemode
+from ..backend import diagnostics, gamemode, mangohud
 from ..backend.gpu import list_gpus
 from ..backend.rosemary import build_launch_arguments
 from ..backend.rosemary_paths import (
@@ -215,6 +215,7 @@ class PerformancePage(Gtk.Box):
         self.backups = []
         self.gpus = []
         self.gamemode_available = False
+        self.mangohud_available = False
         self._gpu_values: list[str | None] = []
         self.framerate_caps: dict[str, int | None] = {}
         self.caches: dict[str, list] = {}
@@ -323,6 +324,8 @@ class PerformancePage(Gtk.Box):
         group.add(self.framerate_row)
         self.gamemode_row = self._switch_row("GameMode", self._gamemode_changed)
         group.add(self.gamemode_row)
+        self.mangohud_row = self._switch_row("MangoHud overlay", self._mangohud_changed)
+        group.add(self.mangohud_row)
         section.add(group)
 
         quality = Adw.PreferencesGroup.new()
@@ -552,6 +555,15 @@ class PerformancePage(Gtk.Box):
                 "Asks Feral GameMode to tune the system while the application runs."
                 if self.gamemode_available
                 else "GameMode is not installed or its daemon cannot be reached."
+            )
+            self.mangohud_row.switch.set_active(config.mangohud)
+            self.mangohud_row.switch.set_sensitive(self.mangohud_available or config.mangohud)
+            self.mangohud_row.set_subtitle(
+                "Shows frame rate and frame times through MangoHud's Vulkan layer; configure it in "
+                "~/.config/MangoHud/MangoHud.conf. If it does not appear, add ROSEMARY_GLIBC=host to the "
+                "Rosemary environment."
+                if self.mangohud_available
+                else "MangoHud's Vulkan layer is not installed."
             )
             flags = config.fast_flags
             self._select(self.msaa_row, MSAA_CHOICES, flags.get(MSAA_FLAG))
@@ -833,6 +845,10 @@ class PerformancePage(Gtk.Box):
         if not self._updating and row.get_selected() < len(self._gpu_values):
             self._set_draft(replace(self.draft, gpu=self._gpu_values[row.get_selected()]))
 
+    def _mangohud_changed(self, switch, _pspec) -> None:
+        if not self._updating:
+            self._set_draft(replace(self.draft, mangohud=switch.get_active()))
+
     def _gamemode_changed(self, switch, _pspec) -> None:
         if not self._updating:
             self._set_draft(replace(self.draft, gamemode=switch.get_active()))
@@ -1058,12 +1074,12 @@ class PerformancePage(Gtk.Box):
                 configs[app_type] = self.store.load(app_type)
         except LaunchConfigError as failure:
             error = str(failure)
-        hardware = (list_gpus(), gamemode.available()) if detect else None
+        hardware = (list_gpus(), gamemode.available(), mangohud.layer_installed()) if detect else None
         GLib.idle_add(self._loaded, configs, error, self.store.backups(), hardware)
 
     def _loaded(self, configs: dict[str, AppLaunchConfig], error: str | None, backups, hardware=None) -> bool:
         if hardware is not None:
-            self.gpus, self.gamemode_available = hardware
+            self.gpus, self.gamemode_available, self.mangohud_available = hardware
         for app_type, config in configs.items():
             unchanged = self.drafts[app_type] == self.saved[app_type]
             self.saved[app_type] = config

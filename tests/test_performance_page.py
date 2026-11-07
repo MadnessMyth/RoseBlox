@@ -149,9 +149,11 @@ class PerformancePageTests(unittest.TestCase):
         self.fetches = []
         self.gpus = []
         self.gamemode_available = False
+        self.mangohud_available = False
         for target, replacement in (
             ("roseblox.pages.performance_page.list_gpus", lambda: list(self.gpus)),
             ("roseblox.pages.performance_page.gamemode.available", lambda: self.gamemode_available),
+            ("roseblox.pages.performance_page.mangohud.layer_installed", lambda: self.mangohud_available),
         ):
             patcher = patch(target, side_effect=replacement)
             patcher.start()
@@ -202,6 +204,19 @@ class PerformancePageTests(unittest.TestCase):
         self.assertFalse(page.draft.gamemode)
         page.preset_row.set_selected(0)
         self.assertEqual({"FFlagDebugSkyGray": "True"}, page.draft.fast_flags)
+
+    def test_mangohud_is_offered_when_its_layer_is_installed(self):
+        page = self._page()
+        self.assertFalse(page.mangohud_row.switch.get_sensitive())
+        self.assertIn("not installed", page.mangohud_row.get_subtitle())
+        self.mangohud_available = True
+        page.reload(detect=True)
+        self.assertTrue(self._wait_until(lambda: page.mangohud_available))
+        self.assertTrue(page.mangohud_row.switch.get_sensitive())
+        page.mangohud_row.switch.set_active(True)
+        self.assertTrue(page.draft.mangohud)
+        self.assertIn("MangoHud: off → on", page.changes)
+        self.assertIn("MANGOHUD=1", page.environment_preview.get_text())
 
     def test_a_saved_gpu_that_is_gone_stays_visible(self):
         self.store.save("player", AppLaunchConfig(gpu="0000:03:00.0"), "Old card")

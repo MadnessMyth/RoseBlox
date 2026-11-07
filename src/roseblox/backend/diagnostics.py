@@ -12,6 +12,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from .. import __version__
+from . import mangohud
 from .gpu import Gpu
 from .rosemary_paths import (
     directory_size,
@@ -119,6 +120,7 @@ def collect(
         ("GPUs", "; ".join(f"{gpu.name} ({gpu.driver or 'no driver'}, {gpu.slot})" for gpu in gpus) or "None found"),
         ("Vulkan drivers", ", ".join(vulkan_drivers()) or "None found"),
         ("GameMode", "Available" if gamemode_available else "Not available"),
+        ("MangoHud layer", "Installed" if mangohud.layer_installed(env) else "Not installed"),
         ("Session", session_type(env)),
         ("Kernel", platform.release()),
         ("CPU", f"{cpu_model()} ({os.cpu_count() or '?'} threads)"),

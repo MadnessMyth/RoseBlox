@@ -27,6 +27,7 @@ PRESENTATION_MODES = ("mailbox", "fifo", "fifo_relaxed", "immediate")
 PRESENTATION_MODE_VARIABLE = "ROSEMARY_METAL_PRESENTATION_MODE"
 REFRESH_RATE_VARIABLE = "ROSEMARY_SCREEN_REFRESH_RATE"
 GUEST_ENVIRONMENT_VARIABLE = "ROSEMARY_ENVIRON"
+MANGOHUD_VARIABLE = "MANGOHUD"
 MIN_REFRESH_RATE = 24
 MAX_REFRESH_RATE = 1000
 MAX_ENTRIES = 100
@@ -47,6 +48,7 @@ _DEDICATED_CONTROLS = {
     REFRESH_RATE_VARIABLE: "the refresh rate setting",
     GUEST_ENVIRONMENT_VARIABLE: "the Roblox environment list",
     "ROSEMARY_PLAIN_CTRL_CLICK": "the Ctrl+click setting",
+    MANGOHUD_VARIABLE: "the MangoHud setting",
 }
 _BLOCKED_ARGUMENTS = {
     "ticket",
@@ -125,6 +127,7 @@ class AppLaunchConfig:
     refresh_rate: int | None = None
     gpu: str | None = None
     gamemode: bool = False
+    mangohud: bool = False
 
     def problems(self) -> list[str]:
         found: list[str] = []
@@ -162,6 +165,8 @@ class AppLaunchConfig:
             found.append("The GPU must be a PCI address such as 0000:01:00.0.")
         if not isinstance(self.gamemode, bool):
             found.append("The GameMode setting must be true or false.")
+        if not isinstance(self.mangohud, bool):
+            found.append("The MangoHud setting must be true or false.")
         return found
 
     def validated(self) -> "AppLaunchConfig":
@@ -190,6 +195,7 @@ class AppLaunchConfig:
             "refresh_rate": self.refresh_rate,
             "gpu": self.gpu,
             "gamemode": self.gamemode,
+            "mangohud": self.mangohud,
         }
 
     @classmethod
@@ -206,6 +212,7 @@ class AppLaunchConfig:
             refresh_rate=document.get("refresh_rate"),
             gpu=document.get("gpu"),
             gamemode=document.get("gamemode", False),
+            mangohud=document.get("mangohud", False),
         ).validated()
 
 
@@ -221,6 +228,8 @@ def effective_environment(
     gpu = find_gpu(config.gpu, list(gpus))
     if gpu is not None:
         environment.update(gpu.vulkan_environment())
+    if config.mangohud:
+        environment[MANGOHUD_VARIABLE] = "1"
     environment.update(config.rosemary_environment)
     if config.presentation_mode is not None:
         environment[PRESENTATION_MODE_VARIABLE] = config.presentation_mode
@@ -265,6 +274,7 @@ def describe_changes(
     )
     setting("GPU", gpu_names.get(old.gpu, old.gpu), gpu_names.get(new.gpu, new.gpu), "chosen by Rosemary")
     setting("GameMode", "on" if old.gamemode else "off", "on" if new.gamemode else "off", "off")
+    setting("MangoHud", "on" if old.mangohud else "off", "on" if new.mangohud else "off", "off")
     for label, before, after in (
         ("FastFlag", old.fast_flags, new.fast_flags),
         ("Rosemary variable", old.rosemary_environment, new.rosemary_environment),

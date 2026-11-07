@@ -109,6 +109,31 @@ class GpuTests(unittest.TestCase):
         self.assertFalse(AppLaunchConfig.from_document({}).gamemode)
 
 
+class MangoHudTests(unittest.TestCase):
+    def test_the_layer_is_found_from_its_manifest(self):
+        from roseblox.backend import mangohud
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            env = {"HOME": directory, "XDG_DATA_DIRS": str(root / "share")}
+            self.assertFalse(mangohud.layer_installed(env))
+            layers = root / "share" / "vulkan" / "implicit_layer.d"
+            layers.mkdir(parents=True)
+            (layers / "MangoHud.x86_64.json").write_text("not json")
+            self.assertFalse(mangohud.layer_installed(env))
+            (layers / "MangoHud.x86_64.json").write_text(
+                '{"file_format_version": "1.0.0", "layer": {"name": "VK_LAYER_MANGOHUD_overlay_x86_64"}}'
+            )
+            self.assertTrue(mangohud.layer_installed(env))
+
+    def test_the_overlay_is_enabled_per_application(self):
+        self.assertEqual("1", effective_environment(AppLaunchConfig(mangohud=True), {})["MANGOHUD"])
+        self.assertNotIn("MANGOHUD", effective_environment(AppLaunchConfig(), {}))
+        self.assertEqual(1, len(AppLaunchConfig(mangohud="on").problems()))
+        self.assertEqual(1, len(AppLaunchConfig(rosemary_environment={"MANGOHUD": "1"}).problems()))
+        self.assertEqual(["MangoHud: off → on"], describe_changes(AppLaunchConfig(), AppLaunchConfig(mangohud=True)))
+
+
 class _Reply:
     def __init__(self, value):
         self.value = value
