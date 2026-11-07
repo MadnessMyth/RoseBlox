@@ -189,9 +189,14 @@ class UpdateNotifierApplication(Gio.Application):
             print("roseblox update check: the `roseblox` command is not in PATH", file=sys.stderr)
             return
         try:
-            self.spawn([os.path.abspath(executable), *arguments], default_log_directory() / "roseblox.log")
+            process = self.spawn([os.path.abspath(executable), *arguments], default_log_directory() / "roseblox.log")
         except OSError as error:
             print(f"roseblox update check: could not open Roseblox: {error}", file=sys.stderr)
+            return
+        pid = getattr(process, "pid", None)
+        if isinstance(pid, int):
+            # The checker outlives the window it opens; reap it so no zombie is left.
+            GLib.child_watch_add(GLib.PRIORITY_DEFAULT, pid, lambda *_: None)
 
     def _on_update(self, _action, parameter) -> None:
         app_type = parameter.get_string()

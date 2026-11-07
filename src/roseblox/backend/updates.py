@@ -153,7 +153,7 @@ def _default_data_home() -> Path:
     return Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share")
 
 
-def _spawn_detached(arguments: list[str], log_path: Path | None = None) -> None:
+def _spawn_detached(arguments: list[str], log_path: Path | None = None) -> subprocess.Popen:
     output = subprocess.DEVNULL
     if log_path is not None:
         try:
@@ -162,7 +162,7 @@ def _spawn_detached(arguments: list[str], log_path: Path | None = None) -> None:
         except OSError:
             output = subprocess.DEVNULL
     try:
-        subprocess.Popen(
+        return subprocess.Popen(
             arguments,
             stdin=subprocess.DEVNULL,
             stdout=output,
