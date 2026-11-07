@@ -103,6 +103,34 @@ Click the bell at the top right. The badge counts the items in the center:
 
 ![Download with speed and time left](screenshots/13-download-speed.png)
 
+## Performance
+
+![Performance](screenshots/14-performance.png)
+
+The **Performance** page holds launch settings for **Player** and **Studio** separately; pick one with the buttons at the top. Changes are only a draft until you click **Review Changes…**, which lists every change and saves it when you click **Apply**. **Discard** throws the draft away. The settings apply the next time that app starts, and nothing is set for your whole desktop.
+
+- **Graphics & frame pacing**
+  - **Preset**: **Balanced** (Rosemary's defaults), **Performance** (no anti-aliasing, low textures, no grass, and GameMode when it is installed), or **Visual Quality** (V-Sync, 4× anti-aliasing, high textures, and the highest graphics level). A preset changes only those settings; anything else you set stays. When you change one of them by hand, the preset shows **Custom**.
+  - **GPU**: which graphics card Rosemary renders with, on computers with more than one.
+  - **Presentation mode**: **Mailbox** (Rosemary's default: low latency, no tearing), **FIFO** (V-Sync), **FIFO relaxed** (V-Sync that may tear when a frame is late), or **Immediate** (lowest latency, may tear).
+  - **Refresh rate**: the display refresh rate Roblox is told about. Roblox builds its in-game **Maximum Frame Rate** menu from this value, so choose your monitor's rate to get matching choices there. **Roblox frame rate cap** shows what that menu is set to.
+  - **GameMode**: asks Feral GameMode (`gamemoded`) to optimize the system while the app runs. Install it with `sudo pacman -S gamemode`. If GameMode cannot start, the app still opens and the notification center says why.
+  - **MangoHud overlay**: shows MangoHud's FPS and frame time overlay. Rosemary translates Metal to Vulkan, so MangoHud's Vulkan layer works. Install it with `sudo pacman -S mangohud`; the switch is greyed out until it is installed. Configure the overlay in `~/.config/MangoHud/MangoHud.conf`.
+  - **Roblox graphics**: anti-aliasing, texture quality, graphics quality level, hide grass, gray sky, and disable DPI scaling. These are FastFlags from Roblox's allowlist, so they also work in Player.
+- **FastFlags**: the flags written to the app's `ClientAppSettings.json` when it starts. The Player uses only flags in Roblox's own allowlist, which Roseblox downloads and marks; other flags are kept but have no effect there. Studio uses every flag. **Import…** and **Export…** read and write a JSON file, and **Use Flags from Installation** copies the flags already in the installed app. Roseblox never adds flags you did not choose, and backs up a `ClientAppSettings.json` it did not write before replacing it.
+- **Keyboard & window**
+  - **Command key**: which key acts as the Mac Command key. **Super, and Ctrl for editing** keeps Super as Command and also lets Ctrl+A, Ctrl+C, Ctrl+V, Ctrl+X, Ctrl+Y and Ctrl+Z work, which is handy in Studio. **Ctrl** and **Alt** make that key the Command key instead.
+  - **Titlebar**: Rosemary's Mac-style titlebar, or your desktop's titlebar with the menus in a row below it.
+- **Environment** (closed by default): extra variables for Rosemary, and variables for Roblox itself. Variables that look like passwords, tokens or cookies are refused, and so are library injection variables (`LD_PRELOAD`, `DYLD_*` and similar). Settings that have their own control, such as the presentation mode, must be changed there.
+- **Launch arguments** (closed by default): extra arguments for Roblox, passed after the link Roseblox opens and never through a shell. Login ticket and authentication arguments are refused. The preview shows the whole command.
+- **Backups** (closed by default): every change you apply first saves the previous settings of both apps. **Restore…** brings one back, and **Reset to Defaults…** clears the settings of the selected app. The 30 newest backups are kept in `~/.config/roseblox/backups/`.
+- **Caches** (closed by default): Rosemary's Metal shader cache and Roblox's caches, with their sizes. **Move to Trash…** moves one to your desktop's trash, so you can still get it back. Roblox and Rosemary rebuild them by themselves, so the first start afterwards can be slower. Your Roblox login and settings are never touched.
+- **Diagnostics** (closed by default): Rosemary's version, your GPUs and Vulkan drivers, whether GameMode and MangoHud are installed, and other details for bug reports. **Copy Report** copies them as text.
+
+The settings are saved in `~/.config/roseblox/launch-config.json`.
+
+![Every Performance section open](screenshots/15-performance-all-sections.png)
+
 ## Update
 
 ### Roseblox
@@ -187,4 +215,8 @@ To update after a new release, run `git pull` in `~/RoseBlox`, then `makepkg -si
 | ZIP import fails with "bsdtar" | `sudo pacman -S --needed libarchive` |
 | Roblox closed or failed and you want its output | Rosemary's output is in `~/.local/state/roseblox/logs/player.log` or `studio.log`; the previous run is in `player.log.1` or `studio.log.1`. |
 | No update notifications | Check that **Settings → Updates** says "On". If it says the login entry is missing, turn the switch off and on again. Make sure notifications for "Roseblox" are allowed in your desktop's notification settings, then click **Check Now**. You are only notified for apps you have installed, and not for a version you skipped. |
+| A FastFlag has no effect in Player | The Player uses only flags in Roblox's allowlist. Flags outside it have a warning under **Performance → FastFlags** ("Roblox Player ignores this flag"), and work only in Studio. |
+| Roblox stopped starting after you changed Performance settings | Open **Performance → Backups** and **Restore…** the backup from before the change, or click **Reset to Defaults…**. |
+| "GameMode was not started" | Install GameMode (`sudo pacman -S gamemode`) and log out and back in. The app still runs, only without GameMode. |
+| The MangoHud overlay does not appear | Check that **Performance → Diagnostics** says the MangoHud layer is installed, and that the overlay is not hidden in `~/.config/MangoHud/MangoHud.conf` (MangoHud's toggle key is Right Shift + F12). |
 | Clicking **Update** in a notification does nothing | See `~/.local/state/roseblox/logs/roseblox.log` for the window it opened. |

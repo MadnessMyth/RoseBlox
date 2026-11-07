@@ -207,10 +207,12 @@ class PerformancePageTests(unittest.TestCase):
 
     def test_keyboard_and_titlebar_choices_edit_the_draft(self):
         page = self._page()
-        page.command_key_row.set_selected(2)
-        page.decorations_row.set_selected(2)
+        page.command_key_row.set_selected(1)
+        page.decorations_row.set_selected(1)
         self.assertEqual("super+ctrl:edit", page.draft.command_key)
         self.assertEqual("server", page.draft.decorations)
+        self.assertIn("Ctrl also works for copy", page.command_key_row.get_subtitle())
+        self.assertIn("Your desktop draws", page.decorations_row.get_subtitle())
         self.assertIn("ROSEMARY_COMMAND_KEY=super+ctrl:edit", page.environment_preview.get_text())
         page._discard_clicked(None)
         self.assertEqual(0, page.command_key_row.get_selected())

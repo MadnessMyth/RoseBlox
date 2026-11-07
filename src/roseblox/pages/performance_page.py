@@ -84,16 +84,26 @@ PRESET_CHOICES = (*((candidate.id, candidate.title) for candidate in PRESETS), (
 GRAY_SKY_FLAG = "FFlagDebugSkyGray"
 DPI_FLAG = "DFFlagDisableDPIScale"
 COMMAND_KEY_CHOICES = (
-    (None, "Rosemary default: Super acts as Command"),
-    ("ctrl", "Ctrl acts as Command, and Super as Ctrl"),
-    ("super+ctrl:edit", "Ctrl also works for copy, paste, cut, undo, redo and select all"),
-    ("alt", "Alt acts as Command, and Super as Option"),
+    (None, "Super (default)"),
+    ("super+ctrl:edit", "Super, and Ctrl for editing"),
+    ("ctrl", "Ctrl"),
+    ("alt", "Alt"),
 )
+COMMAND_KEY_DESCRIPTIONS = {
+    None: "Super acts as the Mac Command key.",
+    "super+ctrl:edit": "Super acts as Command, and Ctrl also works for copy, paste, cut, undo, redo and select all.",
+    "ctrl": "Ctrl acts as Command, and Super as Ctrl.",
+    "alt": "Alt acts as Command, and Super as Option.",
+}
 DECORATION_CHOICES = (
-    (None, "Rosemary default: Mac-style titlebar with menus"),
-    ("client", "Mac-style titlebar with menus"),
-    ("server", "Your desktop's titlebar, menus in a row below it"),
+    (None, "Mac-style (default)"),
+    ("server", "Desktop"),
 )
+DECORATION_DESCRIPTIONS = {
+    None: "Rosemary draws a Mac-style titlebar with the app's menus in it.",
+    "client": "Rosemary draws a Mac-style titlebar with the app's menus in it.",
+    "server": "Your desktop draws the titlebar; the app's menus are in a row below it.",
+}
 BACKUPS_SHOWN = 10
 
 
@@ -422,9 +432,6 @@ class PerformancePage(Gtk.Box):
         )
         group = Adw.PreferencesGroup.new()
         self.command_key_row = self._choice_row("Command key", COMMAND_KEY_CHOICES, self._command_key_changed)
-        self.command_key_row.set_subtitle(
-            "Mac shortcuts use Command. Desktops that keep Super's shortcuts for themselves can make Ctrl work instead."
-        )
         group.add(self.command_key_row)
         self.decorations_row = self._choice_row("Titlebar", DECORATION_CHOICES, self._decorations_changed)
         group.add(self.decorations_row)
@@ -576,7 +583,9 @@ class PerformancePage(Gtk.Box):
             self.refresh_row.set_selected(self._refresh_values.index(config.refresh_rate))
             self._show_gpu(config)
             self._select(self.command_key_row, COMMAND_KEY_CHOICES, config.command_key, describe=False)
+            self.command_key_row.set_subtitle(COMMAND_KEY_DESCRIPTIONS[config.command_key])
             self._select(self.decorations_row, DECORATION_CHOICES, config.decorations, describe=False)
+            self.decorations_row.set_subtitle(DECORATION_DESCRIPTIONS[config.decorations])
             self._show_framerate_cap()
             self.gamemode_row.switch.set_active(config.gamemode)
             self.gamemode_row.switch.set_sensitive(self.gamemode_available or config.gamemode)
