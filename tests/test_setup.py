@@ -17,6 +17,7 @@ from roseblox.backend.rosemary import (
 )
 from roseblox.backend.setup import SetupSettingsError, SetupStore
 from roseblox.backend.url_handlers import (
+    APP_DESKTOP_ID,
     DESKTOP_ID,
     SCHEME_TO_APP,
     SUPPORTED_SCHEMES,
@@ -56,7 +57,9 @@ class SetupStoreTests(unittest.TestCase):
 
 
 class URLHandlerTests(unittest.TestCase):
-    def _service(self, root, defaults=None, *, fail_on_set=None, fallback_to_installed=False):
+    def _service(
+        self, root, defaults=None, *, fail_on_set=None, fallback_to_installed=False, tools=(), app_entry=False
+    ):
         """Fake xdg-mime; ``fallback_to_installed`` mimics its search of installed entries."""
         defaults = dict(defaults or {})
         calls = []
@@ -64,19 +67,23 @@ class URLHandlerTests(unittest.TestCase):
         executable.parent.mkdir(parents=True, exist_ok=True)
         executable.write_text("#!/bin/sh\n", encoding="utf-8")
         executable.chmod(0o755)
-
-        def lookup(name):
-            return str(executable) if name == "roseblox" else "/usr/bin/xdg-mime"
+        paths = {"roseblox": str(executable), "xdg-mime": "/usr/bin/xdg-mime"}
+        paths.update({name: f"/usr/bin/{name}" for name in tools})
 
         def runner(arguments, **_kwargs):
             calls.append(list(arguments))
+            if arguments[0] != "/usr/bin/xdg-mime":
+                return subprocess.CompletedProcess(arguments, 0, "", "")
             if arguments[1] == "query":
                 mime_type = arguments[-1]
                 value = defaults.get(mime_type, "")
                 if value == DESKTOP_ID and service_ref:
                     try:
+                        section = ""
                         for line in service_ref[0].mimeapps_path.read_text(encoding="utf-8").splitlines():
-                            if line.startswith(mime_type + "="):
+                            if line.startswith("["):
+                                section = line
+                            elif section == "[Default Applications]" and line.startswith(mime_type + "="):
                                 entries = [item for item in line.split("=", 1)[1].split(";") if item]
                                 value = entries[0] if entries else ""
                                 break
@@ -119,11 +126,83 @@ class URLHandlerTests(unittest.TestCase):
             SetupStore(root / "config" / "setup.json"),
             data_home=root / "data",
             config_home=root / "config",
-            executable_lookup=lookup,
+            executable_lookup=paths.get,
             command_runner=runner,
+            data_dirs=[root / "system"],
         )
+        if app_entry:
+            entry = root / "system" / "applications" / APP_DESKTOP_ID
+            entry.parent.mkdir(parents=True, exist_ok=True)
+            entry.write_text("[Desktop Entry]\nName=Roseblox\n", encoding="utf-8")
         service_ref.append(service)
         return service, defaults, calls
+
+    def test_switching_refreshes_desktop_caches_when_available(self):
+        with tempfile.TemporaryDirectory() as directory:
+            service, _defaults, calls = self._service(
+                Path(directory), tools=("update-desktop-database", "kbuildsycoca6", "kbuildsycoca5")
+            )
+            service.enable()
+            applications = str(service.desktop_path.parent)
+            refreshes = [call for call in calls if call[0] != "/usr/bin/xdg-mime"]
+            self.assertEqual(
+                [["/usr/bin/update-desktop-database", "-q", applications], ["/usr/bin/kbuildsycoca6"]],
+                refreshes,
+            )
+            calls.clear()
+            service.disable()
+            self.assertIn(["/usr/bin/kbuildsycoca6"], calls)
+
+    def test_handler_entry_is_named_roseblox_and_replaces_older_owned_entries(self):
+        with tempfile.TemporaryDirectory() as directory:
+            service, _defaults, _calls = self._service(Path(directory))
+            service.desktop_path.parent.mkdir(parents=True, exist_ok=True)
+            service.desktop_path.write_text(
+                "[Desktop Entry]\nName=Roseblox Roblox URL Handler\nX-Roseblox-Managed=true\n", encoding="utf-8"
+            )
+            self.assertTrue(service.enable().registered)
+            desktop = service.desktop_path.read_text(encoding="utf-8")
+            self.assertIn("\nName=Roseblox\n", desktop)
+            self.assertIn("Icon=io.github.roseblox.Roseblox\n", desktop)
+
+    def test_enabled_links_list_the_installed_app_in_open_with_dialogs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            service, _defaults, _calls = self._service(Path(directory), app_entry=True)
+            service.mimeapps_path.parent.mkdir(parents=True, exist_ok=True)
+            service.mimeapps_path.write_text(
+                "[Added Associations]\nx-scheme-handler/roblox-player=org.vinegarhq.Sober.desktop;\n"
+                "text/plain=editor.desktop;\n",
+                encoding="utf-8",
+            )
+            self.assertTrue(service.enable().registered)
+            mimeapps = service.mimeapps_path.read_text(encoding="utf-8")
+            self.assertIn(
+                f"x-scheme-handler/roblox-player=org.vinegarhq.Sober.desktop;{APP_DESKTOP_ID};", mimeapps
+            )
+            for scheme in ("roblox", "roblox-studio", "roblox-studio-auth"):
+                self.assertIn(f"x-scheme-handler/{scheme}={APP_DESKTOP_ID};", mimeapps)
+            self.assertEqual(1, mimeapps.count("[Added Associations]"))
+
+            service.disable()
+            mimeapps = service.mimeapps_path.read_text(encoding="utf-8")
+            self.assertNotIn(APP_DESKTOP_ID, mimeapps)
+            self.assertIn("x-scheme-handler/roblox-player=org.vinegarhq.Sober.desktop;", mimeapps)
+            self.assertIn("text/plain=editor.desktop;", mimeapps)
+
+    def test_app_association_is_skipped_when_the_app_entry_is_not_installed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            service, _defaults, _calls = self._service(Path(directory))
+            service.enable()
+            self.assertNotIn(APP_DESKTOP_ID, service.mimeapps_path.read_text(encoding="utf-8"))
+
+    def test_the_app_entry_is_never_recorded_or_restored_as_the_previous_handler(self):
+        with tempfile.TemporaryDirectory() as directory:
+            mime = "x-scheme-handler/roblox-player"
+            service, _defaults, calls = self._service(Path(directory), {mime: APP_DESKTOP_ID})
+            service.enable()
+            self.assertIsNone(service.setup_store.load().previous_url_defaults[mime])
+            service.disable()
+            self.assertNotIn(["/usr/bin/xdg-mime", "default", APP_DESKTOP_ID, mime], calls)
 
     def test_supported_schemes_route_to_player_or_studio(self):
         self.assertEqual(

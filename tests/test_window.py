@@ -249,6 +249,19 @@ class RealWindowTests(unittest.TestCase):
 
 
 class EntryPointTests(unittest.TestCase):
+    def test_links_are_accepted_bare_or_after_the_option(self):
+        from roseblox.application import roblox_url_from_arguments
+
+        uri = "roblox-player:1+launchmode:play+gameinfo:abc"
+        self.assertIsNone(roblox_url_from_arguments([]))
+        self.assertEqual(uri, roblox_url_from_arguments([uri]))
+        self.assertEqual(uri, roblox_url_from_arguments(["--roblox-url", uri]))
+        for arguments in (["--roblox-url"], ["--bogus"], [uri, uri], ["--roblox-url", "--x"]):
+            with self.subTest(arguments=arguments), self.assertRaisesRegex(ValueError, "^Usage"):
+                roblox_url_from_arguments(arguments)
+        with self.assertRaisesRegex(ValueError, "^Invalid Roblox link"):
+            roblox_url_from_arguments(["https://example.com"])
+
     def test_command_line_arguments_reach_the_application(self):
         from roseblox import __main__ as entry_point
 

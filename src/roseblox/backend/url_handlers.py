@@ -23,8 +23,13 @@ SCHEME_TO_APP = {
 }
 SUPPORTED_SCHEMES = tuple(SCHEME_TO_APP)
 DESKTOP_ID = "io.github.roseblox.Roseblox-url-handler.desktop"
+# The packaged app entry also declares the schemes so "Open with" dialogs list Roseblox,
+# but only the managed handler entry above is ever made the default.
+APP_DESKTOP_ID = "io.github.roseblox.Roseblox.desktop"
+_OWN_DESKTOP_IDS = frozenset({DESKTOP_ID, APP_DESKTOP_ID})
 _SCHEME_MIME = {scheme: f"x-scheme-handler/{scheme}" for scheme in SUPPORTED_SCHEMES}
 _DESKTOP_MARKER = "X-Roseblox-Managed=true"
+_CACHE_REFRESH_TIMEOUT = 60
 
 
 class URLHandlerError(RuntimeError):
@@ -69,6 +74,11 @@ def _default_data_home() -> Path:
     return Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share")
 
 
+def _default_data_dirs() -> list[Path]:
+    value = os.environ.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share"
+    return [Path(item) for item in value.split(":") if item]
+
+
 def _default_config_home() -> Path:
     return Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
 
@@ -93,12 +103,20 @@ class URLHandlerService:
         config_home: Path | None = None,
         executable_lookup: Callable[[str], str | None] = shutil.which,
         command_runner: Callable[..., subprocess.CompletedProcess] = subprocess.run,
+        data_dirs: list[Path] | None = None,
     ) -> None:
         self.setup_store = setup_store or SetupStore()
         self.data_home = Path(data_home) if data_home is not None else _default_data_home()
         self.config_home = Path(config_home) if config_home is not None else _default_config_home()
         self.executable_lookup = executable_lookup
         self.command_runner = command_runner
+        self.data_dirs = list(data_dirs) if data_dirs is not None else _default_data_dirs()
+
+    def _app_entry_installed(self) -> bool:
+        return any(
+            (directory / "applications" / APP_DESKTOP_ID).is_file()
+            for directory in (self.data_home, *self.data_dirs)
+        )
 
     @property
     def desktop_path(self) -> Path:
@@ -121,13 +139,19 @@ class URLHandlerService:
         return (
             "[Desktop Entry]\n"
             "Type=Application\n"
-            "Name=Roseblox Roblox URL Handler\n"
+            "Name=Roseblox\n"
+            "Comment=Open Roblox links with Roseblox\n"
+            "Icon=io.github.roseblox.Roseblox\n"
             "NoDisplay=true\n"
             f"Exec={_desktop_quote(executable)} --roblox-url %u\n"
             "Terminal=false\n"
             f"MimeType={mime_types}\n"
             f"{_DESKTOP_MARKER}\n"
         )
+
+    @staticmethod
+    def _is_owned_entry(contents: str) -> bool:
+        return _DESKTOP_MARKER in contents.splitlines()
 
     def _write_owned_desktop(self, contents: str) -> bool:
         path = self.desktop_path
@@ -139,9 +163,10 @@ class URLHandlerService:
                 raise URLHandlerError(f"Could not inspect existing URL-handler entry: {error}") from error
             if existing == contents:
                 return False
-            raise URLHandlerError(
-                f"A different desktop entry already uses {DESKTOP_ID}; it was not overwritten."
-            )
+            if not self._is_owned_entry(existing):
+                raise URLHandlerError(
+                    f"A different desktop entry already uses {DESKTOP_ID}; it was not overwritten."
+                )
         temporary_path: Path | None = None
         try:
             with tempfile.NamedTemporaryFile(
@@ -242,15 +267,20 @@ class URLHandlerService:
             for scheme in SUPPORTED_SCHEMES:
                 mime_type = _SCHEME_MIME[scheme]
                 current = self._query_default(mime_type)
-                if current == DESKTOP_ID and state.previous_url_defaults is not None:
-                    old_defaults[mime_type] = state.previous_url_defaults.get(mime_type)
-                else:
-                    old_defaults[mime_type] = current
+                if current == DESKTOP_ID:
+                    current = (state.previous_url_defaults or {}).get(mime_type)
+                old_defaults[mime_type] = None if current in _OWN_DESKTOP_IDS else current
             contents = self._desktop_contents()
             self.setup_store.save_url_handlers(False, old_defaults)
             created = self._write_owned_desktop(contents)
             for scheme in SUPPORTED_SCHEMES:
                 self._set_default(DESKTOP_ID, _SCHEME_MIME[scheme])
+            if self._app_entry_installed():
+                # The handler entry is hidden, so this is what lists Roseblox in "Open with"
+                # dialogs; the app entry itself declares no schemes, so it never becomes
+                # an implicit default while URL handling is off.
+                self._add_app_associations()
+            self._refresh_desktop_caches()
             verified = self.check()
             if not verified.registered:
                 raise URLHandlerError(verified.error or verified.message)
@@ -258,8 +288,13 @@ class URLHandlerService:
             return self.check()
         except Exception as error:
             rollback_errors = self._restore_defaults(old_defaults)
+            try:
+                self._remove_mime_app_ids(self.mimeapps_path, {APP_DESKTOP_ID})
+            except URLHandlerError as cleanup_error:
+                rollback_errors.append(str(cleanup_error))
             if "created" in locals() and created:
                 self._remove_owned_desktop(contents)
+            self._refresh_desktop_caches()
             rollback_errors += self._verify_not_default()
             try:
                 self.setup_store.save_url_handlers(False, old_defaults if rollback_errors else {})
@@ -286,6 +321,7 @@ class URLHandlerService:
             self._remove_owned_desktop(expected)
         except (OSError, URLHandlerError) as error:
             errors.append(str(error))
+        self._refresh_desktop_caches()
         if not errors:
             errors = self._verify_not_default()
         if errors:
@@ -300,13 +336,38 @@ class URLHandlerService:
                 if self._query_default(mime_type) != DESKTOP_ID:
                     continue
                 old_default = previous.get(mime_type)
-                if old_default:
+                if old_default and old_default not in _OWN_DESKTOP_IDS:
                     self._set_default(old_default, mime_type)
                 else:
                     self._remove_own_default(mime_type)
             except URLHandlerError as error:
                 errors.append(str(error))
         return errors
+
+    def _refresh_desktop_caches(self) -> None:
+        """Rebuild the caches some desktops read instead of the files themselves.
+
+        KDE resolves handlers and mimeapps.list through KSycoca, and the generic
+        xdg-mime lookup trusts mimeinfo.cache, so a stale cache can keep sending links
+        to the old handler (or show a chooser without Roseblox). Best effort only.
+        """
+        commands: list[list[str]] = []
+        applications = self.desktop_path.parent
+        tool = self.executable_lookup("update-desktop-database")
+        if tool and applications.is_dir():
+            commands.append([tool, "-q", str(applications)])
+        for name in ("kbuildsycoca6", "kbuildsycoca5"):
+            tool = self.executable_lookup(name)
+            if tool:
+                commands.append([tool])
+                break
+        for command in commands:
+            try:
+                self.command_runner(
+                    command, check=False, capture_output=True, text=True, timeout=_CACHE_REFRESH_TIMEOUT
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                pass
 
     def _verify_not_default(self) -> list[str]:
         """Confirm Roseblox no longer handles any scheme.
@@ -325,18 +386,57 @@ class URLHandlerService:
         return errors
 
     def _remove_own_default(self, mime_type: str) -> None:
-        self._remove_mime_app_id(self.mimeapps_path, mime_type)
+        self._remove_mime_app_ids(self.mimeapps_path, {DESKTOP_ID}, {mime_type})
 
     def _remove_own_associations(self) -> None:
-        for scheme in SUPPORTED_SCHEMES:
-            self._remove_mime_app_id(self.mimeapps_path, _SCHEME_MIME[scheme])
+        self._remove_mime_app_ids(self.mimeapps_path, _OWN_DESKTOP_IDS)
 
-    @staticmethod
-    def _remove_mime_app_id(path: Path, mime_type: str) -> None:
+    def _add_app_associations(self) -> None:
+        path = self.mimeapps_path
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+        except (OSError, UnicodeError) as error:
+            raise URLHandlerError(f"Could not read MIME associations: {error}") from error
+        pending = [_SCHEME_MIME[scheme] for scheme in SUPPORTED_SCHEMES]
+        result: list[str] = []
+        section = ""
+
+        def add_pending() -> None:
+            result.extend(f"{mime_type}={APP_DESKTOP_ID};" for mime_type in pending)
+            pending.clear()
+
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith("[") and stripped.endswith("]"):
+                if section == "Added Associations":
+                    add_pending()
+                section = stripped[1:-1]
+            elif section == "Added Associations":
+                key, separator, value = line.partition("=")
+                if separator and key.strip() in pending:
+                    ids = [item for item in value.strip().split(";") if item]
+                    if APP_DESKTOP_ID not in ids:
+                        ids.append(APP_DESKTOP_ID)
+                    line = f"{key.strip()}={';'.join(ids)};"
+                    pending.remove(key.strip())
+            result.append(line)
+        if section == "Added Associations":
+            add_pending()
+        if pending:
+            if result and result[-1].strip():
+                result.append("")
+            result.append("[Added Associations]")
+            add_pending()
+        self._write_mimeapps(path, "\n".join(result) + "\n")
+
+    @classmethod
+    def _remove_mime_app_ids(cls, path: Path, ids: set[str] | frozenset[str], mime_types: set[str] | None = None) -> None:
         if not path.exists():
             return
-        text = path.read_text(encoding="utf-8")
-        lines = text.splitlines(keepends=True)
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+        except (OSError, UnicodeError) as error:
+            raise URLHandlerError(f"Could not read MIME associations: {error}") from error
         section = ""
         result: list[str] = []
         for line in lines:
@@ -349,13 +449,17 @@ class URLHandlerService:
             if section not in {"Default Applications", "Added Associations"} or not match:
                 result.append(line)
                 continue
-            if match.group(2) != mime_type:
+            if match.group(2) not in (mime_types if mime_types is not None else _SCHEME_MIME.values()):
                 result.append(line)
                 continue
-            ids = [item for item in match.group(4).split(";") if item and item != DESKTOP_ID]
-            if ids:
+            kept = [item for item in match.group(4).split(";") if item and item not in ids]
+            if kept:
                 ending = match.group(5) or ""
-                result.append(match.group(1) + match.group(2) + match.group(3) + ";".join(ids) + ";" + ending)
+                result.append(match.group(1) + match.group(2) + match.group(3) + ";".join(kept) + ";" + ending)
+        cls._write_mimeapps(path, "".join(result))
+
+    @staticmethod
+    def _write_mimeapps(path: Path, text: str) -> None:
         temporary_path: Path | None = None
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -363,7 +467,7 @@ class URLHandlerService:
                 mode="w", encoding="utf-8", dir=path.parent, delete=False
             ) as stream:
                 temporary_path = Path(stream.name)
-                stream.writelines(result)
+                stream.write(text)
             os.replace(temporary_path, path)
         except OSError as error:
             if temporary_path is not None:
@@ -380,9 +484,7 @@ class URLHandlerService:
             return
         except (OSError, UnicodeError) as error:
             raise URLHandlerError(f"Could not inspect Roseblox URL-handler file: {error}") from error
-        if expected is not None and contents != expected:
-            raise URLHandlerError("The URL-handler desktop entry was changed outside Roseblox; it was left in place.")
-        if expected is None and (_DESKTOP_MARKER not in contents or "Name=Roseblox Roblox URL Handler" not in contents):
+        if contents != expected and not self._is_owned_entry(contents):
             raise URLHandlerError("The URL-handler desktop entry cannot be verified as Roseblox-owned; it was left in place.")
         try:
             self.desktop_path.unlink()

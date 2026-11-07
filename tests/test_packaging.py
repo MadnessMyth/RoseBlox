@@ -43,7 +43,8 @@ class ArchPackagingTests(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn("Type=Application", desktop)
-        self.assertIn("Exec=roseblox", desktop)
+        self.assertIn("Exec=roseblox %u\n", desktop)
+        self.assertNotIn("MimeType=", desktop)
         self.assertIn("TryExec=roseblox", desktop)
         self.assertIn("Icon=io.github.roseblox.Roseblox", desktop)
         icon = ROOT / "packaging" / "arch" / "io.github.roseblox.Roseblox.svg"

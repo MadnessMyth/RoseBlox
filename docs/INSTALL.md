@@ -142,5 +142,5 @@ To update after a new release, run `git pull` in `~/RoseBlox`, then `makepkg -si
 | "No AUR helper found" | Install `paru` (step 2) or `yay`, then click **Try Again**. |
 | "No supported terminal found" | Install a terminal such as `kitty`, `konsole` or `gnome-console`, or set the `TERMINAL` environment variable. |
 | Rosemary installed, but Roseblox says it is missing | Click **Check Again**. If Rosemary is outside `PATH`, use **Settings → Executable → Choose…**. |
-| Roblox links open the wrong app | In **Settings → Roblox Links**, click **Repair**, or turn the switch off and on again. |
+| Roblox links open the wrong app, or a "Choose application" window appears without Roseblox | Make sure **Settings → Roblox Links → Open Roblox links with Roseblox** is on. If it already is, click **Repair** (needed once after updating from v0.2.0), or turn the switch off and on again. If your browser asks, choose **Roseblox** and tick "always". |
 | ZIP import fails with "bsdtar" | `sudo pacman -S --needed libarchive` |

@@ -23,6 +23,28 @@ def _print_error(command_line, message: str) -> None:
         sys.stderr.write(message)
 
 
+USAGE = "Usage: roseblox [[--roblox-url] URI]"
+
+
+def roblox_url_from_arguments(arguments: list[str]) -> str | None:
+    """Return the Roblox link to open, or raise ValueError with a message for the user.
+
+    The app's desktop entry passes links as a bare %u (as "Open with" dialogs do);
+    the URL-handler entry passes them after --roblox-url.
+    """
+    explicit = arguments[:1] == ["--roblox-url"]
+    if explicit:
+        arguments = arguments[1:]
+    if not arguments and not explicit:
+        return None
+    if len(arguments) != 1 or arguments[0].startswith("-"):
+        raise ValueError(USAGE)
+    try:
+        return parse_roblox_url(arguments[0]).uri
+    except ValueError as error:
+        raise ValueError(f"Invalid Roblox link: {error}") from error
+
+
 class RosebloxApplication(Adw.Application):
     """The Roseblox application object."""
 
@@ -60,17 +82,11 @@ class RosebloxApplication(Adw.Application):
         window.present()
 
     def _on_command_line(self, _application, command_line) -> int:
-        arguments = command_line.get_arguments()[1:]
-        uri = None
-        if arguments:
-            if len(arguments) != 2 or arguments[0] != "--roblox-url":
-                _print_error(command_line, "Usage: roseblox [--roblox-url URI]\n")
-                return 2
-            try:
-                uri = parse_roblox_url(arguments[1]).uri
-            except ValueError as error:
-                _print_error(command_line, f"Invalid Roblox link: {error}\n")
-                return 2
+        try:
+            uri = roblox_url_from_arguments(command_line.get_arguments()[1:])
+        except ValueError as error:
+            _print_error(command_line, f"{error}\n")
+            return 2
         self.activate()
         if uri is not None:
             window = self.props.active_window
