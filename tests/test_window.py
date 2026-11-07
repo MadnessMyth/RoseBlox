@@ -248,5 +248,17 @@ class RealWindowTests(unittest.TestCase):
         self.assertEqual([(player_id, "roblox://placeId=1")], launched)
 
 
+class EntryPointTests(unittest.TestCase):
+    def test_command_line_arguments_reach_the_application(self):
+        from roseblox import __main__ as entry_point
+
+        argv = ["roseblox", "--roblox-url", "roblox://placeId=1"]
+        with patch.object(entry_point.sys, "argv", argv), patch.object(
+            entry_point.RosebloxApplication, "__init__", return_value=None
+        ), patch.object(entry_point.RosebloxApplication, "run", return_value=0) as run:
+            self.assertEqual(0, entry_point.main())
+        run.assert_called_once_with(argv)
+
+
 if __name__ == "__main__":
     unittest.main()
