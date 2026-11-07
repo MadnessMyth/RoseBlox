@@ -20,6 +20,12 @@ PAGE_DEFINITIONS = (
         "power-profile-performance-symbolic",
         "Graphics, frame pacing, FastFlags, environment and launch arguments for Player and Studio.",
     ),
+    (
+        "mods",
+        "Mods",
+        "color-select-symbolic",
+        "Replacement fonts, cursors, sounds and textures for Player and Studio.",
+    ),
     ("settings", "Settings", "emblem-system-symbolic", "Configure Roseblox and its Rosemary integration."),
 )
 
@@ -60,6 +66,15 @@ def create_page(
         scroller = Gtk.ScrolledWindow()
         scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         scroller.set_child(PerformancePage(window))
+        scroller.set_hexpand(True)
+        scroller.set_vexpand(True)
+        return scroller
+    if page_id == "mods":
+        from .mods_page import ModsPage
+
+        scroller = Gtk.ScrolledWindow()
+        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroller.set_child(ModsPage(window))
         scroller.set_hexpand(True)
         scroller.set_vexpand(True)
         return scroller

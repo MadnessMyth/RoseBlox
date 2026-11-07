@@ -59,6 +59,7 @@ class LaunchSession:
     plain_ctrl_click_active: bool = False
     log_path: Path | None = None
     gamemode_error: str | None = None
+    mods_message: str | None = None
 
     def output_text(self) -> str:
         """Rosemary's output so far: the end of its log file, or captured pipe output."""

@@ -23,6 +23,7 @@ from ..backend.library import (
     LibraryDataError,
 )
 from ..backend.launch_config import LaunchConfigStore
+from ..backend.mods import prepare_launch as prepare_mods
 from ..backend.preferences import PreferencesError
 from ..backend.rosemary_install import RosemaryInstallState
 from ..backend.discord_rpc import effective_application_id, valid_application_id
@@ -1055,6 +1056,7 @@ class InstallationPage(Gtk.Box):
     def _launch_worker(self, installation_id: str, record: InstallationRecord, guest_arguments=()) -> None:
         try:
             setup_state = getattr(self.window, "setup_state", None)
+            mods_message = prepare_mods(record)
             session = launch_application(
                 record,
                 self.rosemary_status,
@@ -1062,6 +1064,7 @@ class InstallationPage(Gtk.Box):
                 plain_ctrl_click=getattr(setup_state, "plain_ctrl_click", True),
                 launch_config=LaunchConfigStore().load(record.app_type),
             )
+            session.mods_message = mods_message
             wait_for_running(session)
         except Exception as error:
             GLib.idle_add(self._launch_failed, installation_id, str(error))
@@ -1091,6 +1094,9 @@ class InstallationPage(Gtk.Box):
         gamemode_error = getattr(session, "gamemode_error", None)
         if gamemode_error and center is not None and app_type is not None:
             center.notify(app_type, f"GameMode was not started: {gamemode_error}", "failed")
+        mods_message = getattr(session, "mods_message", None)
+        if mods_message and center is not None and app_type is not None:
+            center.notify(app_type, mods_message, "failed")
         threading.Thread(
             target=self._watch_worker,
             args=(installation_id, session),

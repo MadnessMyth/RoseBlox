@@ -110,6 +110,7 @@ class RosebloxWindow(Adw.ApplicationWindow):
         self.pages = {}
         self.settings_page = None
         self.performance_page = None
+        self.mods_page = None
 
         for page_id, title, icon_name, description in PAGE_DEFINITIONS:
             page = create_page(
@@ -134,6 +135,8 @@ class RosebloxWindow(Adw.ApplicationWindow):
                 self.settings_page = _scrolled_content(page)
             elif page_id == "performance":
                 self.performance_page = _scrolled_content(page)
+            elif page_id == "mods":
+                self.mods_page = _scrolled_content(page)
 
         from .pages.notification_center import NotificationCenter
         self.notification_center = NotificationCenter(self)
