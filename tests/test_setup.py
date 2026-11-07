@@ -15,7 +15,7 @@ from roseblox.backend.rosemary import (
     rosemary_supports_plain_ctrl_click,
     save_rosemary_executable,
 )
-from roseblox.backend.setup import ClosePreference, SetupSettingsError, SetupStore
+from roseblox.backend.setup import Appearance, ClosePreference, SetupSettingsError, SetupStore
 from roseblox.backend.url_handlers import (
     APP_DESKTOP_ID,
     DESKTOP_ID,
@@ -107,6 +107,40 @@ class SetupStoreTests(unittest.TestCase):
                 {"version": 1, "close_after_launch": {"phone": {"enabled": True}}},
                 {"version": 1, "update_checks_enabled": 1},
                 {"version": 1, "skipped_versions": {"player": 5}},
+            ):
+                with self.subTest(document=document):
+                    text = json.dumps(document)
+                    path.write_text(text, encoding="utf-8")
+                    with self.assertRaises(SetupSettingsError):
+                        SetupStore(path).load()
+                    self.assertEqual(text, path.read_text(encoding="utf-8"))
+
+    def test_appearance_input_and_layout_preferences_persist(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = SetupStore(Path(directory) / "setup.json")
+            state = store.load()
+            self.assertEqual(Appearance("roseblox", "dark", "roseblox"), state.appearance)
+            self.assertTrue(state.plain_ctrl_click)
+            self.assertEqual({}, state.expanded_sections)
+            store.save_appearance(Appearance("system", "system", "teal"))
+            store.save_plain_ctrl_click(False)
+            store.save_section_expanded("advanced", True)
+            store.save_section_expanded("appearance", False)
+            loaded = SetupStore(store.path).load()
+        self.assertEqual(Appearance("system", "system", "teal"), loaded.appearance)
+        self.assertFalse(loaded.plain_ctrl_click)
+        self.assertEqual({"advanced": True, "appearance": False}, loaded.expanded_sections)
+        with self.assertRaises(ValueError):
+            store.save_appearance(Appearance("roseblox", "dark", "magenta"))
+
+    def test_invalid_appearance_is_reported_without_overwriting(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "setup.json"
+            for document in (
+                {"version": 1, "appearance": {"colors": "neon"}},
+                {"version": 1, "appearance": "dark"},
+                {"version": 1, "plain_ctrl_click": "yes"},
+                {"version": 1, "expanded_sections": {"advanced": 1}},
             ):
                 with self.subTest(document=document):
                     text = json.dumps(document)
@@ -456,10 +490,31 @@ class RosemarySetupTests(unittest.TestCase):
                 self.assertEqual("1", environment[PLAIN_CTRL_CLICK_VARIABLE])
                 self.assertEqual("preserved", environment["ROSEBLOX_TEST_ENV"])
                 self.assertEqual(original_value, os.environ.get(PLAIN_CTRL_CLICK_VARIABLE))
-                self.assertTrue(session.plain_ctrl_click_supported)
+                self.assertTrue(session.plain_ctrl_click_active)
                 self.assertEqual(
                     "roblox-player:1+launchmode:play", popen.call_args.args[0][-1]
                 )
+
+    def test_turning_the_input_setting_off_keeps_rosemary_default_behavior(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bundle = self._bundle(root, "player")
+            executable = root / "rosemary"
+            executable.write_bytes(b"ELF\0" + PLAIN_CTRL_CLICK_VARIABLE.encode() + b"\0")
+            executable.chmod(0o755)
+            fake_process = subprocess.CompletedProcess([], 0)
+            fake_process.pid = 23458
+            fake_process.poll = lambda: None
+            with patch.dict(os.environ, {PLAIN_CTRL_CLICK_VARIABLE: "1"}):
+                with patch("roseblox.backend.rosemary.subprocess.Popen", return_value=fake_process) as popen:
+                    session = launch_application(
+                        {"app_type": "player", "bundle_path": str(bundle)},
+                        RosemaryStatus(str(executable)),
+                        log_directory=root / "logs",
+                        plain_ctrl_click=False,
+                    )
+            self.assertNotIn(PLAIN_CTRL_CLICK_VARIABLE, popen.call_args.kwargs["env"])
+            self.assertFalse(session.plain_ctrl_click_active)
 
     def test_unsupported_rosemary_launch_does_not_claim_fix_is_active(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -478,7 +533,7 @@ class RosemarySetupTests(unittest.TestCase):
                 with patch("roseblox.backend.rosemary.subprocess.Popen", return_value=fake_process) as popen:
                     session = launch_application(record, RosemaryStatus(str(executable)), log_directory=root / "logs")
             self.assertNotIn(PLAIN_CTRL_CLICK_VARIABLE, popen.call_args.kwargs["env"])
-            self.assertFalse(session.plain_ctrl_click_supported)
+            self.assertFalse(session.plain_ctrl_click_active)
             self.assertFalse(rosemary_supports_plain_ctrl_click(executable))
 
     def test_release_launcher_reports_the_runtime_capability(self):

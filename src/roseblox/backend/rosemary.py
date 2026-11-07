@@ -52,7 +52,7 @@ class LaunchSession:
     stdout: bytes = b""
     stderr: bytes = b""
     output_done: threading.Event | None = None
-    plain_ctrl_click_supported: bool = False
+    plain_ctrl_click_active: bool = False
     log_path: Path | None = None
 
     def output_text(self) -> str:
@@ -363,6 +363,7 @@ def launch_application(
     *,
     guest_arguments: tuple[str, ...] | list[str] = (),
     log_directory: Path | None = None,
+    plain_ctrl_click: bool = True,
 ) -> LaunchSession:
     """Start Rosemary asynchronously and return a bundle-bound process session.
 
@@ -378,10 +379,13 @@ def launch_application(
         detail = f" {status.error}" if status.error else ""
         raise RosemaryUnavailableError(f"Rosemary is required to launch Roblox.{detail}")
 
-    supports_plain_ctrl_click = rosemary_supports_plain_ctrl_click(status.executable)
+    plain_ctrl_click_active = plain_ctrl_click and rosemary_supports_plain_ctrl_click(status.executable)
     environment = os.environ.copy()
-    if supports_plain_ctrl_click:
+    if plain_ctrl_click_active:
         environment[PLAIN_CTRL_CLICK_VARIABLE] = "1"
+    else:
+        # Turned off in Settings means Rosemary's default, even if the variable is set globally.
+        environment.pop(PLAIN_CTRL_CLICK_VARIABLE, None)
     arguments = build_launch_arguments(status.executable, bundle_path, guest_arguments)
     try:
         log_path, log_stream = _open_launch_log(log_directory or default_log_directory(), app_type)
@@ -403,6 +407,6 @@ def launch_application(
         rosemary_path=status.executable,
         bundle_path=os.path.abspath(bundle_path),
         output_done=done,
-        plain_ctrl_click_supported=supports_plain_ctrl_click,
+        plain_ctrl_click_active=plain_ctrl_click_active,
         log_path=log_path,
     )

@@ -1035,7 +1035,13 @@ class InstallationPage(Gtk.Box):
 
     def _launch_worker(self, installation_id: str, record: InstallationRecord, guest_arguments=()) -> None:
         try:
-            session = launch_application(record, self.rosemary_status, guest_arguments=guest_arguments)
+            setup_state = getattr(self.window, "setup_state", None)
+            session = launch_application(
+                record,
+                self.rosemary_status,
+                guest_arguments=guest_arguments,
+                plain_ctrl_click=getattr(setup_state, "plain_ctrl_click", True),
+            )
             wait_for_running(session)
         except Exception as error:
             GLib.idle_add(self._launch_failed, installation_id, str(error))

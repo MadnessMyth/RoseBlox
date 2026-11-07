@@ -15,6 +15,7 @@ class LaunchPageWorkerTests(unittest.TestCase):
     def test_unexpected_launch_error_is_dispatched_to_failure_handler(self):
         page = SimpleNamespace(
             rosemary_status=object(),
+            window=SimpleNamespace(),
             _launching_ids={"install-id"},
             _refresh_all=Mock(),
             _show_error=Mock(),

@@ -34,6 +34,27 @@ class ClosePreference:
         return self.enabled and (from_link or not self.only_from_link)
 
 
+COLOR_THEMES = ("roseblox", "system")
+COLOR_STYLES = ("dark", "light", "system")
+ACCENT_CHOICES = (
+    "roseblox", "system", "blue", "teal", "green", "yellow", "orange", "red", "pink", "purple", "slate",
+)
+
+
+@dataclass(frozen=True)
+class Appearance:
+    """``colors`` picks Roseblox's palette or the desktop's; ``style`` is dark, light or system."""
+
+    colors: str = "roseblox"
+    style: str = "dark"
+    accent: str = "roseblox"
+
+    def validate(self) -> "Appearance":
+        if self.colors not in COLOR_THEMES or self.style not in COLOR_STYLES or self.accent not in ACCENT_CHOICES:
+            raise ValueError("Unknown appearance setting.")
+        return self
+
+
 @dataclass(frozen=True)
 class SetupState:
     onboarding_completed: bool = False
@@ -42,6 +63,9 @@ class SetupState:
     close_after_launch: dict[str, ClosePreference] = field(default_factory=dict)
     update_checks_enabled: bool = False
     skipped_versions: dict[str, str] = field(default_factory=dict)
+    appearance: Appearance = field(default_factory=Appearance)
+    plain_ctrl_click: bool = True
+    expanded_sections: dict[str, bool] = field(default_factory=dict)
 
     def close_preference(self, app_type: str) -> ClosePreference:
         return self.close_after_launch.get(app_type, ClosePreference())
@@ -85,6 +109,9 @@ class SetupStore:
             close_after_launch=self._close_preferences(document.get("close_after_launch", {})),
             update_checks_enabled=self._boolean(document, "update_checks_enabled"),
             skipped_versions=self._skipped_versions(document.get("skipped_versions", {})),
+            appearance=self._appearance(document.get("appearance", {})),
+            plain_ctrl_click=self._boolean(document, "plain_ctrl_click", True),
+            expanded_sections=self._expanded_sections(document.get("expanded_sections", {})),
         )
 
     def complete_onboarding(self) -> SetupState:
@@ -142,9 +169,54 @@ class SetupStore:
         if app_type not in APP_TYPES:
             raise ValueError(f"Unknown Roblox application type: {app_type!r}")
 
+    def save_appearance(self, appearance: Appearance) -> SetupState:
+        appearance.validate()
+        return self._update(appearance={
+            "colors": appearance.colors, "style": appearance.style, "accent": appearance.accent,
+        })
+
+    def save_plain_ctrl_click(self, enabled: bool) -> SetupState:
+        if not isinstance(enabled, bool):
+            raise ValueError("The Ctrl + left-click setting must be on or off.")
+        return self._update(plain_ctrl_click=enabled)
+
+    def save_section_expanded(self, section: str, expanded: bool) -> SetupState:
+        if not isinstance(section, str) or not section or not isinstance(expanded, bool):
+            raise ValueError("Invalid Settings section state.")
+
+        def change(document: dict) -> None:
+            sections = dict(document.get("expanded_sections") or {})
+            sections[section] = expanded
+            document["expanded_sections"] = sections
+
+        return self._modify(change)
+
     @staticmethod
-    def _boolean(document: dict, key: str) -> bool:
-        value = document.get(key, False)
+    def _appearance(value: object) -> Appearance:
+        invalid = SetupSettingsError("Saved appearance settings are invalid; the file was not changed.")
+        if not isinstance(value, dict):
+            raise invalid
+        defaults = Appearance()
+        try:
+            return Appearance(
+                value.get("colors", defaults.colors),
+                value.get("style", defaults.style),
+                value.get("accent", defaults.accent),
+            ).validate()
+        except ValueError as error:
+            raise invalid from error
+
+    @staticmethod
+    def _expanded_sections(value: object) -> dict[str, bool]:
+        if not isinstance(value, dict) or any(
+            not isinstance(key, str) or not isinstance(state, bool) for key, state in value.items()
+        ):
+            raise SetupSettingsError("Saved Settings layout is invalid; the file was not changed.")
+        return dict(value)
+
+    @staticmethod
+    def _boolean(document: dict, key: str, default: bool = False) -> bool:
+        value = document.get(key, default)
         if not isinstance(value, bool):
             raise SetupSettingsError("Roseblox setup settings have an invalid format; the file was not changed.")
         return value
