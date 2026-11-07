@@ -4,9 +4,9 @@
 
 - [x] Bump the version in `pyproject.toml`, `src/roseblox/__init__.py`, and `packaging/arch-git/PKGBUILD`.
 - [x] Run the full unittest suite, Python compilation, and `git diff --check`.
-- [ ] Create the annotated `v0.2.1` Git tag on the release commit.
-- [ ] Point `packaging/arch/PKGBUILD` at the `v0.2.1` tag, record the archive and desktop entry checksums, and regenerate `.SRCINFO`.
-- [ ] Build `packaging/arch/PKGBUILD` with `makepkg` on Arch Linux and install it.
+- [x] Create the annotated `v0.2.1` Git tag on the release commit.
+- [x] Point `packaging/arch/PKGBUILD` at the `v0.2.1` tag, record the archive and desktop entry checksums, and regenerate `.SRCINFO`.
+- [x] Build `packaging/arch/PKGBUILD` with `makepkg` on Arch Linux and install it.
 - [ ] Create the GitHub release for `v0.2.1` from these notes.
 
 ## Release notes — v0.2.1
