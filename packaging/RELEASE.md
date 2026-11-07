@@ -1,5 +1,27 @@
 # Roseblox release preparation
 
+## Release checklist — v0.2.1
+
+- [x] Bump the version in `pyproject.toml`, `src/roseblox/__init__.py`, and `packaging/arch-git/PKGBUILD`.
+- [x] Run the full unittest suite, Python compilation, and `git diff --check`.
+- [ ] Create the annotated `v0.2.1` Git tag on the release commit.
+- [ ] Point `packaging/arch/PKGBUILD` at the `v0.2.1` tag, record the archive and desktop entry checksums, and regenerate `.SRCINFO`.
+- [ ] Build `packaging/arch/PKGBUILD` with `makepkg` on Arch Linux and install it.
+- [ ] Create the GitHub release for `v0.2.1` from these notes.
+
+## Release notes — v0.2.1
+
+### Fixed
+
+- Choosing Roseblox in a browser's or KDE Plasma's "Choose application" window opened only the launcher instead of joining the game. The menu entry now passes the link, and `roseblox URI` is accepted as well as `roseblox --roblox-url URI`.
+- Roseblox was missing from those windows. While **Open Roblox links with Roseblox** is on, Roseblox is now listed next to other Roblox launchers; while it is off, installing Roseblox still never takes over Roblox links.
+- Turning link handling on or off now rebuilds the desktop caches that KDE Plasma and other launchers read, so the change applies immediately.
+- The link handler entry is named "Roseblox" and uses the Roseblox icon.
+
+### Upgrading
+
+If link handling was on in v0.2.0, Settings shows that it needs attention after the update. Click **Repair** once.
+
 ## Release checklist — v0.2.0
 
 - [x] Bump the version in `pyproject.toml`, `src/roseblox/__init__.py`, and `packaging/arch-git/PKGBUILD`.

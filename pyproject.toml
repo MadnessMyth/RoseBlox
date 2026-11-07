@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "roseblox"
-version = "0.2.0"
+version = "0.2.1"
 description = "A native Linux launcher and installation manager for Roblox through Rosemary"
 readme = "README.md"
 requires-python = ">=3.10"
