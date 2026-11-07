@@ -147,7 +147,7 @@ def find_roblox_log(
                 target = os.readlink(entry)
             except OSError:
                 continue
-            if _ROBLOX_LOG.search(target) and not target.endswith(" (deleted)"):
+            if _ROBLOX_LOG.search(target) and "CrashHandler" not in target and not target.endswith(" (deleted)"):
                 return entry
     if directory is None:
         return None
@@ -157,7 +157,8 @@ def find_roblox_log(
     except OSError:
         return None
     for candidate in candidates:
-        if candidate.suffix != ".log" or "Player" not in candidate.name:
+        # The crash handler's log is named after the Player too, e.g. "..._Player_bc545_CrashHandler_last.log".
+        if candidate.suffix != ".log" or "Player" not in candidate.name or "CrashHandler" in candidate.name:
             continue
         try:
             modified = candidate.stat().st_mtime

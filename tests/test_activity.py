@@ -33,6 +33,25 @@ def feed(tracker, *lines):
 
 
 class TrackerTests(unittest.TestCase):
+    def test_a_mac_player_log_from_rosemary(self):
+        lines = [
+            "2026-11-07T20:44:39.893Z,0.893042,e8cc0000,6 [FLog::SingleSurfaceApp] returnToLuaApp: (stage:InitializedLuaApp).",
+            "2026-11-07T20:45:20.612Z,41.612572,e9ef0000,6 [FLog::Output] ! Joining game "
+            "'11111111-2222-4333-8444-555555555555' place 1234567890 at 10.1.2.3",
+            "2026-11-07T20:45:20.616Z,41.616253,e9ef0000,7 [FLog::Network] UDMUX Address = 128.116.0.10, Port = 53033 "
+            "| RCC Server Address = 10.1.2.3, Port = 53033",
+            "2026-11-07T20:45:20.766Z,41.766312,e9ef0000,7 [FLog::Network] Replicator created for player 128.116.0.10|53033",
+            "2026-11-07T20:45:20.766Z,41.766319,e9ef0000,7 [FLog::Network] Replicator created: 0x7f921f78eb70",
+            "2026-11-07T20:45:23.951Z,44.951740,e8cc0000,6 [FLog::SingleSurfaceApp] returnToLuaApp: (stage:UGCGame).",
+            "2026-11-07T20:45:23.961Z,44.961334,ea990000,7 [FLog::Network] Time to disconnect replication data: 0.072429",
+        ]
+        tracker = ActivityTracker()
+        events = [event for line in lines for event in tracker.feed(line)]
+        self.assertEqual(
+            [GameJoined(1234567890, "11111111-2222-4333-8444-555555555555", "128.116.0.10", False), GameLeft(True)],
+            events,
+        )
+
     def test_a_join_is_reported_once_connected_with_the_public_address(self):
         tracker = ActivityTracker()
         self.assertEqual([], feed(tracker, JOIN, PUBLIC))
@@ -448,6 +467,7 @@ class FindRobloxLogTests(unittest.TestCase):
 
     def test_the_log_a_player_has_open_is_found_through_its_process_tree(self):
         self._fd(10, 1, "/home/me/.local/state/roseblox/logs/player.log")
+        self._fd(11, 2, "/Users/me/Library/Logs/Roblox/0.746_20261107T204438Z_Player_bc545_CrashHandler_last.log")
         self._fd(11, 3, "/Users/me/Library/Logs/Roblox/old_Player_last.log (deleted)")
         self._fd(11, 7, "/Users/me/Library/Logs/Roblox/0.700_20261108T040000Z_Player_AB12_last.log")
         self._fd(12, 4, "/Users/me/Library/Logs/Roblox/other_Player_last.log")
@@ -458,7 +478,7 @@ class FindRobloxLogTests(unittest.TestCase):
         logs = self.root / "Logs" / "Roblox"
         logs.mkdir(parents=True)
         for name, modified in (("a_Player_old.log", 100), ("b_Player_new.log", 300), ("c_Studio_new.log", 400),
-                               ("d_Player_mid.log", 250)):
+                               ("d_Player_mid.log", 250), ("e_Player_bc545_CrashHandler_last.log", 500)):
             (logs / name).write_text("")
             os.utime(logs / name, (modified, modified))
         tree = lambda pid, proc: [10]
