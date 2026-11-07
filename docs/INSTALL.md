@@ -116,6 +116,10 @@ Click the bell at the top right. The badge counts the items in the center:
 
 ![Download with speed and time left](screenshots/13-download-speed.png)
 
+## Opening a place file in Studio
+
+On the **Studio** page, click **Open Place…** next to an installation and choose a `.rbxl` or `.rbxlx` file. Studio opens it directly, the same as double-clicking it on a Mac. The file can be anywhere in your home folder.
+
 ## Performance
 
 ![Performance](screenshots/14-performance.png)
