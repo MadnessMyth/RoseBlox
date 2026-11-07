@@ -3,3 +3,4 @@
 *.pkg.tar*
 roseblox-*.tar.gz
 *.log
+/roseblox/
