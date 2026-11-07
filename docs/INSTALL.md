@@ -47,6 +47,12 @@ makepkg -si
 
 Run this as your normal user, not with `sudo`. `makepkg` asks for your password when it installs the package. If you previously installed the older `roseblox` package from `packaging/arch`, pacman asks whether to replace it. Answer `y`.
 
+With `paru`, you can build the same folder instead. Roseblox is not on the AUR yet, so `paru -S roseblox` does not find it:
+
+```sh
+paru -Bi ~/RoseBlox/packaging/arch-git
+```
+
 Check that it worked:
 
 ```sh
