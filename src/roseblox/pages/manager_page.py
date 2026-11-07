@@ -17,7 +17,7 @@ from gi.repository import Adw, Gio, GLib, Gtk
 from ..backend.archive import ArchiveTypeUndetermined, inspect_archive
 from ..backend.downloader import DownloadCancelled
 from ..backend.download_state import DownloadJob, DownloadStateError
-from ..backend.installer import InstallProgress, InstallResult, InstallerService
+from ..backend.installer import InstallProgress, InstallResult, InstallerService, duplicate_name
 from ..backend.library import (
     APP_BUNDLE_NAMES,
     InstallationRecord,
@@ -97,10 +97,12 @@ class InstallationPage(Gtk.Box):
         self.library_error = library_error
         self._launching_ids: set[str] = window.launching_installations
         self._stopping_ids: set[str] = window.stopping_installations
+        self._copying_ids: set[str] = getattr(window, "copying_installations", set())
+        self._operation_failure_title = "Installation failed"
         self._sessions: dict[str, LaunchSession] = window.process_sessions
-        self._extra_sessions: dict[str, list[tuple[int, LaunchSession]]] = getattr(window, "extra_sessions", {})
         self._launch_buttons: dict[str, Gtk.Button] = {}
         self._remove_buttons: dict[str, Gtk.Button] = {}
+        self._duplicate_buttons: dict[str, Gtk.Button] = {}
         self._preferred_buttons: dict[str, Gtk.Button] = {}
         self._validation_by_id: dict[str, str] = {}
         self._preferred_ids: dict[str, str | None] = {"player": None, "studio": None}
@@ -265,6 +267,7 @@ class InstallationPage(Gtk.Box):
         if loading:
             self._launch_buttons = {}
             self._remove_buttons = {}
+            self._duplicate_buttons = {}
             self._preferred_buttons = {}
             self._clear_rows()
             self.notice.set_label("Loading registered installations…")
@@ -273,6 +276,7 @@ class InstallationPage(Gtk.Box):
         if error:
             self._launch_buttons = {}
             self._remove_buttons = {}
+            self._duplicate_buttons = {}
             self._preferred_buttons = {}
             self._clear_rows()
             self.notice.set_label(f"{error} No changes will be saved until the library file is repaired.")
@@ -294,6 +298,8 @@ class InstallationPage(Gtk.Box):
             self.download_button.set_sensitive(enabled)
         for button in self._action_buttons:
             button.set_sensitive(enabled)
+        for button in self._duplicate_buttons.values():
+            button.set_sensitive(enabled)
 
     def _clear_rows(self) -> None:
         child = self.list_box.get_first_child()
@@ -305,6 +311,7 @@ class InstallationPage(Gtk.Box):
     def _render_records(self, records: list[InstallationRecord]) -> None:
         self._launch_buttons = {}
         self._remove_buttons = {}
+        self._duplicate_buttons = {}
         self._preferred_buttons = {}
         self._clear_rows()
         if not records:
@@ -401,12 +408,14 @@ class InstallationPage(Gtk.Box):
             self._update_launch_button(record.id)
             contents.append(launch_button)
 
-            if self._multiple_allowed(record) and record.id in self._sessions and record.id not in self._stopping_ids:
-                another = Gtk.Button.new_with_label("Launch Another")
-                another.set_valign(Gtk.Align.CENTER)
-                another.set_tooltip_text("Start one more Roblox Player alongside the running one")
-                another.connect("clicked", lambda _button, record=record: self.launch_another(record))
-                contents.append(another)
+            if self._multiple_allowed(record):
+                duplicate = Gtk.Button.new_with_label("Duplicate…")
+                duplicate.set_valign(Gtk.Align.CENTER)
+                duplicate.set_tooltip_text("Copy this installation so a second Player can run from the copy")
+                duplicate.set_sensitive(not self._busy and self._validation_by_id.get(record.id) == "Valid")
+                duplicate.connect("clicked", self._on_duplicate_clicked, record)
+                self._duplicate_buttons[record.id] = duplicate
+                contents.append(duplicate)
 
         remove = Gtk.Button.new_with_label("Remove")
         remove.set_valign(Gtk.Align.CENTER)
@@ -415,7 +424,7 @@ class InstallationPage(Gtk.Box):
             record.id not in self._launching_ids
             and record.id not in self._sessions
             and record.id not in self._stopping_ids
-            and not self._extra_sessions.get(record.id)
+            and record.id not in self._copying_ids
         )
         remove.connect("clicked", self._on_remove_clicked, record)
         self._remove_buttons[record.id] = remove
@@ -937,6 +946,8 @@ class InstallationPage(Gtk.Box):
             self.download_button.set_sensitive(False)
         for button in self._action_buttons:
             button.set_sensitive(False)
+        for button in self._duplicate_buttons.values():
+            button.set_sensitive(False)
         for button in self._recovery_buttons:
             button.set_sensitive(False)
         self._emit_operation()
@@ -962,6 +973,17 @@ class InstallationPage(Gtk.Box):
             )
             self.cancel_button.set_visible(self._cancel_event is not None)
             self.cancel_button.set_sensitive(True)
+        elif progress.phase == "copying":
+            message = f"Copied {self._format_size(progress.downloaded)}"
+            fraction = None
+            if progress.total:
+                message += f" of {self._format_size(progress.total)}"
+                fraction = min(max(progress.downloaded / progress.total, 0.0), 1.0)
+                self.progress_bar.set_fraction(fraction)
+            else:
+                self.progress_bar.pulse()
+            self.progress_bar.set_text(f"{fraction:.0%}" if fraction is not None else "")
+            self.cancel_button.set_visible(self._cancel_event is not None)
         elif progress.phase == "extracting":
             message = "Extracting and validating application bundle with bsdtar…"
             self.progress_bar.set_text("")
@@ -998,6 +1020,8 @@ class InstallationPage(Gtk.Box):
             self._emit_operation()
 
     def _operation_finished(self, result: InstallResult | None, error: Exception | None) -> bool:
+        failure_title = self._operation_failure_title
+        self._operation_failure_title = "Installation failed"
         self._busy = False
         self._cancel_event = None
         make_preferred = self._make_preferred_after_install
@@ -1013,15 +1037,19 @@ class InstallationPage(Gtk.Box):
                 self._emit_operation()
             else:
                 self.workflow_status.set_visible(False)
-                self._emit_operation(message=f"Installation failed: {error}")
-                self._show_error("Installation failed", str(error))
+                self._emit_operation(message=f"{failure_title}: {error}")
+                self._show_error(failure_title, str(error))
             return GLib.SOURCE_REMOVE
         if result is not None:
-            message = (
-                f"{result.record.display_name} is already registered at {result.record.bundle_path}."
-                if result.already_installed
-                else f"Installed {result.record.display_name}. Archive preserved at {result.archive_path}."
-            )
+            if result.already_installed:
+                message = f"{result.record.display_name} is already registered at {result.record.bundle_path}."
+            elif result.copied_from:
+                message = (
+                    f"Copied {result.copied_from} to {result.record.display_name}. "
+                    "Launch it while the other Player runs to play a second instance."
+                )
+            else:
+                message = f"Installed {result.record.display_name}. Archive preserved at {result.archive_path}."
             if make_preferred:
                 message += " It is now the preferred installation."
                 self._preference_busy = True
@@ -1048,10 +1076,9 @@ class InstallationPage(Gtk.Box):
         if session is not None:
             self._stopping_ids.add(record.id)
             self._refresh_all(reload_library=False)
-            extras = [extra for _number, extra in self._extra_sessions.get(record.id, [])]
             threading.Thread(
                 target=self._stop_worker,
-                args=(record.id, session, extras),
+                args=(record.id, session),
                 daemon=True,
             ).start()
             return
@@ -1068,9 +1095,15 @@ class InstallationPage(Gtk.Box):
 
     def request_launch_url(self, record: InstallationRecord, uri: str) -> None:
         """Route a validated deep link through the existing Rosemary session flow."""
-        if record.id in self._sessions and self._multiple_allowed(record) and record.id not in self._stopping_ids:
-            self.launch_another(record, (uri,))
-            return
+        if self._active(record.id) and self._multiple_allowed(record):
+            idle = self._idle_copy(record)
+            if idle is None:
+                self._show_error(
+                    "Every Roblox Player is already running",
+                    "Use Duplicate… on the Player page to make another copy, then open the link again.",
+                )
+                return
+            record = idle
         if record.id in self._sessions or record.id in self._launching_ids or record.id in self._stopping_ids:
             self._show_error("Application already active", "Stop this installation before opening another Roblox link.")
             return
@@ -1080,85 +1113,82 @@ class InstallationPage(Gtk.Box):
             target=self._launch_worker, args=(record.id, record, (uri,)), daemon=True
         ).start()
 
+    def _active(self, installation_id: str) -> bool:
+        return (
+            installation_id in self._sessions
+            or installation_id in self._launching_ids
+            or installation_id in self._stopping_ids
+        )
+
     def _multiple_allowed(self, record: InstallationRecord) -> bool:
         state = getattr(self.window, "setup_state", None)
         return record.app_type == "player" and bool(getattr(state, "multiple_players", False))
 
-    def launch_another(self, record: InstallationRecord, guest_arguments=()) -> None:
-        """Start one more Player for an installation that is already running one."""
-        if not self._multiple_allowed(record) or record.id not in self._sessions:
+    def _idle_copy(self, record: InstallationRecord) -> InstallationRecord | None:
+        """Another valid installation of the same app that is not running, the same version first."""
+        candidates = [
+            other
+            for other in getattr(self.window, "library_records", [])
+            if other.app_type == record.app_type
+            and other.id != record.id
+            and not self._active(other.id)
+            and self._validation_by_id.get(other.id) == "Valid"
+        ]
+        candidates.sort(key=lambda other: other.version != record.version)
+        return candidates[0] if candidates else None
+
+    def _on_duplicate_clicked(self, _button: Gtk.Button, record: InstallationRecord) -> None:
+        if self._busy:
             return
-        used = {number for number, _session in self._extra_sessions.get(record.id, [])}
-        number = next(candidate for candidate in range(2, 2 + len(used) + 1) if candidate not in used)
-        self._extra_sessions.setdefault(record.id, []).append((number, None))
+        taken = {other.display_name for other in getattr(self.window, "library_records", [])}
+        prompt = Adw.MessageDialog.new(
+            self.window,
+            "Duplicate this installation",
+            "Roseblox copies the whole app so a second Roblox Player can run from the copy. "
+            f"This uses about as much disk space as {record.display_name}. Roblox settings and mods are shared.",
+        )
+        prompt.set_close_response("cancel")
+        prompt.add_response("cancel", "Cancel")
+        prompt.add_response("duplicate", "Duplicate")
+        prompt.set_default_response("duplicate")
+        prompt.set_response_appearance("duplicate", Adw.ResponseAppearance.SUGGESTED)
+        name_entry = Gtk.Entry()
+        name_entry.set_text(duplicate_name(record.display_name, taken))
+        name_entry.set_activates_default(True)
+        prompt.set_extra_child(name_entry)
+        prompt.connect("response", self._on_duplicate_response, record, name_entry)
+        prompt.present()
+
+    def _on_duplicate_response(self, dialog, response, record, name_entry) -> None:
+        dialog.destroy()
+        if response == "duplicate":
+            self.start_duplicate(record, name_entry.get_text())
+
+    def start_duplicate(self, record: InstallationRecord, display_name: str) -> None:
+        if self._busy:
+            return
+        self._cancel_event = threading.Event()
+        self._copying_ids.add(record.id)
+        self._operation_failure_title = "Copy failed"
+        self._begin_operation(f"Copying {record.display_name}…", cancellable=True)
+        self._refresh_all(reload_library=False)
+        self.cancel_button.set_label("Cancel Copy")
+        self.cancel_button.set_visible(True)
         threading.Thread(
-            target=self._extra_launch_worker, args=(record, number, tuple(guest_arguments)), daemon=True
+            target=self._duplicate_worker, args=(record, display_name, self._cancel_event), daemon=True
         ).start()
 
-    def _extra_launch_worker(self, record: InstallationRecord, number: int, guest_arguments) -> None:
+    def _duplicate_worker(self, record, display_name, cancel_event) -> None:
         try:
-            setup_state = getattr(self.window, "setup_state", None)
-            session = launch_application(
-                record,
-                self.rosemary_status,
-                guest_arguments=guest_arguments,
-                plain_ctrl_click=getattr(setup_state, "plain_ctrl_click", True),
-                launch_config=LaunchConfigStore().load(record.app_type),
-                log_name=f"{record.app_type}-{number}",
-            )
-            wait_for_running(session)
+            result = self.installer.duplicate(record, display_name, cancel_event, self._post_progress)
         except Exception as error:
-            GLib.idle_add(self._extra_failed, record.id, number, str(error))
+            GLib.idle_add(self._duplicate_finished, record.id, None, error)
             return
-        GLib.idle_add(self._extra_ready, record.id, number, session)
+        GLib.idle_add(self._duplicate_finished, record.id, result, None)
 
-    def _replace_extra(self, installation_id: str, number: int, session: LaunchSession | None, *, keep: bool) -> None:
-        entries = [(n, s) for n, s in self._extra_sessions.get(installation_id, []) if n != number]
-        if keep:
-            entries.append((number, session))
-        if entries:
-            self._extra_sessions[installation_id] = sorted(entries, key=lambda entry: entry[0])
-        else:
-            self._extra_sessions.pop(installation_id, None)
-
-    def _extra_failed(self, installation_id: str, number: int, message: str) -> bool:
-        self._replace_extra(installation_id, number, None, keep=False)
-        self._refresh_all(reload_library=False)
-        self._show_error("Could not launch another Roblox Player", message)
-        return GLib.SOURCE_REMOVE
-
-    def _extra_ready(self, installation_id: str, number: int, session: LaunchSession) -> bool:
-        if session.process.poll() is not None:
-            return self._extra_failed(
-                installation_id, number, "The second Roblox Player exited before Roseblox could mark it running."
-            )
-        self._replace_extra(installation_id, number, session, keep=True)
-        threading.Thread(target=self._extra_watch_worker, args=(installation_id, number, session), daemon=True).start()
-        if installation_id in self._stopping_ids or installation_id not in self._sessions:
-            threading.Thread(target=self._stop_worker, args=(installation_id, session), daemon=True).start()
-            self._refresh_all(reload_library=False)
-            return GLib.SOURCE_REMOVE
-        self._refresh_all(reload_library=False)
-        gamemode_error = getattr(session, "gamemode_error", None)
-        center = getattr(self.window, "notification_center", None)
-        if gamemode_error and center is not None:
-            center.notify("player", f"GameMode was not started: {gamemode_error}", "failed")
-        self._start_activity_watcher(session)
-        return GLib.SOURCE_REMOVE
-
-    def _extra_watch_worker(self, installation_id: str, number: int, session: LaunchSession) -> None:
-        session.process.wait()
-        GLib.idle_add(self._extra_exited, installation_id, number, session)
-
-    def _extra_exited(self, installation_id: str, number: int, session: LaunchSession) -> bool:
-        if any(s is session for _n, s in self._extra_sessions.get(installation_id, [])):
-            self._replace_extra(installation_id, number, None, keep=False)
-            self._refresh_all(reload_library=False)
-        elif self._sessions.get(installation_id) is session:
-            del self._sessions[installation_id]
-            self._stopping_ids.discard(installation_id)
-            self._refresh_all(reload_library=False)
-        return GLib.SOURCE_REMOVE
+    def _duplicate_finished(self, installation_id: str, result, error) -> bool:
+        self._copying_ids.discard(installation_id)
+        return self._operation_finished(result, error)
 
     def _on_open_place_clicked(self, _button: Gtk.Button, record: InstallationRecord) -> None:
         file_filter = Gtk.FileFilter()
@@ -1302,11 +1332,6 @@ class InstallationPage(Gtk.Box):
             return GLib.SOURCE_REMOVE
         was_stopping = installation_id in self._stopping_ids
         del self._sessions[installation_id]
-        running = [(n, s) for n, s in self._extra_sessions.get(installation_id, []) if s is not None]
-        if running and not was_stopping:
-            number, promoted = running[0]
-            self._replace_extra(installation_id, number, None, keep=False)
-            self._sessions[installation_id] = promoted
         self._stopping_ids.discard(installation_id)
         self._refresh_all(reload_library=False)
         if not was_stopping and return_code != 0:
@@ -1316,17 +1341,11 @@ class InstallationPage(Gtk.Box):
             )
         return GLib.SOURCE_REMOVE
 
-    def _stop_worker(self, installation_id: str, session: LaunchSession, extras=()) -> None:
-        errors = []
-        for target in (*extras, session):
-            if target is None or target.process.poll() is not None:
-                continue
-            try:
-                stop_application(target)
-            except (OSError, ProcessIdentityError, subprocess.TimeoutExpired) as error:
-                errors.append(str(error))
-        if errors:
-            GLib.idle_add(self._stop_failed, installation_id, session, "\n".join(errors))
+    def _stop_worker(self, installation_id: str, session: LaunchSession) -> None:
+        try:
+            stop_application(session)
+        except (OSError, ProcessIdentityError, subprocess.TimeoutExpired) as error:
+            GLib.idle_add(self._stop_failed, installation_id, session, str(error))
             return
         GLib.idle_add(self._stop_finished, installation_id, session)
 
@@ -1366,10 +1385,12 @@ class InstallationPage(Gtk.Box):
         if installation_id in self._stopping_ids:
             return "Stopping…", False
         if installation_id in self._sessions:
-            return ("Stop All", True) if getattr(self, "_extra_sessions", {}).get(installation_id) else ("Stop", True)
+            return "Stop", True
         return "Launch", True
 
     def _on_remove_clicked(self, _button: Gtk.Button, record: InstallationRecord) -> None:
+        if record.id in self._copying_ids:
+            return
         if record.managed:
             dialog = Adw.MessageDialog.new(
                 self.window,
@@ -1602,8 +1623,8 @@ class SettingsPage(Gtk.Box):
         self.multiple_row = Adw.ActionRow.new()
         self.multiple_row.set_title("Allow more than one Roblox Player")
         self.multiple_row.set_subtitle(
-            "Adds Launch Another while Player runs, and opens Roblox links in a new Player instead of refusing. "
-            "Each Player can sign in to its own account. Every Player uses more memory and GPU time."
+            "Adds Duplicate… to Player installations. Each copy runs its own Player, so you can sign in to a "
+            "different account in each. Roblox links open in a copy that is not running yet."
         )
         self.multiple_switch = Gtk.Switch(valign=Gtk.Align.CENTER)
         self.multiple_switch.connect("notify::active", self._multiple_changed)

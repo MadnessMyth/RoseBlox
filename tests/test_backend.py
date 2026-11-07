@@ -51,6 +51,32 @@ class RosemaryTests(unittest.TestCase):
             self.assertTrue(tail.startswith("[Roseblox omitted earlier process output.]"))
             self.assertTrue(tail.endswith("last line"))
 
+    def test_a_log_still_held_by_a_running_launch_is_not_rotated(self):
+        with tempfile.TemporaryDirectory() as directory:
+            logs = Path(directory) / "logs"
+            first_path, first = _open_launch_log(logs, "player")
+            first.write(b"first player\n")
+            first.flush()
+            child = subprocess.Popen(["sleep", "30"], stdout=first)
+            first.close()
+            try:
+                second_path, second = _open_launch_log(logs, "player")
+                second.close()
+                third_path, third = _open_launch_log(logs, "player")
+                third.close()
+            finally:
+                child.kill()
+                child.wait()
+            self.assertEqual(logs / "player.log", first_path)
+            self.assertEqual(logs / "player-2.log", second_path)
+            self.assertEqual(logs / "player-2.log", third_path)
+            self.assertEqual(b"first player\n", first_path.read_bytes())
+            self.assertFalse((logs / "player.log.1").exists())
+            again, stream = _open_launch_log(logs, "player")
+            stream.close()
+            self.assertEqual(logs / "player.log", again)
+            self.assertEqual(b"first player\n", (logs / "player.log.1").read_bytes())
+
     def test_detects_rosemary_using_path_lookup(self):
         with patch("roseblox.backend.rosemary.shutil.which", return_value="/usr/bin/rosemary"):
             status = detect_rosemary(config_path=Path("/path/that/does/not/exist"))

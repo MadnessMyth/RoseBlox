@@ -3,11 +3,12 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from roseblox.backend.archive import ArchiveTypeUndetermined
 from roseblox.backend.downloader import DownloadCancelled, DownloadError
-from roseblox.backend.installer import InstallationConflictError, InstallerService
+from roseblox.backend.installer import InstallationConflictError, InstallerService, duplicate_name
 from roseblox.backend.library import LibraryStore
 from roseblox.backend.versions import VersionCache, VersionInfo
 from roseblox.backend.version_settings import VersionSource
@@ -285,3 +286,59 @@ def json_read(path: Path):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DuplicateTests(unittest.TestCase):
+    def setUp(self):
+        self._directory = tempfile.TemporaryDirectory()
+        self.root = Path(self._directory.name)
+        archive = self.root / f"{VERSION}-RobloxPlayer.zip"
+        with zipfile.ZipFile(archive, "w") as output:
+            output.writestr("RobloxPlayer.app/Contents/Info.plist", "plist")
+            output.writestr("RobloxPlayer.app/Contents/MacOS/RobloxPlayer", b"x" * 4096)
+        self.service = InstallerTests.make_service(None, self.root)
+        self.original = self.service.import_archive(archive).record
+
+    def tearDown(self):
+        self._directory.cleanup()
+
+    def test_copy_is_registered_as_a_separate_managed_installation(self):
+        phases = []
+        result = self.service.duplicate(
+            self.original, " Second Player ", threading.Event(), lambda progress: phases.append(progress.phase)
+        )
+        copy = result.record
+        self.assertEqual("Second Player", copy.display_name)
+        self.assertEqual(self.original.display_name, result.copied_from)
+        self.assertNotEqual(self.original.id, copy.id)
+        self.assertNotEqual(self.original.bundle_path, copy.bundle_path)
+        self.assertEqual((VERSION, True, "duplicate"), (copy.version, copy.managed, copy.source))
+        self.assertEqual(
+            b"x" * 4096, (Path(copy.bundle_path) / "Contents" / "MacOS" / "RobloxPlayer").read_bytes()
+        )
+        self.assertEqual(f"{VERSION}-copy-2", Path(copy.bundle_path).parent.name)
+        self.assertEqual(["copying", "registering", "complete"], phases)
+        second = self.service.duplicate(self.original, "Third", threading.Event()).record
+        self.assertEqual(f"{VERSION}-copy-3", Path(second.bundle_path).parent.name)
+        self.assertEqual(3, len(self.service.library.load()))
+        self.assertTrue(Path(self.original.bundle_path).is_dir())
+
+    def test_cancelled_copy_leaves_nothing_behind(self):
+        cancel = threading.Event()
+        cancel.set()
+        with self.assertRaises(DownloadCancelled):
+            self.service.duplicate(self.original, "Copy", cancel)
+        self.assertEqual([self.original], self.service.library.load())
+        self.assertEqual([VERSION], [path.name for path in (self.service.install_root / "player").iterdir()])
+        self.assertEqual([], list((self.root / "data" / ".staging").iterdir()))
+
+    def test_copy_is_refused_without_enough_free_space(self):
+        with patch("roseblox.backend.installer.shutil.disk_usage", return_value=SimpleNamespace(free=1024)):
+            with self.assertRaisesRegex(InstallationConflictError, "Not enough free space"):
+                self.service.duplicate(self.original, "Copy", threading.Event())
+        self.assertEqual([self.original], self.service.library.load())
+
+    def test_default_names_count_up_from_two(self):
+        self.assertEqual("Roblox Player (2)", duplicate_name("Roblox Player", set()))
+        self.assertEqual("Roblox Player (3)", duplicate_name("Roblox Player (2)", {"Roblox Player (2)"}))
+        self.assertEqual("A (4)", duplicate_name("A", {"A (2)", "A (3)"}))

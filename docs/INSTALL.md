@@ -216,15 +216,19 @@ To update by hand, open the **Player** or **Studio** page, click **Refresh Versi
 
 ### More than one Roblox Player
 
-By default Roseblox runs one Player per installation: while it runs, **Launch** becomes **Stop** and Roblox links are refused. Turn on **Settings → After Launching → Allow more than one Roblox Player** to run several, for example to sign in to a different account in each:
+Roblox treats a second launch of the same installation as a request to show the window that is already open. To run two Players at once, for example to sign in to a different account in each, run them from two installations. Two different versions work, and so does a copy:
 
 ![Allow more than one Roblox Player in Settings](screenshots/21-multiple-players.png)
 
-1. Click **Launch** on the **Player** page (or **Play** on Home) as usual.
-2. Click **Launch Another** next to **Stop**. Each click starts one more Player. Opening a Roblox link from the website while Player runs also starts a new Player instead of being refused.
-3. **Stop All** stops every Player started from that installation. Closing a Player window yourself only ends that one.
+1. Turn on **Settings → After Launching → Allow more than one Roblox Player**.
+2. On the **Player** page, click **Duplicate…** next to an installation, keep or change the suggested name (for example `Roblox Player (2)`), and click **Duplicate**. Roseblox copies the whole app in the background with a progress bar and **Cancel Copy**. It checks free space first and adds nothing to the Library if the copy fails or is cancelled. **Remove** is unavailable on the original while it is being copied.
+3. Click **Launch** on the first installation, then **Launch** on the copy. Each has its own **Stop**.
 
-The setting only changes Roseblox's own one-Player rule; it does not modify Roblox or Rosemary. All Players share the same Rosemary prefix and therefore the same Roblox settings and installed mods. Each extra Player writes its own log (`player-2.log`, `player-3.log`, …) next to `player.log`. Every Player uses its own memory and GPU time, so expect lower frame rates with several open. **Remove** stays unavailable until every Player has exited. Studio still runs one at a time.
+![Two Player installations after Duplicate…](screenshots/22-player-duplicate.png)
+
+With the setting on, a Roblox link opened from the website while Player runs starts the first installation that is not running, preferring the same version. If every installation is running, Roseblox tells you to make another copy.
+
+Each copy uses as much disk space as the original and is a managed installation, so **Remove → Delete Managed Bundle** deletes it. All Players share one Rosemary prefix, so Roblox settings and mods are shared. The first Player writes `player.log`, and a Player started while that log is in use writes `player-2.log`, `player-3.log`, and so on, so Discord presence and server notifications follow each Player separately. Update downloads do not update copies; duplicate the new version again if you want a copy of it.
 
 ## Tagged releases instead of `master`
 

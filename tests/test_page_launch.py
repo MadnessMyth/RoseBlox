@@ -8,6 +8,7 @@ from roseblox.backend.library import LibraryStore
 from roseblox.backend.preferences import PreferencesStore
 from roseblox.backend.version_settings import VersionSource, default_version_source
 from roseblox.pages.home import _LaunchCard
+from roseblox.backend.installer import InstallResult
 from roseblox.pages.manager_page import InstallationPage, SettingsPage
 
 
@@ -158,92 +159,109 @@ class SettingsPageWorkerTests(unittest.TestCase):
 
 class MultiplePlayerTests(unittest.TestCase):
     def _page(self, allowed=True):
-        primary = SimpleNamespace(process=SimpleNamespace(poll=lambda: None, pid=1))
+        records = [
+            SimpleNamespace(id="a", app_type="player", version="v1", display_name="Roblox Player v1"),
+            SimpleNamespace(id="b", app_type="player", version="v0", display_name="Old Player"),
+            SimpleNamespace(id="c", app_type="player", version="v1", display_name="Roblox Player v1 (2)"),
+            SimpleNamespace(id="s", app_type="studio", version="v1", display_name="Studio"),
+        ]
         page = SimpleNamespace(
-            window=SimpleNamespace(setup_state=SimpleNamespace(multiple_players=allowed, plain_ctrl_click=True)),
-            rosemary_status=object(),
-            _sessions={"p": primary},
-            _extra_sessions={},
+            window=SimpleNamespace(
+                setup_state=SimpleNamespace(multiple_players=allowed), library_records=records
+            ),
+            _sessions={"a": object()},
             _launching_ids=set(),
             _stopping_ids=set(),
+            _validation_by_id={"a": "Valid", "b": "Valid", "c": "Valid", "s": "Valid"},
             _refresh_all=Mock(),
             _show_error=Mock(),
-            _start_activity_watcher=Mock(),
             _launch_worker=Mock(),
         )
-        for name in (
-            "launch_another", "_extra_launch_worker", "_extra_ready", "_extra_failed", "_replace_extra",
-            "_extra_exited", "_extra_watch_worker", "_session_exited", "_multiple_allowed", "request_launch_url",
-            "launch_button_state",
-        ):
+        for name in ("_active", "_multiple_allowed", "_idle_copy", "request_launch_url"):
             setattr(page, name, MethodType(getattr(InstallationPage, name), page))
-        return page, primary
+        return page, records
 
-    def _run(self, page, record, sessions, arguments=()):
-        launched = []
-
-        def fake_launch(_record, _status, **kwargs):
-            launched.append(kwargs)
-            return sessions.pop(0)
-
-        with patch("roseblox.pages.manager_page.launch_application", side_effect=fake_launch), patch(
-            "roseblox.pages.manager_page.wait_for_running"
-        ), patch("roseblox.pages.manager_page.LaunchConfigStore"), patch(
-            "roseblox.pages.manager_page.threading.Thread",
-            side_effect=lambda target, args, daemon: SimpleNamespace(start=lambda: None if target.__name__ == "_extra_watch_worker" else target(*args)),
-        ), patch("roseblox.pages.manager_page.GLib.idle_add", side_effect=lambda callback, *args: callback(*args)):
-            if arguments:
-                page.request_launch_url(record, arguments[0])
-            else:
-                page.launch_another(record)
-        return launched
-
-    def test_extra_players_get_their_own_logs_and_stop_all(self):
-        page, primary = self._page()
-        record = SimpleNamespace(id="p", app_type="player")
-        second = SimpleNamespace(process=SimpleNamespace(poll=lambda: None, pid=2))
-        third = SimpleNamespace(process=SimpleNamespace(poll=lambda: None, pid=3))
-        launched = self._run(page, record, [second])
-        launched += self._run(page, record, [third], ("roblox://placeId=1",))
-        self.assertEqual(["player-2", "player-3"], [kwargs["log_name"] for kwargs in launched])
-        self.assertEqual(("roblox://placeId=1",), launched[1]["guest_arguments"])
-        self.assertEqual([(2, second), (3, third)], page._extra_sessions["p"])
-        self.assertEqual(("Stop All", True), page.launch_button_state("p"))
-        page._launch_worker.assert_not_called()
-        page._extra_exited("p", 2, second)
-        self.assertEqual([(3, third)], page._extra_sessions["p"])
-        page._session_exited("p", primary, 0, "")
-        self.assertIs(third, page._sessions["p"])
-        self.assertNotIn("p", page._extra_sessions)
-        page._extra_exited("p", 3, third)
-        self.assertNotIn("p", page._sessions)
-
-    def test_extra_player_that_finishes_starting_during_stop_all_is_stopped(self):
-        page, _primary = self._page()
-        page._stop_worker = Mock()
-        page._stopping_ids.add("p")
-        late = SimpleNamespace(process=SimpleNamespace(poll=lambda: None, pid=4))
-        page._extra_sessions["p"] = [(2, None)]
-        stopped = []
+    def _open_link(self, page, record):
+        started = []
         with patch(
             "roseblox.pages.manager_page.threading.Thread",
-            side_effect=lambda target, args, daemon: SimpleNamespace(start=lambda: stopped.append(target)),
+            side_effect=lambda target, args, daemon: SimpleNamespace(start=lambda: started.append(args)),
         ):
-            InstallationPage._extra_ready(page, "p", 2, late)
-        self.assertIn(page._stop_worker, stopped)
-        page._start_activity_watcher.assert_not_called()
+            page.request_launch_url(record, "roblox://placeId=1")
+        return started
 
-    def test_without_the_setting_a_second_launch_is_refused(self):
-        page, _primary = self._page(allowed=False)
-        record = SimpleNamespace(id="p", app_type="player")
-        self.assertEqual([], self._run(page, record, [], ("roblox://placeId=1",)))
+    def test_a_link_opens_in_a_copy_that_is_not_running_same_version_first(self):
+        page, records = self._page()
+        started = self._open_link(page, records[0])
+        self.assertEqual([("c", records[2], ("roblox://placeId=1",))], started)
+        self.assertIn("c", page._launching_ids)
+        page._show_error.assert_not_called()
+
+    def test_running_copies_and_unavailable_ones_are_skipped(self):
+        page, records = self._page()
+        page._launching_ids.add("c")
+        page._validation_by_id["b"] = "Missing"
+        self.assertEqual([], self._open_link(page, records[0]))
+        self.assertEqual("Every Roblox Player is already running", page._show_error.call_args.args[0])
+
+    def test_without_the_setting_a_link_is_refused_while_player_runs(self):
+        page, records = self._page(allowed=False)
+        self.assertEqual([], self._open_link(page, records[0]))
         self.assertEqual("Application already active", page._show_error.call_args.args[0])
-        page.launch_another(record)
-        self.assertEqual({}, page._extra_sessions)
-        studio = SimpleNamespace(id="p", app_type="studio")
+        self.assertFalse(page._multiple_allowed(records[3]))
         page.window.setup_state.multiple_players = True
-        page.launch_another(studio)
-        self.assertEqual({}, page._extra_sessions)
+        self.assertFalse(page._multiple_allowed(records[3]))
+        self.assertTrue(page._multiple_allowed(records[0]))
+
+    def test_duplicate_runs_in_the_background_and_reports_the_copy(self):
+        record = SimpleNamespace(id="a", app_type="player", display_name="Roblox Player v1")
+        copy = SimpleNamespace(display_name="Roblox Player v1 (2)")
+        installer = SimpleNamespace(
+            duplicate=Mock(return_value=InstallResult(copy, None, copied_from="Roblox Player v1"))
+        )
+        finished = []
+        page = SimpleNamespace(
+            _busy=False,
+            installer=installer,
+            cancel_button=Mock(),
+            _begin_operation=Mock(),
+            _refresh_all=Mock(),
+            _copying_ids=set(),
+            _post_progress=object(),
+            _operation_finished=lambda result, error: finished.append((result, error, set(page._copying_ids))),
+        )
+        page._duplicate_worker = MethodType(InstallationPage._duplicate_worker, page)
+        page._duplicate_finished = MethodType(InstallationPage._duplicate_finished, page)
+        installer.duplicate.side_effect = lambda *_args: (
+            self.assertEqual({"a"}, page._copying_ids) or installer.duplicate.return_value
+        )
+        with patch(
+            "roseblox.pages.manager_page.threading.Thread",
+            side_effect=lambda target, args, daemon: SimpleNamespace(start=lambda: target(*args)),
+        ), patch("roseblox.pages.manager_page.GLib.idle_add", side_effect=lambda callback, *args: callback(*args)):
+            InstallationPage.start_duplicate(page, record, "Roblox Player v1 (2)")
+        installer.duplicate.assert_called_once_with(
+            record, "Roblox Player v1 (2)", page._cancel_event, page._post_progress
+        )
+        page.cancel_button.set_label.assert_called_with("Cancel Copy")
+        self.assertEqual("Copy failed", page._operation_failure_title)
+        self.assertEqual([(installer.duplicate.return_value, None, set())], finished)
+
+    def test_a_failed_copy_is_reported_and_unblocks_remove(self):
+        record = SimpleNamespace(id="a", app_type="player", display_name="Roblox Player v1")
+        failure = RuntimeError("disk full")
+        finished = []
+        page = SimpleNamespace(
+            installer=SimpleNamespace(duplicate=Mock(side_effect=failure)),
+            _copying_ids={"a"},
+            _post_progress=None,
+            _operation_finished=lambda result, error: finished.append((result, error)),
+        )
+        page._duplicate_finished = MethodType(InstallationPage._duplicate_finished, page)
+        with patch("roseblox.pages.manager_page.GLib.idle_add", side_effect=lambda callback, *args: callback(*args)):
+            InstallationPage._duplicate_worker(page, record, "Copy", None)
+        self.assertEqual([(None, failure)], finished)
+        self.assertEqual(set(), page._copying_ids)
 
 
 class HomeLaunchDelegationTests(unittest.TestCase):

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import re
@@ -363,13 +364,48 @@ def _read_log_tail(path: Path) -> str:
     return text.strip()
 
 
-def _open_launch_log(log_directory: Path, name: str):
-    """Open a fresh log, keeping the previous run as ``.1``."""
+_LAUNCH_LOG_GUARD = threading.Lock()
+_MAX_LAUNCH_LOGS = 32
+
+
+def _log_in_use(path: Path) -> bool:
+    try:
+        stream = path.open("rb")
+    except FileNotFoundError:
+        return False
+    with stream:
+        try:
+            fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return True
+        fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+    return False
+
+
+def _open_launch_log(log_directory: Path, app_type: str):
+    """Open a fresh log for this launch, keeping the previous run as ``.1``.
+
+    Rosemary inherits the log with its lock, so the lock lasts as long as that
+    launch, even across Roseblox restarts. While ``player.log`` is held, another
+    Player writes ``player-2.log`` instead of rotating a log that is still in use.
+    """
     log_directory.mkdir(parents=True, exist_ok=True)
-    path = log_directory / f"{name}.log"
-    if path.exists():
-        os.replace(path, path.with_name(path.name + ".1"))
-    return path, path.open("wb")
+    with _LAUNCH_LOG_GUARD:
+        for number in range(1, _MAX_LAUNCH_LOGS + 1):
+            path = log_directory / (f"{app_type}.log" if number == 1 else f"{app_type}-{number}.log")
+            if not _log_in_use(path):
+                break
+        else:
+            raise OSError(f"{_MAX_LAUNCH_LOGS} {app_type} logs are already in use.")
+        if path.exists():
+            os.replace(path, path.with_name(path.name + ".1"))
+        stream = path.open("wb")
+        try:
+            fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            stream.close()
+            raise
+        return path, stream
 
 
 def launch_application(
@@ -381,7 +417,6 @@ def launch_application(
     plain_ctrl_click: bool = True,
     launch_config: AppLaunchConfig | None = None,
     flag_backup_directory: Path | None = None,
-    log_name: str | None = None,
 ) -> LaunchSession:
     """Start Rosemary asynchronously and return a bundle-bound process session.
 
@@ -419,7 +454,7 @@ def launch_application(
             raise RosemaryUnavailableError(f"Could not apply FastFlags: {error}") from error
     arguments = build_launch_arguments(status.executable, bundle_path, guest_arguments)
     try:
-        log_path, log_stream = _open_launch_log(log_directory or default_log_directory(), log_name or app_type)
+        log_path, log_stream = _open_launch_log(log_directory or default_log_directory(), app_type)
     except OSError as error:
         raise RosemaryUnavailableError(f"Could not create the Rosemary log file: {error}") from error
     with log_stream:

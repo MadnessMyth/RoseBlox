@@ -49,9 +49,32 @@ class InstallResult:
     record: InstallationRecord
     archive_path: Path | None
     already_installed: bool = False
+    copied_from: str | None = None
 
 
 ProgressCallback = Callable[[InstallProgress], None]
+# Space left over after a copy, so duplicating never fills the disk to the last byte.
+DUPLICATE_HEADROOM = 512 * 1024 * 1024
+_COPY_PROGRESS_STEP = 16 * 1024 * 1024
+
+
+def bundle_size(bundle: Path) -> int:
+    total = 0
+    for directory, _subdirectories, files in os.walk(bundle):
+        for name in files:
+            try:
+                total += os.lstat(os.path.join(directory, name)).st_size
+            except OSError:
+                continue
+    return total
+
+
+def duplicate_name(display_name: str, taken: set[str]) -> str:
+    base = re.sub(r" \(\d+\)$", "", display_name.strip()) or display_name.strip()
+    number = 2
+    while f"{base} ({number})" in taken:
+        number += 1
+    return f"{base} ({number})"
 _ARCHIVE_VERSION_PATTERNS = {
     "player": re.compile(r"^(version-[0-9a-f]{16})-RobloxPlayer\.zip$", re.IGNORECASE),
     "studio": re.compile(r"^(version-[0-9a-f]{16})-RobloxStudioApp\.zip$", re.IGNORECASE),
@@ -444,6 +467,91 @@ class InstallerService:
             raise
         finally:
             if not preserve_stage:
+                shutil.rmtree(stage, ignore_errors=True)
+
+    def duplicate(
+        self,
+        record: InstallationRecord,
+        display_name: str,
+        cancel_event: threading.Event,
+        progress_callback: ProgressCallback | None = None,
+    ) -> InstallResult:
+        """Copy an installation's bundle into managed storage and register the copy.
+
+        Roblox treats a second launch of the same bundle as a request to show the
+        running window, so a separate Player needs a separate copy.
+        """
+        display_name = display_name.strip()
+        if not display_name:
+            raise ValueError("Enter a name for the copy.")
+        with self._application_lock(record.app_type):
+            source = validate_bundle(record.bundle_path, record.app_type)
+            app_install_root = self.install_root / record.app_type
+            app_install_root.mkdir(parents=True, exist_ok=True)
+            total = bundle_size(source)
+            free = shutil.disk_usage(app_install_root).free
+            if free < total + DUPLICATE_HEADROOM:
+                raise InstallationConflictError(
+                    f"Not enough free space to copy {record.display_name}: it needs about "
+                    f"{(total + DUPLICATE_HEADROOM) // (1024 * 1024)} MB and {free // (1024 * 1024)} MB is free."
+                )
+            staging_root = self.data_directory / ".staging"
+            staging_root.mkdir(parents=True, exist_ok=True)
+            stage = Path(tempfile.mkdtemp(prefix="duplicate-", dir=staging_root))
+            version_directory: Path | None = None
+            registered = False
+            copied = 0
+            reported = 0
+            self._emit(progress_callback, InstallProgress("copying", 0, total))
+
+            def copy_file(source_file, destination_file):
+                nonlocal copied, reported
+                if cancel_event.is_set():
+                    raise DownloadCancelled("Copy cancelled. Nothing was added to the Library.")
+                shutil.copy2(source_file, destination_file)
+                copied += os.lstat(destination_file).st_size
+                if copied - reported >= _COPY_PROGRESS_STEP:
+                    reported = copied
+                    self._emit(progress_callback, InstallProgress("copying", copied, total))
+                return destination_file
+
+            try:
+                bundle_name = APP_BUNDLE_NAMES[record.app_type]
+                copy = stage / bundle_name
+                shutil.copytree(source, copy, symlinks=True, copy_function=copy_file)
+                if cancel_event.is_set():
+                    raise DownloadCancelled("Copy cancelled. Nothing was added to the Library.")
+                validate_bundle(copy, record.app_type)
+                base = f"{record.version or 'unknown'}-copy"
+                number = 2
+                while True:
+                    version_directory = app_install_root / f"{base}-{number}"
+                    try:
+                        version_directory.mkdir(exist_ok=False)
+                        break
+                    except FileExistsError:
+                        number += 1
+                installed_bundle = version_directory / bundle_name
+                os.rename(copy, installed_bundle)
+                self._emit(progress_callback, InstallProgress("registering"))
+                new_record = self.library.add(
+                    record.app_type,
+                    installed_bundle,
+                    display_name,
+                    version=record.version,
+                    managed=True,
+                    source="duplicate",
+                )
+                registered = True
+                self._emit(progress_callback, InstallProgress("complete"))
+                return InstallResult(new_record, None, copied_from=record.display_name)
+            except shutil.Error as error:
+                details = error.args[0] if error.args else None
+                reason = details[0][2] if isinstance(details, list) and details and len(details[0]) == 3 else error
+                raise RuntimeError(f"Could not copy {record.display_name}: {reason}") from error
+            finally:
+                if version_directory is not None and not registered:
+                    shutil.rmtree(version_directory, ignore_errors=True)
                 shutil.rmtree(stage, ignore_errors=True)
 
     def _preserve_download(self, source: Path, app_type: str, version: str | None) -> Path:
