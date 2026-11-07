@@ -1,15 +1,15 @@
 """GTK application setup for Roseblox."""
 
-from pathlib import Path
-
 import gi
 
 gi.require_version("Adw", "1")
 gi.require_version("Gdk", "4.0")
-from gi.repository import Adw, Gdk, Gtk
+from gi.repository import Adw, Gdk
 from gi.repository import Gio, GLib
 
+from .backend.setup import Appearance, SetupSettingsError, SetupStore
 from .command_line import parse_window_arguments, print_error
+from .theme import ThemeManager
 from .window import RosebloxWindow
 
 
@@ -26,22 +26,15 @@ class RosebloxApplication(Adw.Application):
 
     def do_startup(self) -> None:
         Adw.Application.do_startup(self)
-        # The stylesheet defines a dark palette; a light system scheme would otherwise
-        # draw libadwaita's white lists and entries on top of it.
-        Adw.StyleManager.get_default().set_color_scheme(Adw.ColorScheme.FORCE_DARK)
+        self.theme = None
         display = Gdk.Display.get_default()
         if display is None:
             return
-
-        stylesheet = Path(__file__).parent / "resources" / "style.css"
-        provider = Gtk.CssProvider()
-        provider.load_from_path(str(stylesheet))
-        Gtk.StyleContext.add_provider_for_display(
-            display,
-            provider,
-            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
-        )
-        self._style_provider = provider
+        try:
+            appearance = SetupStore().load().appearance
+        except SetupSettingsError:
+            appearance = Appearance()
+        self.theme = ThemeManager(display, appearance)
 
     def _on_activate(self, _application: Adw.Application) -> None:
         window = self.props.active_window

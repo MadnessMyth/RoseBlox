@@ -560,6 +560,17 @@ class RosebloxWindow(Adw.ApplicationWindow):
         dialog.set_default_response("close")
         dialog.present()
 
+    def apply_appearance(self, appearance) -> str | None:
+        """Save and apply an appearance; returns an error message if it could not be saved."""
+        theme = getattr(self.get_application(), "theme", None)
+        if theme is not None:
+            theme.apply(appearance)
+        try:
+            self.setup_state = self.setup_store.save_appearance(appearance)
+        except (SetupSettingsError, ValueError) as error:
+            return str(error)[:300]
+        return None
+
     def apply_update_checker_status(self, status, message=None, *, source=None, reload=True) -> None:
         self.update_checker_status = status
         for row in self.update_check_rows:

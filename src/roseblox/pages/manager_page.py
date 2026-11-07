@@ -24,9 +24,11 @@ from ..backend.library import (
 )
 from ..backend.preferences import PreferencesError
 from ..backend.rosemary_install import RosemaryInstallState
-from ..backend.setup import ClosePreference, SetupSettingsError
+from ..backend.setup import ACCENT_CHOICES, COLOR_STYLES, COLOR_THEMES, Appearance, ClosePreference, SetupSettingsError
 from ..backend.updates import APP_TITLES, NotificationLog, UpdateCheckerError
+from .sections import CollapsibleSection
 from .update_checks import UpdateCheckRow
+from ..theme import ACCENT_NAMES, system_accent_available
 from ..backend.rosemary import (
     LaunchSession,
     ProcessIdentityError,
@@ -1273,10 +1275,33 @@ class SettingsPage(Gtk.Box):
         heading.add_css_class("title-1")
         heading.set_halign(Gtk.Align.START)
         self.append(heading)
+        self._sections: dict[str, CollapsibleSection] = {}
+        self._sections_restored = False
 
+        appearance = self._section(
+            "appearance", "Appearance", "Colors, light or dark style, and the accent color."
+        )
+        self._appearance_block = False
+        self.colors_row = Adw.ComboRow.new()
+        self.colors_row.set_title("Colors")
+        self.colors_row.set_model(Gtk.StringList.new(["Roseblox", "System"]))
+        self.style_row = Adw.ComboRow.new()
+        self.style_row.set_title("Style")
+        self.style_row.set_model(Gtk.StringList.new(["Dark", "Light", "Follow system"]))
+        self.accent_row = Adw.ComboRow.new()
+        self.accent_row.set_title("Accent color")
+        self.accent_row.set_model(Gtk.StringList.new([ACCENT_NAMES[choice] for choice in ACCENT_CHOICES]))
+        appearance_group = Adw.PreferencesGroup.new()
+        for row in (self.colors_row, self.style_row, self.accent_row):
+            row.connect("notify::selected", self._appearance_changed)
+            appearance_group.add(row)
+        appearance.add(appearance_group)
+        self._show_appearance(Appearance())
+
+        rosemary = self._section(
+            "rosemary", "Rosemary", "Roseblox launches Player and Studio through Rosemary."
+        )
         rosemary_group = Adw.PreferencesGroup.new()
-        rosemary_group.set_title("Rosemary")
-        rosemary_group.set_description("Roseblox launches Player and Studio through Rosemary.")
         self.rosemary_row = Adw.ActionRow.new()
         self.rosemary_row.set_title("Rosemary")
         self.rosemary_row.set_subtitle_selectable(True)
@@ -1307,23 +1332,19 @@ class SettingsPage(Gtk.Box):
         self._rosemary_install_state = RosemaryInstallState()
         self._rosemary_status = status
 
-        executable_row = Adw.ActionRow.new()
-        executable_row.set_title("Executable")
-        executable_row.set_subtitle("Choose a specific build, or find “rosemary” in PATH automatically.")
-        use_path = Gtk.Button.new_with_label("Use PATH")
-        use_path.set_valign(Gtk.Align.CENTER)
-        use_path.connect("clicked", self._use_rosemary_path)
-        executable_row.add_suffix(use_path)
-        choose_rosemary = Gtk.Button.new_with_label("Choose…")
-        choose_rosemary.set_valign(Gtk.Align.CENTER)
-        choose_rosemary.connect("clicked", lambda *_: self.window.choose_rosemary_executable())
-        executable_row.add_suffix(choose_rosemary)
-        rosemary_group.add(executable_row)
-
         self.rosemary_input_row = Adw.ActionRow.new()
         self.rosemary_input_row.set_title("Ctrl + left-click compatibility")
         self.rosemary_input_row.set_subtitle("Checking this Rosemary build…")
+        self.input_switch = Gtk.Switch()
+        self.input_switch.set_valign(Gtk.Align.CENTER)
+        self.input_switch.set_active(True)
+        self.input_switch.set_sensitive(False)
+        self.input_switch.connect("notify::active", self._input_switch_changed)
+        self.rosemary_input_row.add_suffix(self.input_switch)
+        self.rosemary_input_row.set_activatable_widget(self.input_switch)
         rosemary_group.add(self.rosemary_input_row)
+        self._input_block = False
+        self._input_supported: bool | None = None
 
         setup_row = Adw.ActionRow.new()
         setup_row.set_title("First-time setup")
@@ -1333,41 +1354,17 @@ class SettingsPage(Gtk.Box):
         setup_button.connect("clicked", lambda *_: self.window.navigate_to("setup"))
         setup_row.add_suffix(setup_button)
         rosemary_group.add(setup_row)
-        self.append(rosemary_group)
+        rosemary.add(rosemary_group)
         self._input_check_path: object = _NOT_CHECKED
         self._input_check_generation = 0
 
-        url_group = Adw.PreferencesGroup.new()
-        url_group.set_title("Roblox Links")
-        url_group.set_description(
-            "Open roblox://, roblox-player://, roblox-studio:// and roblox-studio-auth:// links with Roseblox. "
-            "Turning this off restores the previous default application."
-        )
-        self.url_switch = Gtk.Switch()
-        self.url_switch.set_valign(Gtk.Align.CENTER)
-        self.url_switch.connect("state-set", self._url_switch_changed)
-        self.url_row = Adw.ActionRow.new()
-        self.url_row.set_title("Open Roblox links with Roseblox")
-        self.url_row.set_subtitle("Checking desktop registration…")
-        self.url_repair_button = Gtk.Button.new_with_label("Repair")
-        self.url_repair_button.set_valign(Gtk.Align.CENTER)
-        self.url_repair_button.set_visible(False)
-        self.url_repair_button.connect("clicked", lambda *_: self._run_url_change(True))
-        self.url_row.add_suffix(self.url_repair_button)
-        self.url_row.add_suffix(self.url_switch)
-        self.url_row.set_activatable_widget(self.url_switch)
-        url_group.add(self.url_row)
-        self.append(url_group)
-        self._url_busy = False
-        self._url_message: str | None = None
-        self._render_rosemary()
-
-        close_group = Adw.PreferencesGroup.new()
-        close_group.set_title("After Launching")
-        close_group.set_description(
+        launching = self._section(
+            "launching",
+            "After Launching",
             "Close Roseblox once Roblox has started so the launcher is not left open. "
-            "Roblox keeps running; open Roseblox again any time."
+            "Roblox keeps running; open Roseblox again any time.",
         )
+        close_group = Adw.PreferencesGroup.new()
         self._close_rows: dict[str, tuple[Adw.ExpanderRow, Gtk.Switch]] = {}
         self._close_block = False
         for app_type, title in (("player", "Roblox Player"), ("studio", "Roblox Studio")):
@@ -1390,14 +1387,41 @@ class SettingsPage(Gtk.Box):
             link_switch.connect("notify::active", self._close_preference_changed, app_type)
             close_group.add(expander)
             self._close_rows[app_type] = (expander, link_switch)
-        self.append(close_group)
+        launching.add(close_group)
 
-        updates_group = Adw.PreferencesGroup.new()
-        updates_group.set_title("Updates")
-        updates_group.set_description(
-            "A small background checker starts when you log in, looks for new Player and Studio "
-            "versions every few hours, and sends a notification with Update and Skip buttons."
+        links = self._section(
+            "links",
+            "Roblox Links",
+            "Open roblox://, roblox-player://, roblox-studio:// and roblox-studio-auth:// links with Roseblox. "
+            "Turning this off restores the previous default application.",
         )
+        url_group = Adw.PreferencesGroup.new()
+        self.url_switch = Gtk.Switch()
+        self.url_switch.set_valign(Gtk.Align.CENTER)
+        self.url_switch.connect("state-set", self._url_switch_changed)
+        self.url_row = Adw.ActionRow.new()
+        self.url_row.set_title("Open Roblox links with Roseblox")
+        self.url_row.set_subtitle("Checking desktop registration…")
+        self.url_repair_button = Gtk.Button.new_with_label("Repair")
+        self.url_repair_button.set_valign(Gtk.Align.CENTER)
+        self.url_repair_button.set_visible(False)
+        self.url_repair_button.connect("clicked", lambda *_: self._run_url_change(True))
+        self.url_row.add_suffix(self.url_repair_button)
+        self.url_row.add_suffix(self.url_switch)
+        self.url_row.set_activatable_widget(self.url_switch)
+        url_group.add(self.url_row)
+        links.add(url_group)
+        self._url_busy = False
+        self._url_message: str | None = None
+        self._render_rosemary()
+
+        updates = self._section(
+            "updates",
+            "Updates",
+            "A small background checker starts when you log in, looks for new Player and Studio "
+            "versions every few hours, and sends a notification with Update and Skip buttons.",
+        )
+        updates_group = Adw.PreferencesGroup.new()
         self.update_row = UpdateCheckRow(window)
         updates_group.add(self.update_row)
         self.check_now_row = Adw.ActionRow.new()
@@ -1418,7 +1442,30 @@ class SettingsPage(Gtk.Box):
         self.ask_again_button.connect("clicked", self._ask_again_clicked)
         self.skipped_row.add_suffix(self.ask_again_button)
         updates_group.add(self.skipped_row)
-        self.append(updates_group)
+        updates.add(updates_group)
+
+        advanced = self._section(
+            "advanced",
+            "Advanced",
+            "Only change these if you need to. Wrong values stop Roseblox from finding Rosemary "
+            "or new Roblox versions.",
+            expanded=False,
+        )
+        executable_group = Adw.PreferencesGroup.new()
+        executable_group.set_title("Rosemary Executable")
+        executable_row = Adw.ActionRow.new()
+        executable_row.set_title("Executable")
+        executable_row.set_subtitle("Choose a specific build, or find “rosemary” in PATH automatically.")
+        use_path = Gtk.Button.new_with_label("Use PATH")
+        use_path.set_valign(Gtk.Align.CENTER)
+        use_path.connect("clicked", self._use_rosemary_path)
+        executable_row.add_suffix(use_path)
+        choose_rosemary = Gtk.Button.new_with_label("Choose…")
+        choose_rosemary.set_valign(Gtk.Align.CENTER)
+        choose_rosemary.connect("clicked", lambda *_: self.window.choose_rosemary_executable())
+        executable_row.add_suffix(choose_rosemary)
+        executable_group.add(executable_row)
+        advanced.add(executable_group)
 
         settings = {app: default_version_source(app) for app in ("player", "studio")}
         self._source_widgets = {}
@@ -1467,13 +1514,110 @@ class SettingsPage(Gtk.Box):
             actions_row.add_suffix(actions)
             group.add(actions_row)
             self._source_widgets[app_type] = (endpoint, pointer, result_label, test_button, save_button, reset_button)
-            self.append(group)
+            advanced.add(group)
             for action in (test_button, save_button, reset_button):
                 action.set_sensitive(False)
         threading.Thread(target=self._load_sources_worker, daemon=True).start()
 
+    def _section(self, section_id: str, title: str, description: str, *, expanded: bool = True) -> CollapsibleSection:
+        section = CollapsibleSection(
+            section_id, title, description, expanded=expanded, on_toggled=self._section_toggled
+        )
+        self._sections[section_id] = section
+        self.append(section)
+        return section
+
+    def _section_toggled(self, section_id: str, expanded: bool) -> None:
+        if self.setup_store is None:
+            return
+        try:
+            self.window.setup_state = self.setup_store.save_section_expanded(section_id, expanded)
+        except SetupSettingsError:
+            pass  # Only the layout is lost; the section still opens and closes.
+
+    def _restore_sections(self, setup_state) -> None:
+        if self._sections_restored:
+            return
+        self._sections_restored = True
+        for section_id, expanded in setup_state.expanded_sections.items():
+            section = self._sections.get(section_id)
+            if section is not None:
+                section.set_expanded(expanded)
+
+    def _show_appearance(self, appearance: Appearance) -> None:
+        self._appearance_block = True
+        try:
+            self.colors_row.set_selected(COLOR_THEMES.index(appearance.colors))
+            self.style_row.set_selected(COLOR_STYLES.index(appearance.style))
+            self.accent_row.set_selected(ACCENT_CHOICES.index(appearance.accent))
+        finally:
+            self._appearance_block = False
+        self._describe_appearance(appearance)
+
+    def _describe_appearance(self, appearance: Appearance, error: str | None = None) -> None:
+        self.colors_row.set_subtitle(
+            "Roseblox’s own pink and purple tones." if appearance.colors == "roseblox"
+            else "Your desktop’s standard window colors."
+        )
+        self.style_row.set_subtitle(
+            "Follows your desktop’s light or dark preference." if appearance.style == "system" else ""
+        )
+        if error:
+            self.accent_row.set_subtitle(error)
+        elif appearance.accent == "system":
+            self.accent_row.set_subtitle(
+                "Uses your desktop’s accent color." if system_accent_available()
+                else "Your desktop does not share an accent color with apps, so blue is used."
+            )
+        else:
+            self.accent_row.set_subtitle("")
+
+    def _appearance_changed(self, *_args) -> None:
+        if self._appearance_block:
+            return
+        appearance = Appearance(
+            COLOR_THEMES[self.colors_row.get_selected()],
+            COLOR_STYLES[self.style_row.get_selected()],
+            ACCENT_CHOICES[self.accent_row.get_selected()],
+        )
+        error = self.window.apply_appearance(appearance)
+        self._describe_appearance(appearance, f"Not saved: {error}" if error else None)
+
+    def _input_switch_changed(self, switch, _pspec) -> None:
+        if self._input_block or self.setup_store is None:
+            return
+        try:
+            self.window.setup_state = self.setup_store.save_plain_ctrl_click(switch.get_active())
+        except SetupSettingsError as error:
+            self._set_input_switch(not switch.get_active())
+            self.rosemary_input_row.set_subtitle(f"Not saved: {str(error)[:300]}")
+            return
+        self._describe_input()
+
+    def _set_input_switch(self, active: bool) -> None:
+        self._input_block = True
+        self.input_switch.set_active(active)
+        self._input_block = False
+
+    def _describe_input(self) -> None:
+        supported = self._input_supported
+        self.input_switch.set_sensitive(supported is True)
+        if supported is None:
+            message = "Available once Rosemary is detected."
+        elif not supported:
+            message = "Not supported by this Rosemary build; default input behavior is kept."
+        elif self.input_switch.get_active():
+            message = "On. Ctrl + left-click acts as a normal left-click in Player and Studio."
+        else:
+            message = "Off. Ctrl + left-click keeps Rosemary’s default behavior."
+        self.rosemary_input_row.set_subtitle(message)
+
     def apply_setup_snapshot(self, rosemary_status, setup_state, setup_error, handler_status) -> None:
         if setup_state is not None:
+            self._restore_sections(setup_state)
+            self._show_appearance(setup_state.appearance)
+            self._set_input_switch(setup_state.plain_ctrl_click)
+            self._describe_input()
             self._show_close_preferences(setup_state)
             self._show_skipped_versions(setup_state.skipped_versions)
         enabled = bool(setup_state and setup_state.url_handlers_enabled)
@@ -1549,13 +1693,8 @@ class SettingsPage(Gtk.Box):
     def _show_rosemary_input_status(self, supported, generation) -> bool:
         if generation != self._input_check_generation:
             return GLib.SOURCE_REMOVE
-        if supported is True:
-            message = "Enabled. Ctrl + left-click acts as a normal left-click in Roseblox-launched apps."
-        elif supported is False:
-            message = "Not supported by this Rosemary build; default input behavior is kept."
-        else:
-            message = "Available once Rosemary is detected."
-        self.rosemary_input_row.set_subtitle(message)
+        self._input_supported = supported
+        self._describe_input()
         return GLib.SOURCE_REMOVE
 
     def apply_update_status(self, status) -> None:
