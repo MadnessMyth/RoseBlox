@@ -1420,7 +1420,7 @@ class SettingsPage(Gtk.Box):
         else:
             self.rosemary_icon.set_from_icon_name("dialog-warning-symbolic")
             self.rosemary_row.set_subtitle("Not installed. Rosemary is required to launch Roblox.")
-        self.install_rosemary_row.set_visible(not status.available or install.waiting or bool(install.message))
+        self.install_rosemary_row.set_visible(not status.available or install.waiting)
         self.install_rosemary_row.set_subtitle(
             install.message or "Build the “rosemary” package with paru or yay in a terminal window."
         )
