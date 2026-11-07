@@ -1,0 +1,5 @@
+/RoseBlox/
+/src/
+/pkg/
+*.pkg.tar*
+*.log

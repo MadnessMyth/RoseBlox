@@ -22,6 +22,22 @@ class ArchPackagingTests(unittest.TestCase):
         self.assertNotRegex(recipe, r"(?m)^(depends|optdepends)=.*rosemary")
         self.assertNotIn("pip install", recipe)
 
+    def test_git_recipe_tracks_master_and_replaces_the_release_package(self):
+        recipe = (ROOT / "packaging" / "arch-git" / "PKGBUILD").read_text(encoding="utf-8")
+        release = (ROOT / "packaging" / "arch" / "PKGBUILD").read_text(encoding="utf-8")
+        self.assertIn("pkgname=roseblox-git", recipe)
+        self.assertIn("git+https://github.com/MadnessMyth/RoseBlox.git#branch=master", recipe)
+        self.assertIn("makedepends=('git'", recipe)
+        self.assertIn('provides=("$_pkgname")', recipe)
+        self.assertIn('conflicts=("$_pkgname")', recipe)
+        self.assertIn("pkgver() {", recipe)
+        runtime = re.search(r"(?m)^depends=.*$", release).group(0)
+        self.assertIn(runtime, recipe)
+        self.assertNotRegex(recipe, r"(?m)^(depends|optdepends)=.*rosemary")
+        for asset in ("io.github.roseblox.Roseblox.desktop", "io.github.roseblox.Roseblox.svg"):
+            self.assertIn(f"packaging/arch/{asset}", recipe)
+            self.assertTrue((ROOT / "packaging" / "arch" / asset).is_file())
+
     def test_desktop_entry_references_the_packaged_hicolor_icon(self):
         desktop = (ROOT / "packaging" / "arch" / "io.github.roseblox.Roseblox.desktop").read_text(
             encoding="utf-8"

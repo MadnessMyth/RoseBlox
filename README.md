@@ -16,15 +16,21 @@ On Arch Linux or CachyOS, the relevant packages are `gtk4`, `libadwaita`, and `p
 
 ## Install on Arch Linux or CachyOS
 
-The repository includes a pinned PKGBUILD at `packaging/arch/PKGBUILD`. Build and install it from a checkout with `makepkg`:
+**See [docs/INSTALL.md](docs/INSTALL.md) for the step-by-step install, update, and uninstall guide.**
+
+To get the latest `master`, build the `roseblox-git` package from `packaging/arch-git/PKGBUILD`:
 
 ```sh
 git clone https://github.com/MadnessMyth/RoseBlox.git
-cd RoseBlox/packaging/arch
+cd RoseBlox/packaging/arch-git
 makepkg -si
 ```
 
-Run `makepkg` as a regular user; it will request system package installation through pacman as needed. The recipe installs Roseblox into the system Python package path, its MIT license under `/usr/share/licenses/roseblox/`, a scalable application icon, and the `roseblox` command and desktop menu entry. Package sources use the versioned `v0.1.0` Git tag. **The AUR package has not been published yet.**
+To update, run `git pull` in the checkout, then `makepkg -si` in `packaging/arch-git` again.
+
+The repository also includes a pinned release PKGBUILD at `packaging/arch/PKGBUILD`, which builds the `v0.1.0` tag; that tag predates first-run setup and the Roblox link fixes. Both packages provide `roseblox` and conflict with each other.
+
+Run `makepkg` as a regular user; it will request system package installation through pacman as needed. Each recipe installs Roseblox into the system Python package path, its MIT license under `/usr/share/licenses/<package name>/`, a scalable application icon, and the `roseblox` command and desktop menu entry. **The AUR package has not been published yet.**
 
 Rosemary must be discoverable as `rosemary` in `PATH`, or configured through Roseblox's Settings page. Roseblox never bundles Rosemary or downloads it itself. When Rosemary is missing, **Install Rosemary** (in setup and Settings) opens a terminal running `paru -S --needed rosemary` (or `yay` when paru is absent), so you can review the [AUR package](https://aur.archlinux.org/packages/rosemary) and authenticate there; Roseblox detects the new executable automatically when the build finishes. The terminal is chosen from `$TERMINAL` when supported, then `xdg-terminal-exec`, GNOME Console, Ptyxis, GNOME Terminal, Konsole, Xfce Terminal, Alacritty, kitty, foot, WezTerm, Ghostty, and xterm. You can also choose any existing Rosemary executable or release AppImage. ZIP archive import and installation use `bsdtar`, provided by Arch's `libarchive` package; install `libarchive` if this command is unavailable. Roblox bundles and downloaded archives are kept in the user's XDG data directory and are not removed when Roseblox is uninstalled.
 

@@ -1,0 +1,38 @@
+# Maintainer: Roseblox contributors
+pkgname=roseblox-git
+_pkgname=roseblox
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Native GTK launcher and installation manager for Roblox through Rosemary (latest master)'
+arch=('any')
+url='https://github.com/MadnessMyth/RoseBlox'
+license=('MIT')
+depends=('gtk4' 'libadwaita' 'python' 'python-gobject' 'xdg-utils')
+makedepends=('git' 'python-build' 'python-installer' 'python-setuptools' 'python-wheel')
+optdepends=('libarchive: required for importing or extracting Roblox ZIP archives (bsdtar)')
+provides=("$_pkgname")
+conflicts=("$_pkgname")
+
+source=("RoseBlox::git+https://github.com/MadnessMyth/RoseBlox.git#branch=master")
+sha256sums=('SKIP')
+
+pkgver() {
+  cd "$srcdir/RoseBlox"
+  git describe --long --tags --abbrev=7 | sed 's/^v//;s/\([^-]*-g\)/r\1/;s/-/./g'
+}
+
+build() {
+  cd "$srcdir/RoseBlox"
+  rm -rf dist
+  python -m build --wheel --no-isolation
+}
+
+package() {
+  cd "$srcdir/RoseBlox"
+  python -m installer --destdir="$pkgdir" dist/*.whl
+  install -Dm644 packaging/arch/io.github.roseblox.Roseblox.desktop \
+    "$pkgdir/usr/share/applications/io.github.roseblox.Roseblox.desktop"
+  install -Dm644 packaging/arch/io.github.roseblox.Roseblox.svg \
+    "$pkgdir/usr/share/icons/hicolor/scalable/apps/io.github.roseblox.Roseblox.svg"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
