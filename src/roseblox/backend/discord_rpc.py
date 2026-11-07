@@ -11,7 +11,8 @@ import uuid
 from pathlib import Path
 from typing import Mapping
 
-DEFAULT_APPLICATION_ID = ""
+# The "Roseblox" application in the Discord Developer Portal; Discord shows "Playing Roseblox".
+DEFAULT_APPLICATION_ID = "1568683661321052170"
 _APPLICATION_ID = re.compile(r"^\d{15,22}$")
 _HANDSHAKE, _FRAME, _CLOSE = 0, 1, 2
 _MAX_PAYLOAD = 64 * 1024
@@ -68,10 +69,9 @@ def build_activity(
     }
     if creator:
         activity["state"] = _limit(f"by {creator}", 128)
+    # Without an image Discord shows the application's own icon.
     if icon_url and icon_url.startswith("https://"):
         activity["assets"]["large_image"] = icon_url
-    else:
-        activity["assets"]["large_image"] = "roseblox"
     if buttons:
         activity["buttons"] = [
             {"label": _limit(label, 32), "url": url} for label, url in buttons[:2] if url.startswith("https://")

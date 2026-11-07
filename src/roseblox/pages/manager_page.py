@@ -1438,6 +1438,7 @@ class SettingsPage(Gtk.Box):
         )
         playing_group = Adw.PreferencesGroup.new()
         self._playing_block = False
+        self.discord_id_row = None
         self._playing_rows: dict[str, tuple[Adw.ActionRow, Gtk.Switch]] = {}
         for field_name, title in (
             ("discord_presence", "Discord Rich Presence"),
@@ -1454,12 +1455,6 @@ class SettingsPage(Gtk.Box):
             row.set_activatable_widget(switch)
             playing_group.add(row)
             self._playing_rows[field_name] = (row, switch)
-        self.discord_id_row = Adw.EntryRow.new()
-        self.discord_id_row.set_title("Discord application ID")
-        self.discord_id_row.set_show_apply_button(True)
-        self.discord_id_row.set_input_purpose(Gtk.InputPurpose.DIGITS)
-        self.discord_id_row.connect("apply", self._discord_id_applied)
-        playing_group.add(self.discord_id_row)
         self.playing_message = Gtk.Label(xalign=0, wrap=True)
         self.playing_message.add_css_class("dim-label")
         self.playing_message.set_visible(False)
@@ -1544,6 +1539,24 @@ class SettingsPage(Gtk.Box):
         executable_row.add_suffix(choose_rosemary)
         executable_group.add(executable_row)
         advanced.add(executable_group)
+
+        discord_group = Adw.PreferencesGroup.new()
+        discord_group.set_title("Discord Application")
+        discord_group.set_description(
+            "Discord Rich Presence uses Roseblox's own Discord application. Enter another application ID "
+            "from the Discord Developer Portal to show its name instead; leave it empty for Roseblox's."
+        )
+        self.discord_id_row = Adw.EntryRow.new()
+        self.discord_id_row.set_title("Discord application ID")
+        self.discord_id_row.set_show_apply_button(True)
+        self.discord_id_row.set_input_purpose(Gtk.InputPurpose.DIGITS)
+        self.discord_id_row.connect("apply", self._discord_id_applied)
+        discord_group.add(self.discord_id_row)
+        self.discord_id_message = Gtk.Label(xalign=0, wrap=True)
+        self.discord_id_message.add_css_class("dim-label")
+        self.discord_id_message.set_visible(False)
+        advanced.add(discord_group)
+        advanced.add(self.discord_id_message)
 
         settings = {app: default_version_source(app) for app in ("player", "studio")}
         self._source_widgets = {}
@@ -1839,7 +1852,7 @@ class SettingsPage(Gtk.Box):
         try:
             for field_name, (_row, switch) in self._playing_rows.items():
                 switch.set_active(getattr(settings, field_name))
-            if self.discord_id_row.get_text() != settings.discord_application_id:
+            if self.discord_id_row is not None and self.discord_id_row.get_text() != settings.discord_application_id:
                 self.discord_id_row.set_text(settings.discord_application_id)
         finally:
             self._playing_block = False
@@ -1850,7 +1863,7 @@ class SettingsPage(Gtk.Box):
             "Shows the game you are in on your Discord profile, with a View Game button. "
             "The Discord app must be running."
             if has_id
-            else "Enter a Discord application ID below first."
+            else "Enter a Discord application ID under Advanced first."
         )
         join_row, join_switch = self._playing_rows["discord_join_button"]
         join_switch.set_sensitive(settings.discord_presence)
@@ -1889,11 +1902,13 @@ class SettingsPage(Gtk.Box):
     def _discord_id_applied(self, row) -> None:
         text = row.get_text().strip()
         if text and not valid_application_id(text):
-            self.playing_message.set_text(
+            self.discord_id_message.set_text(
                 "A Discord application ID is the long number under General Information in the Discord Developer Portal."
             )
-            self.playing_message.set_visible(True)
+            self.discord_id_message.set_visible(True)
             return
+        self.discord_id_message.set_text("Saved." if text else "Saved. Roseblox's own Discord application is used.")
+        self.discord_id_message.set_visible(True)
         self._save_while_playing(replace(self._current_while_playing(), discord_application_id=text))
 
     def _close_preference_changed(self, _widget, _pspec, app_type: str) -> None:

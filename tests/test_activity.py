@@ -184,7 +184,7 @@ class DiscordTests(unittest.TestCase):
         )
         self.assertEqual(128, len(activity["details"]))
         self.assertNotIn("state", activity)
-        self.assertEqual("roseblox", activity["assets"]["large_image"])
+        self.assertNotIn("large_image", activity["assets"])
         self.assertEqual(["https://a"], [button["url"] for button in activity["buttons"]])
         self.assertLessEqual(len(activity["buttons"][0]["label"]), 32)
 
@@ -371,12 +371,16 @@ class WatcherTests(unittest.TestCase):
         self.assertEqual([], self.kills)
         self.assertEqual(0, watcher.run())
 
-    def test_presence_is_off_without_the_switch_or_an_id(self):
-        self.settings = WhilePlaying(discord_presence=True, discord_application_id="")
+    def test_presence_uses_roseblox_application_unless_another_is_set(self):
+        self.settings = WhilePlaying(discord_presence=True)
         watcher = self._watcher()
         self._write(JOIN, CONNECTED)
         watcher.poll()
-        self.assertEqual([], FakePresence.instances)
+        self.assertEqual("1568683661321052170", FakePresence.instances[0].application_id)
+        self.settings = WhilePlaying(discord_presence=False)
+        self._write(DISCONNECT, JOIN, CONNECTED)
+        watcher.poll()
+        self.assertEqual(1, len(FakePresence.instances))
 
     def test_a_discord_failure_is_retried_later(self):
         attempts = []

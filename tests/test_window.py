@@ -323,7 +323,7 @@ class RealWindowTests(unittest.TestCase):
         self.assertTrue(player_link.get_active())
         self.assertTrue(studio_row.get_enable_expansion())
 
-    def test_while_playing_switches_save_and_discord_needs_an_application_id(self):
+    def test_while_playing_switches_save_and_use_roseblox_discord_application(self):
         from roseblox.backend.setup import SetupStore, WhilePlaying
 
         window = self._loaded_window()
@@ -331,19 +331,18 @@ class RealWindowTests(unittest.TestCase):
         discord_row, discord = settings._playing_rows["discord_presence"]
         _join_row, join = settings._playing_rows["discord_join_button"]
         _location_row, location = settings._playing_rows["server_location"]
-        self.assertFalse(discord.get_sensitive())
-        self.assertIn("application ID", discord_row.get_subtitle())
+        self.assertTrue(discord.get_sensitive())
+        self.assertIn("Discord profile", discord_row.get_subtitle())
         self.assertFalse(join.get_sensitive())
 
         location.set_active(True)
-        settings.discord_id_row.set_text("not a number")
-        settings.discord_id_row.emit("apply")
-        self.assertTrue(settings.playing_message.get_visible())
-        settings.discord_id_row.set_text("123456789012345678")
-        settings.discord_id_row.emit("apply")
-        self.assertTrue(discord.get_sensitive())
         discord.set_active(True)
         self.assertTrue(join.get_sensitive())
+        settings.discord_id_row.set_text("not a number")
+        settings.discord_id_row.emit("apply")
+        self.assertIn("long number", settings.discord_id_message.get_text())
+        settings.discord_id_row.set_text("123456789012345678")
+        settings.discord_id_row.emit("apply")
         state = SetupStore(self.config_home / "roseblox" / "setup.json").load()
         self.assertEqual(
             WhilePlaying(discord_presence=True, discord_application_id="123456789012345678", server_location=True),
