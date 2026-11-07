@@ -36,6 +36,19 @@ def prefix_directory(env: Mapping[str, str]) -> Path | None:
     return data_home / "rosemary" / "prefixes" / "default"
 
 
+def guest_path(host_path: Path, env: Mapping[str, str]) -> str:
+    """How a guest names a host file: inside the prefix's root, or under ``/Volumes/Host``."""
+    host_path = Path(os.path.abspath(host_path))
+    prefix = prefix_directory(env)
+    if prefix is None:
+        return str(host_path)
+    root = Path(os.path.abspath(prefix)) / "root"
+    try:
+        return "/" + host_path.relative_to(root).as_posix()
+    except ValueError:
+        return "/Volumes/Host" + host_path.as_posix()
+
+
 def login_name() -> str:
     try:
         name = pwd.getpwuid(os.geteuid()).pw_name

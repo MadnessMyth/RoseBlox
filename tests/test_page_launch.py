@@ -70,6 +70,45 @@ class LaunchPageWorkerTests(unittest.TestCase):
         self.assertIn("Restore a backup", dispatched[0][1][1])
 
 
+class OpenPlaceTests(unittest.TestCase):
+    def _page(self):
+        page = SimpleNamespace(
+            _sessions={}, _launching_ids=set(), _stopping_ids=set(), _refresh_all=Mock(), _show_error=Mock(),
+            _launch_worker=Mock(), _launch_failed=Mock(),
+        )
+        page._open_place_worker = MethodType(InstallationPage._open_place_worker, page)
+        return page
+
+    def test_a_place_file_opens_in_studio_with_its_guest_path(self):
+        page = self._page()
+        record = SimpleNamespace(id="studio-id", app_type="studio")
+        with tempfile.TemporaryDirectory() as directory:
+            place = Path(directory) / "My Game.rbxl"
+            place.write_bytes(b"<roblox!")
+            with patch.dict("os.environ", {"XDG_CONFIG_HOME": directory, "XDG_DATA_HOME": directory + "/data"}), patch(
+                "roseblox.pages.manager_page.threading.Thread",
+                side_effect=lambda target, args, daemon: SimpleNamespace(start=lambda: target(*args)),
+            ):
+                InstallationPage.request_open_place(page, record, place)
+        page._launch_worker.assert_called_once_with(
+            "studio-id", record, ("-task", "EditFile", "-localPlaceFile", f"/Volumes/Host{place}"), from_link=False
+        )
+        self.assertIn("studio-id", page._launching_ids)
+
+    def test_other_files_and_busy_installations_are_refused(self):
+        page = self._page()
+        record = SimpleNamespace(id="studio-id", app_type="studio")
+        with tempfile.TemporaryDirectory() as directory:
+            other = Path(directory) / "notes.txt"
+            other.write_text("x")
+            InstallationPage.request_open_place(page, record, other)
+            self.assertEqual("Not a place file", page._show_error.call_args.args[0])
+            page._sessions["studio-id"] = object()
+            InstallationPage.request_open_place(page, record, other)
+            self.assertEqual("Studio is already open", page._show_error.call_args.args[0])
+        page._launch_worker.assert_not_called()
+
+
 class SettingsPageWorkerTests(unittest.TestCase):
     def test_per_app_invalid_saved_value_leaves_both_settings_controls_available(self):
         player_widgets = [Mock() for _ in range(6)]

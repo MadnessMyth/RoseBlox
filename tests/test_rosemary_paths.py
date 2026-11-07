@@ -18,6 +18,7 @@ from roseblox.backend.rosemary_paths import (
     CacheError,
     cache_entries,
     guest_home,
+    guest_path,
     login_name,
     prefix_directory,
     read_framerate_cap,
@@ -54,6 +55,14 @@ class PathTests(unittest.TestCase):
                 self.assertIsNone(prefix_directory({"ROSEMARY_PREFIX": value}))
                 self.assertIsNone(guest_home({"ROSEMARY_PREFIX": value}))
         self.assertEqual(Path("/home/me"), guest_home({"HOME": "/home/me", "ROSEMARY_PREFIX_HOME": "host"}))
+
+    def test_host_files_have_guest_paths(self):
+        env = {"HOME": "/home/me"}
+        self.assertEqual("/Volumes/Host/home/me/Places/My Game.rbxl", guest_path(Path("/home/me/Places/My Game.rbxl"), env))
+        inside = Path("/home/me/.local/share/rosemary/prefixes/default/root/Users/me/Documents/a.rbxlx")
+        self.assertEqual("/Users/me/Documents/a.rbxlx", guest_path(inside, env))
+        self.assertEqual("/home/me/a.rbxl", guest_path(Path("/home/me/a.rbxl"), {"ROSEMARY_PREFIX": "off"}))
+        self.assertEqual("/Volumes/Host/srv/a.rbxl", guest_path(Path("/srv/x/../a.rbxl"), {"ROSEMARY_PREFIX": "/p"}))
 
     def test_shader_cache_location(self):
         self.assertEqual(Path("/home/me/.cache/rosemary/metal-shaders"), shader_cache_directory({"HOME": "/home/me"}))

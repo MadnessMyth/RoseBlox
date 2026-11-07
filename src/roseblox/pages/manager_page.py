@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import threading
 from dataclasses import dataclass, replace
@@ -22,7 +23,8 @@ from ..backend.library import (
     InstallationRecord,
     LibraryDataError,
 )
-from ..backend.launch_config import LaunchConfigStore
+from ..backend.launch_config import LaunchConfigStore, effective_environment
+from ..backend.rosemary_paths import guest_path
 from ..backend.mods import prepare_launch as prepare_mods
 from ..backend.preferences import PreferencesError
 from ..backend.rosemary_install import RosemaryInstallState
@@ -377,6 +379,18 @@ class InstallationPage(Gtk.Box):
             preferred_button.connect("clicked", self._on_set_preferred_clicked, record)
             self._preferred_buttons[record.id] = preferred_button
             contents.append(preferred_button)
+
+            if record.app_type == "studio":
+                place_button = Gtk.Button.new_with_label("Open Place…")
+                place_button.set_valign(Gtk.Align.CENTER)
+                place_button.set_tooltip_text("Open a .rbxl or .rbxlx file in this Studio installation")
+                place_button.set_sensitive(
+                    record.id not in self._launching_ids
+                    and record.id not in self._sessions
+                    and record.id not in self._stopping_ids
+                )
+                place_button.connect("clicked", self._on_open_place_clicked, record)
+                contents.append(place_button)
 
             launch_button = Gtk.Button()
             launch_button.set_valign(Gtk.Align.CENTER)
@@ -1053,7 +1067,50 @@ class InstallationPage(Gtk.Box):
             target=self._launch_worker, args=(record.id, record, (uri,)), daemon=True
         ).start()
 
-    def _launch_worker(self, installation_id: str, record: InstallationRecord, guest_arguments=()) -> None:
+    def _on_open_place_clicked(self, _button: Gtk.Button, record: InstallationRecord) -> None:
+        file_filter = Gtk.FileFilter()
+        file_filter.set_name("Roblox places")
+        for pattern in ("*.rbxl", "*.rbxlx", "*.RBXL", "*.RBXLX"):
+            file_filter.add_pattern(pattern)
+        filters = Gio.ListStore.new(Gtk.FileFilter)
+        filters.append(file_filter)
+        dialog = Gtk.FileDialog(title="Open Place in Studio", modal=True, filters=filters)
+
+        def finished(dialog, result) -> None:
+            try:
+                file = dialog.open_finish(result)
+            except GLib.Error:
+                return
+            if file.get_path():
+                self.request_open_place(record, Path(file.get_path()))
+
+        dialog.open(self.window, None, finished)
+
+    def request_open_place(self, record: InstallationRecord, place: Path) -> None:
+        if record.app_type != "studio":
+            return
+        if record.id in self._sessions or record.id in self._launching_ids or record.id in self._stopping_ids:
+            self._show_error("Studio is already open", "Close this installation before opening another place.")
+            return
+        if place.suffix.lower() not in (".rbxl", ".rbxlx") or not place.is_file():
+            self._show_error("Not a place file", f"{place.name} is not a .rbxl or .rbxlx file.")
+            return
+        self._launching_ids.add(record.id)
+        self._refresh_all(reload_library=False)
+        threading.Thread(target=self._open_place_worker, args=(record, place), daemon=True).start()
+
+    def _open_place_worker(self, record: InstallationRecord, place: Path) -> None:
+        try:
+            environment = effective_environment(LaunchConfigStore().load("studio"), os.environ)
+        except Exception as error:
+            GLib.idle_add(self._launch_failed, record.id, str(error))
+            return
+        arguments = ("-task", "EditFile", "-localPlaceFile", guest_path(place, environment))
+        self._launch_worker(record.id, record, arguments, from_link=False)
+
+    def _launch_worker(
+        self, installation_id: str, record: InstallationRecord, guest_arguments=(), from_link: bool | None = None
+    ) -> None:
         try:
             setup_state = getattr(self.window, "setup_state", None)
             mods_message = prepare_mods(record)
@@ -1070,7 +1127,8 @@ class InstallationPage(Gtk.Box):
             GLib.idle_add(self._launch_failed, installation_id, str(error))
             return
         GLib.idle_add(
-            self._launch_ready, installation_id, session, record.app_type, bool(guest_arguments)
+            self._launch_ready, installation_id, session, record.app_type,
+            bool(guest_arguments) if from_link is None else from_link,
         )
 
     def _launch_ready(
