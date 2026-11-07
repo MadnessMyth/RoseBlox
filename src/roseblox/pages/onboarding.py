@@ -310,7 +310,7 @@ class OnboardingPage(Gtk.Box):
         install = self._install_state
         if status.available:
             _set_badge(self.rosemary_badge, "Ready", "done")
-            self.rosemary_icon.set_from_icon_name("emblem-ok-symbolic")
+            self.rosemary_icon.set_from_icon_name("object-select-symbolic")
             self.rosemary_row.set_subtitle(status.executable)
         elif status.error:
             _set_badge(self.rosemary_badge, "Needs attention", "attention")

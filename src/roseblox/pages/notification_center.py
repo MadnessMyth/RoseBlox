@@ -393,7 +393,7 @@ class NotificationCenter(Gtk.MenuButton):
         icon_name, style = {
             "failed": ("dialog-error-symbolic", "error"),
             "cancelled": ("process-stop-symbolic", "dim-label"),
-        }.get(entry.outcome, ("emblem-ok-symbolic", "success"))
+        }.get(entry.outcome, ("object-select-symbolic", "success"))
         icon = Gtk.Image.new_from_icon_name(icon_name)
         icon.add_css_class(style)
         row.add_prefix(icon)

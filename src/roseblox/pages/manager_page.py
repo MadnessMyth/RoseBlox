@@ -1661,7 +1661,7 @@ class SettingsPage(Gtk.Box):
         status = self._rosemary_status
         install = self._rosemary_install_state
         if status.available:
-            self.rosemary_icon.set_from_icon_name("emblem-ok-symbolic")
+            self.rosemary_icon.set_from_icon_name("object-select-symbolic")
             self.rosemary_row.set_subtitle(status.executable)
         elif status.error:
             self.rosemary_icon.set_from_icon_name("dialog-warning-symbolic")
