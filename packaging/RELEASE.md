@@ -7,7 +7,7 @@
 - [x] Create the annotated `v0.4.1` Git tag on the release commit.
 - [x] Point `packaging/arch/PKGBUILD` at the `v0.4.1` tag, record the archive checksum, and regenerate `.SRCINFO`.
 - [x] Build `packaging/arch/PKGBUILD` with `makepkg` on Arch Linux and install it.
-- [ ] Create the GitHub release for `v0.4.1` from these notes.
+- [x] Create the GitHub release for `v0.4.1` from these notes.
 
 ## Release notes — v0.4.1
 
@@ -26,7 +26,7 @@
 - [x] Create the annotated `v0.4.0` Git tag on the release commit.
 - [x] Point `packaging/arch/PKGBUILD` at the `v0.4.0` tag, record the archive checksum, and regenerate `.SRCINFO`.
 - [x] Build `packaging/arch/PKGBUILD` with `makepkg` on Arch Linux and install it.
-- [ ] Create the GitHub release for `v0.4.0` from these notes.
+- [x] Create the GitHub release for `v0.4.0` from these notes.
 
 ## Release notes — v0.4.0
 
@@ -58,7 +58,7 @@
 - [x] Create the annotated `v0.3.0` Git tag on the release commit.
 - [x] Point `packaging/arch/PKGBUILD` at the `v0.3.0` tag, record the archive checksum, and regenerate `.SRCINFO`.
 - [x] Build `packaging/arch/PKGBUILD` with `makepkg` on Arch Linux and install it.
-- [ ] Create the GitHub release for `v0.3.0` from these notes.
+- [x] Create the GitHub release for `v0.3.0` from these notes.
 
 ## Release notes — v0.3.0
 
