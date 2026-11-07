@@ -32,12 +32,21 @@ from ..backend.flag_catalog import (
     flag_info,
     load_cached_allowlist,
 )
-from ..backend import gamemode
+from ..backend import diagnostics, gamemode
 from ..backend.gpu import list_gpus
 from ..backend.rosemary import build_launch_arguments
+from ..backend.rosemary_paths import (
+    CacheError,
+    cache_entries,
+    read_framerate_cap,
+    roblox_settings_path,
+    trash_cache,
+)
+from ..backend.transfer_rate import format_size
 from ..backend.launch_config import (
     APP_TYPES,
     AppLaunchConfig,
+    effective_environment,
     LaunchConfigError,
     LaunchConfigStore,
     describe_changes,
@@ -207,6 +216,10 @@ class PerformancePage(Gtk.Box):
         self.gpus = []
         self.gamemode_available = False
         self._gpu_values: list[str | None] = []
+        self.framerate_caps: dict[str, int | None] = {}
+        self.caches: dict[str, list] = {}
+        self.report: list[tuple[str, str]] = []
+        self.scanning = False
         self._updating = False
 
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
@@ -249,10 +262,14 @@ class PerformancePage(Gtk.Box):
         self._build_environment()
         self._build_arguments()
         self._build_backups()
+        self._build_caches()
+        self._build_diagnostics()
 
         self.app_buttons["player"].set_active(True)
         self.allowlist = load_cached_allowlist()
         self._show_draft()
+        self._show_caches()
+        self._show_report()
         self.reload()
         self._allowlist_requested = False
         self.connect("map", self._mapped)
@@ -261,6 +278,7 @@ class PerformancePage(Gtk.Box):
         if not self._allowlist_requested:
             self._allowlist_requested = True
             self.refresh_allowlist(force=False)
+            self.scan()
 
     def _section(self, section_id: str, title: str, description: str, *, expanded: bool = True) -> CollapsibleSection:
         section = CollapsibleSection(section_id, title, description, expanded=expanded)
@@ -300,6 +318,9 @@ class PerformancePage(Gtk.Box):
         self.refresh_row.connect("notify::selected", self._refresh_changed)
         self._refresh_values: list[int | None] = []
         group.add(self.refresh_row)
+        self.framerate_row = Adw.ActionRow.new()
+        self.framerate_row.set_title("Roblox frame rate cap")
+        group.add(self.framerate_row)
         self.gamemode_row = self._switch_row("GameMode", self._gamemode_changed)
         group.add(self.gamemode_row)
         section.add(group)
@@ -443,6 +464,38 @@ class PerformancePage(Gtk.Box):
         self.defaults_button.connect("clicked", self._defaults_clicked)
         section.add(self.defaults_button)
 
+    def _build_caches(self) -> None:
+        section = self._section(
+            "caches", "Caches", "Caches Roblox and Rosemary rebuild by themselves. Cleared caches go to the trash.",
+            expanded=False,
+        )
+        self.caches_group = Adw.PreferencesGroup.new()
+        self._cache_rows: list[Gtk.Widget] = []
+        section.add(self.caches_group)
+        self.caches_refresh = Gtk.Button(label="Refresh", halign=Gtk.Align.START)
+        self.caches_refresh.connect("clicked", lambda _button: self.scan())
+        section.add(self.caches_refresh)
+
+    def _build_diagnostics(self) -> None:
+        section = self._section(
+            "diagnostics", "Diagnostics", "Facts about this system for troubleshooting; nothing here is estimated.",
+            expanded=False,
+        )
+        self.diagnostics_group = Adw.PreferencesGroup.new()
+        self._diagnostic_rows: list[Gtk.Widget] = []
+        section.add(self.diagnostics_group)
+        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self.copy_report_button = Gtk.Button(label="Copy Report")
+        self.copy_report_button.connect("clicked", self._copy_report)
+        actions.append(self.copy_report_button)
+        self.diagnostics_refresh = Gtk.Button(label="Refresh")
+        self.diagnostics_refresh.connect("clicked", lambda _button: self.scan())
+        actions.append(self.diagnostics_refresh)
+        section.add(actions)
+        self.diagnostics_message = Gtk.Label(xalign=0, visible=False)
+        self.diagnostics_message.add_css_class("dim-label")
+        section.add(self.diagnostics_message)
+
     @property
     def draft(self) -> AppLaunchConfig:
         return self.drafts[self.app_type]
@@ -462,6 +515,9 @@ class PerformancePage(Gtk.Box):
         if button.get_active() and app_type != self.app_type:
             self.app_type = app_type
             self._show_draft()
+            self._show_caches()
+            if self.report:
+                self.scan()
 
     def _show_draft(self) -> None:
         self._updating = True
@@ -489,6 +545,7 @@ class PerformancePage(Gtk.Box):
                 )
             self.refresh_row.set_selected(self._refresh_values.index(config.refresh_rate))
             self._show_gpu(config)
+            self._show_framerate_cap()
             self.gamemode_row.switch.set_active(config.gamemode)
             self.gamemode_row.switch.set_sensitive(self.gamemode_available or config.gamemode)
             self.gamemode_row.set_subtitle(
@@ -529,6 +586,152 @@ class PerformancePage(Gtk.Box):
             self.gpu_row.set_subtitle(f"Only one GPU was found: {self.gpus[0].name}.")
         else:
             self.gpu_row.set_subtitle("No GPU was found through /sys/class/drm.")
+
+    def _show_framerate_cap(self) -> None:
+        explanation = (
+            "Set in Roblox under Settings → Maximum Frame Rate, which offers rates up to the refresh rate above."
+        )
+        if self.app_type not in self.framerate_caps:
+            saved = ""
+        elif self.framerate_caps[self.app_type] is None:
+            saved = " Roblox has not saved its settings in this prefix yet."
+        elif self.framerate_caps[self.app_type] <= 0:
+            saved = " Roblox's saved choice: Default."
+        else:
+            saved = f" Roblox's saved choice: {self.framerate_caps[self.app_type]} FPS."
+        self.framerate_row.set_subtitle(explanation + saved)
+
+    def _show_caches(self) -> None:
+        for row in self._cache_rows:
+            self.caches_group.remove(row)
+        self._cache_rows = []
+        entries = self.caches.get(self.app_type)
+        if not entries:
+            row = Adw.ActionRow.new()
+            if self.scanning:
+                row.set_title("Checking caches…")
+            elif entries is None:
+                row.set_title("Not checked yet")
+            else:
+                row.set_title("No caches to clear")
+            if entries == []:
+                row.set_subtitle("Roblox and Rosemary have not cached anything for this application yet.")
+            self.caches_group.add(row)
+            self._cache_rows.append(row)
+        for entry in entries or []:
+            row = Adw.ActionRow.new()
+            row.set_title(GLib.markup_escape_text(entry.title))
+            row.set_subtitle(
+                GLib.markup_escape_text(
+                    f"{format_size(entry.size)} in {entry.files} files · {entry.path}\n{entry.description}"
+                )
+            )
+            row.set_subtitle_selectable(True)
+            button = Gtk.Button(label="Move to Trash…", valign=Gtk.Align.CENTER)
+            button.set_sensitive(not self.scanning)
+            button.connect("clicked", self._trash_clicked, entry)
+            row.add_suffix(button)
+            self.caches_group.add(row)
+            self._cache_rows.append(row)
+
+    def _show_report(self) -> None:
+        for row in self._diagnostic_rows:
+            self.diagnostics_group.remove(row)
+        self._diagnostic_rows = []
+        for label, value in self.report or [("Diagnostics", "Collecting…" if self.scanning else "Not collected yet")]:
+            row = Adw.ActionRow.new()
+            row.set_title(GLib.markup_escape_text(label))
+            row.set_subtitle(GLib.markup_escape_text(value))
+            row.set_subtitle_selectable(True)
+            self.diagnostics_group.add(row)
+            self._diagnostic_rows.append(row)
+        self.copy_report_button.set_sensitive(bool(self.report))
+
+    def _app_environment(self, app_type: str, gpus=None) -> dict[str, str]:
+        return effective_environment(self.saved[app_type], os.environ, self.gpus if gpus is None else gpus)
+
+    def scan(self) -> None:
+        if self.scanning:
+            return
+        self.scanning = True
+        for button in (self.caches_refresh, self.diagnostics_refresh):
+            button.set_sensitive(False)
+        self._show_caches()
+        self._show_report()
+        status = getattr(self.window, "rosemary_status", None)
+        environments = {app_type: self._app_environment(app_type) for app_type in APP_TYPES}
+        threading.Thread(
+            target=self._scan_worker,
+            args=(environments, getattr(status, "executable", None), self.app_type),
+            daemon=True,
+        ).start()
+
+    def _scan_worker(self, environments, executable, app_type) -> None:
+        caps = {app: read_framerate_cap(roblox_settings_path(env)) for app, env in environments.items()}
+        caches = {app: cache_entries(env) for app, env in environments.items()}
+        gpus = list_gpus()
+        report = diagnostics.collect(
+            rosemary_executable=executable,
+            env=environments[app_type],
+            gpus=gpus,
+            gamemode_available=gamemode.available(),
+        )
+        GLib.idle_add(self._scanned, caps, caches, report)
+
+    def _scanned(self, caps, caches, report) -> bool:
+        self.scanning = False
+        self.framerate_caps, self.caches, self.report = caps, caches, report
+        for button in (self.caches_refresh, self.diagnostics_refresh):
+            button.set_sensitive(True)
+        self._show_framerate_cap()
+        self._show_caches()
+        self._show_report()
+        return GLib.SOURCE_REMOVE
+
+    def _copy_report(self, _button) -> None:
+        text = f"Diagnostics for {APP_TITLES[self.app_type]}\n" + diagnostics.format_report(self.report)
+        self.get_clipboard().set(text)
+        self.diagnostics_message.set_text("Copied the report to the clipboard.")
+        self.diagnostics_message.set_visible(True)
+
+    def _trash_clicked(self, _button, entry) -> None:
+        dialog = Adw.MessageDialog.new(
+            self.window,
+            f"Move {entry.title} to the trash?",
+            f"{format_size(entry.size)} in {entry.path}. It is rebuilt when needed, and you can restore it "
+            "from the trash. Close the application first so it is not using the cache.",
+        )
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("trash", "Move to Trash")
+        dialog.set_response_appearance("trash", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_close_response("cancel")
+        dialog.connect("response", self._trash_response, entry)
+        dialog.present()
+
+    def _trash_response(self, _dialog, response: str, entry) -> None:
+        if response == "trash":
+            self.trash(entry)
+
+    def trash(self, entry) -> None:
+        environment = self._app_environment(self.app_type)
+        self.scanning = True
+        self._show_caches()
+        threading.Thread(target=self._trash_worker, args=(entry, environment), daemon=True).start()
+
+    def _trash_worker(self, entry, environment) -> None:
+        try:
+            trash_cache(entry.path, environment)
+            error = None
+        except CacheError as failure:
+            error = str(failure)
+        GLib.idle_add(self._trashed, error)
+
+    def _trashed(self, error: str | None) -> bool:
+        self.scanning = False
+        if error is not None:
+            self._show_error("Could not clear the cache", error)
+        self.scan()
+        return GLib.SOURCE_REMOVE
 
     @staticmethod
     def _select(row: Adw.ComboRow, choices, value: str | None) -> None:
