@@ -156,6 +156,96 @@ class SettingsPageWorkerTests(unittest.TestCase):
             action.set_sensitive.assert_called_with(True)
 
 
+class MultiplePlayerTests(unittest.TestCase):
+    def _page(self, allowed=True):
+        primary = SimpleNamespace(process=SimpleNamespace(poll=lambda: None, pid=1))
+        page = SimpleNamespace(
+            window=SimpleNamespace(setup_state=SimpleNamespace(multiple_players=allowed, plain_ctrl_click=True)),
+            rosemary_status=object(),
+            _sessions={"p": primary},
+            _extra_sessions={},
+            _launching_ids=set(),
+            _stopping_ids=set(),
+            _refresh_all=Mock(),
+            _show_error=Mock(),
+            _start_activity_watcher=Mock(),
+            _launch_worker=Mock(),
+        )
+        for name in (
+            "launch_another", "_extra_launch_worker", "_extra_ready", "_extra_failed", "_replace_extra",
+            "_extra_exited", "_extra_watch_worker", "_session_exited", "_multiple_allowed", "request_launch_url",
+            "launch_button_state",
+        ):
+            setattr(page, name, MethodType(getattr(InstallationPage, name), page))
+        return page, primary
+
+    def _run(self, page, record, sessions, arguments=()):
+        launched = []
+
+        def fake_launch(_record, _status, **kwargs):
+            launched.append(kwargs)
+            return sessions.pop(0)
+
+        with patch("roseblox.pages.manager_page.launch_application", side_effect=fake_launch), patch(
+            "roseblox.pages.manager_page.wait_for_running"
+        ), patch("roseblox.pages.manager_page.LaunchConfigStore"), patch(
+            "roseblox.pages.manager_page.threading.Thread",
+            side_effect=lambda target, args, daemon: SimpleNamespace(start=lambda: None if target.__name__ == "_extra_watch_worker" else target(*args)),
+        ), patch("roseblox.pages.manager_page.GLib.idle_add", side_effect=lambda callback, *args: callback(*args)):
+            if arguments:
+                page.request_launch_url(record, arguments[0])
+            else:
+                page.launch_another(record)
+        return launched
+
+    def test_extra_players_get_their_own_logs_and_stop_all(self):
+        page, primary = self._page()
+        record = SimpleNamespace(id="p", app_type="player")
+        second = SimpleNamespace(process=SimpleNamespace(poll=lambda: None, pid=2))
+        third = SimpleNamespace(process=SimpleNamespace(poll=lambda: None, pid=3))
+        launched = self._run(page, record, [second])
+        launched += self._run(page, record, [third], ("roblox://placeId=1",))
+        self.assertEqual(["player-2", "player-3"], [kwargs["log_name"] for kwargs in launched])
+        self.assertEqual(("roblox://placeId=1",), launched[1]["guest_arguments"])
+        self.assertEqual([(2, second), (3, third)], page._extra_sessions["p"])
+        self.assertEqual(("Stop All", True), page.launch_button_state("p"))
+        page._launch_worker.assert_not_called()
+        page._extra_exited("p", 2, second)
+        self.assertEqual([(3, third)], page._extra_sessions["p"])
+        page._session_exited("p", primary, 0, "")
+        self.assertIs(third, page._sessions["p"])
+        self.assertNotIn("p", page._extra_sessions)
+        page._extra_exited("p", 3, third)
+        self.assertNotIn("p", page._sessions)
+
+    def test_extra_player_that_finishes_starting_during_stop_all_is_stopped(self):
+        page, _primary = self._page()
+        page._stop_worker = Mock()
+        page._stopping_ids.add("p")
+        late = SimpleNamespace(process=SimpleNamespace(poll=lambda: None, pid=4))
+        page._extra_sessions["p"] = [(2, None)]
+        stopped = []
+        with patch(
+            "roseblox.pages.manager_page.threading.Thread",
+            side_effect=lambda target, args, daemon: SimpleNamespace(start=lambda: stopped.append(target)),
+        ):
+            InstallationPage._extra_ready(page, "p", 2, late)
+        self.assertIn(page._stop_worker, stopped)
+        page._start_activity_watcher.assert_not_called()
+
+    def test_without_the_setting_a_second_launch_is_refused(self):
+        page, _primary = self._page(allowed=False)
+        record = SimpleNamespace(id="p", app_type="player")
+        self.assertEqual([], self._run(page, record, [], ("roblox://placeId=1",)))
+        self.assertEqual("Application already active", page._show_error.call_args.args[0])
+        page.launch_another(record)
+        self.assertEqual({}, page._extra_sessions)
+        studio = SimpleNamespace(id="p", app_type="studio")
+        page.window.setup_state.multiple_players = True
+        page.launch_another(studio)
+        self.assertEqual({}, page._extra_sessions)
+
+
 class HomeLaunchDelegationTests(unittest.TestCase):
     def test_home_delegates_to_existing_application_page_controller(self):
         record = object()

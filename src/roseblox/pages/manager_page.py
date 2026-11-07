@@ -98,6 +98,7 @@ class InstallationPage(Gtk.Box):
         self._launching_ids: set[str] = window.launching_installations
         self._stopping_ids: set[str] = window.stopping_installations
         self._sessions: dict[str, LaunchSession] = window.process_sessions
+        self._extra_sessions: dict[str, list[tuple[int, LaunchSession]]] = getattr(window, "extra_sessions", {})
         self._launch_buttons: dict[str, Gtk.Button] = {}
         self._remove_buttons: dict[str, Gtk.Button] = {}
         self._preferred_buttons: dict[str, Gtk.Button] = {}
@@ -400,6 +401,13 @@ class InstallationPage(Gtk.Box):
             self._update_launch_button(record.id)
             contents.append(launch_button)
 
+            if self._multiple_allowed(record) and record.id in self._sessions and record.id not in self._stopping_ids:
+                another = Gtk.Button.new_with_label("Launch Another")
+                another.set_valign(Gtk.Align.CENTER)
+                another.set_tooltip_text("Start one more Roblox Player alongside the running one")
+                another.connect("clicked", lambda _button, record=record: self.launch_another(record))
+                contents.append(another)
+
         remove = Gtk.Button.new_with_label("Remove")
         remove.set_valign(Gtk.Align.CENTER)
         remove.set_tooltip_text("Remove this registration from Roseblox only")
@@ -407,6 +415,7 @@ class InstallationPage(Gtk.Box):
             record.id not in self._launching_ids
             and record.id not in self._sessions
             and record.id not in self._stopping_ids
+            and not self._extra_sessions.get(record.id)
         )
         remove.connect("clicked", self._on_remove_clicked, record)
         self._remove_buttons[record.id] = remove
@@ -1039,9 +1048,10 @@ class InstallationPage(Gtk.Box):
         if session is not None:
             self._stopping_ids.add(record.id)
             self._refresh_all(reload_library=False)
+            extras = [extra for _number, extra in self._extra_sessions.get(record.id, [])]
             threading.Thread(
                 target=self._stop_worker,
-                args=(record.id, session),
+                args=(record.id, session, extras),
                 daemon=True,
             ).start()
             return
@@ -1058,6 +1068,9 @@ class InstallationPage(Gtk.Box):
 
     def request_launch_url(self, record: InstallationRecord, uri: str) -> None:
         """Route a validated deep link through the existing Rosemary session flow."""
+        if record.id in self._sessions and self._multiple_allowed(record) and record.id not in self._stopping_ids:
+            self.launch_another(record, (uri,))
+            return
         if record.id in self._sessions or record.id in self._launching_ids or record.id in self._stopping_ids:
             self._show_error("Application already active", "Stop this installation before opening another Roblox link.")
             return
@@ -1066,6 +1079,86 @@ class InstallationPage(Gtk.Box):
         threading.Thread(
             target=self._launch_worker, args=(record.id, record, (uri,)), daemon=True
         ).start()
+
+    def _multiple_allowed(self, record: InstallationRecord) -> bool:
+        state = getattr(self.window, "setup_state", None)
+        return record.app_type == "player" and bool(getattr(state, "multiple_players", False))
+
+    def launch_another(self, record: InstallationRecord, guest_arguments=()) -> None:
+        """Start one more Player for an installation that is already running one."""
+        if not self._multiple_allowed(record) or record.id not in self._sessions:
+            return
+        used = {number for number, _session in self._extra_sessions.get(record.id, [])}
+        number = next(candidate for candidate in range(2, 2 + len(used) + 1) if candidate not in used)
+        self._extra_sessions.setdefault(record.id, []).append((number, None))
+        threading.Thread(
+            target=self._extra_launch_worker, args=(record, number, tuple(guest_arguments)), daemon=True
+        ).start()
+
+    def _extra_launch_worker(self, record: InstallationRecord, number: int, guest_arguments) -> None:
+        try:
+            setup_state = getattr(self.window, "setup_state", None)
+            session = launch_application(
+                record,
+                self.rosemary_status,
+                guest_arguments=guest_arguments,
+                plain_ctrl_click=getattr(setup_state, "plain_ctrl_click", True),
+                launch_config=LaunchConfigStore().load(record.app_type),
+                log_name=f"{record.app_type}-{number}",
+            )
+            wait_for_running(session)
+        except Exception as error:
+            GLib.idle_add(self._extra_failed, record.id, number, str(error))
+            return
+        GLib.idle_add(self._extra_ready, record.id, number, session)
+
+    def _replace_extra(self, installation_id: str, number: int, session: LaunchSession | None, *, keep: bool) -> None:
+        entries = [(n, s) for n, s in self._extra_sessions.get(installation_id, []) if n != number]
+        if keep:
+            entries.append((number, session))
+        if entries:
+            self._extra_sessions[installation_id] = sorted(entries, key=lambda entry: entry[0])
+        else:
+            self._extra_sessions.pop(installation_id, None)
+
+    def _extra_failed(self, installation_id: str, number: int, message: str) -> bool:
+        self._replace_extra(installation_id, number, None, keep=False)
+        self._refresh_all(reload_library=False)
+        self._show_error("Could not launch another Roblox Player", message)
+        return GLib.SOURCE_REMOVE
+
+    def _extra_ready(self, installation_id: str, number: int, session: LaunchSession) -> bool:
+        if session.process.poll() is not None:
+            return self._extra_failed(
+                installation_id, number, "The second Roblox Player exited before Roseblox could mark it running."
+            )
+        self._replace_extra(installation_id, number, session, keep=True)
+        threading.Thread(target=self._extra_watch_worker, args=(installation_id, number, session), daemon=True).start()
+        if installation_id in self._stopping_ids or installation_id not in self._sessions:
+            threading.Thread(target=self._stop_worker, args=(installation_id, session), daemon=True).start()
+            self._refresh_all(reload_library=False)
+            return GLib.SOURCE_REMOVE
+        self._refresh_all(reload_library=False)
+        gamemode_error = getattr(session, "gamemode_error", None)
+        center = getattr(self.window, "notification_center", None)
+        if gamemode_error and center is not None:
+            center.notify("player", f"GameMode was not started: {gamemode_error}", "failed")
+        self._start_activity_watcher(session)
+        return GLib.SOURCE_REMOVE
+
+    def _extra_watch_worker(self, installation_id: str, number: int, session: LaunchSession) -> None:
+        session.process.wait()
+        GLib.idle_add(self._extra_exited, installation_id, number, session)
+
+    def _extra_exited(self, installation_id: str, number: int, session: LaunchSession) -> bool:
+        if any(s is session for _n, s in self._extra_sessions.get(installation_id, [])):
+            self._replace_extra(installation_id, number, None, keep=False)
+            self._refresh_all(reload_library=False)
+        elif self._sessions.get(installation_id) is session:
+            del self._sessions[installation_id]
+            self._stopping_ids.discard(installation_id)
+            self._refresh_all(reload_library=False)
+        return GLib.SOURCE_REMOVE
 
     def _on_open_place_clicked(self, _button: Gtk.Button, record: InstallationRecord) -> None:
         file_filter = Gtk.FileFilter()
@@ -1209,6 +1302,11 @@ class InstallationPage(Gtk.Box):
             return GLib.SOURCE_REMOVE
         was_stopping = installation_id in self._stopping_ids
         del self._sessions[installation_id]
+        running = [(n, s) for n, s in self._extra_sessions.get(installation_id, []) if s is not None]
+        if running and not was_stopping:
+            number, promoted = running[0]
+            self._replace_extra(installation_id, number, None, keep=False)
+            self._sessions[installation_id] = promoted
         self._stopping_ids.discard(installation_id)
         self._refresh_all(reload_library=False)
         if not was_stopping and return_code != 0:
@@ -1218,11 +1316,17 @@ class InstallationPage(Gtk.Box):
             )
         return GLib.SOURCE_REMOVE
 
-    def _stop_worker(self, installation_id: str, session: LaunchSession) -> None:
-        try:
-            stop_application(session)
-        except (OSError, ProcessIdentityError, subprocess.TimeoutExpired) as error:
-            GLib.idle_add(self._stop_failed, installation_id, session, str(error))
+    def _stop_worker(self, installation_id: str, session: LaunchSession, extras=()) -> None:
+        errors = []
+        for target in (*extras, session):
+            if target is None or target.process.poll() is not None:
+                continue
+            try:
+                stop_application(target)
+            except (OSError, ProcessIdentityError, subprocess.TimeoutExpired) as error:
+                errors.append(str(error))
+        if errors:
+            GLib.idle_add(self._stop_failed, installation_id, session, "\n".join(errors))
             return
         GLib.idle_add(self._stop_finished, installation_id, session)
 
@@ -1262,7 +1366,7 @@ class InstallationPage(Gtk.Box):
         if installation_id in self._stopping_ids:
             return "Stopping…", False
         if installation_id in self._sessions:
-            return "Stop", True
+            return ("Stop All", True) if getattr(self, "_extra_sessions", {}).get(installation_id) else ("Stop", True)
         return "Launch", True
 
     def _on_remove_clicked(self, _button: Gtk.Button, record: InstallationRecord) -> None:
@@ -1494,6 +1598,20 @@ class SettingsPage(Gtk.Box):
             close_group.add(expander)
             self._close_rows[app_type] = (expander, link_switch)
         launching.add(close_group)
+        multiple_group = Adw.PreferencesGroup.new()
+        self.multiple_row = Adw.ActionRow.new()
+        self.multiple_row.set_title("Allow more than one Roblox Player")
+        self.multiple_row.set_subtitle(
+            "Adds Launch Another while Player runs, and opens Roblox links in a new Player instead of refusing. "
+            "Each Player can sign in to its own account. Every Player uses more memory and GPU time."
+        )
+        self.multiple_switch = Gtk.Switch(valign=Gtk.Align.CENTER)
+        self.multiple_switch.connect("notify::active", self._multiple_changed)
+        self.multiple_row.add_suffix(self.multiple_switch)
+        self.multiple_row.set_activatable_widget(self.multiple_switch)
+        multiple_group.add(self.multiple_row)
+        launching.add(multiple_group)
+        self._multiple_block = False
 
         playing = self._section(
             "playing",
@@ -1738,6 +1856,23 @@ class SettingsPage(Gtk.Box):
         error = self.window.apply_appearance(appearance)
         self._describe_appearance(appearance, f"Not saved: {error}" if error else None)
 
+    def _multiple_changed(self, switch, _pspec) -> None:
+        if self._multiple_block or self.setup_store is None:
+            return
+        try:
+            self.window.setup_state = self.setup_store.save_multiple_players(switch.get_active())
+        except SetupSettingsError as error:
+            self._show_multiple(not switch.get_active())
+            self.multiple_row.set_subtitle(f"Not saved: {str(error)[:300]}")
+            return
+        if hasattr(self.window, "refresh_pages"):
+            self.window.refresh_pages(reload_library=False)
+
+    def _show_multiple(self, active: bool) -> None:
+        self._multiple_block = True
+        self.multiple_switch.set_active(active)
+        self._multiple_block = False
+
     def _input_switch_changed(self, switch, _pspec) -> None:
         if self._input_block or self.setup_store is None:
             return
@@ -1775,6 +1910,7 @@ class SettingsPage(Gtk.Box):
             self._show_appearance(setup_state.appearance)
             self._describe_input()
             self._show_close_preferences(setup_state)
+            self._show_multiple(setup_state.multiple_players)
             self._show_while_playing(setup_state.while_playing)
             self._show_skipped_versions(setup_state.skipped_versions)
         enabled = bool(setup_state and setup_state.url_handlers_enabled)

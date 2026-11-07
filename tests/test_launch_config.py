@@ -260,7 +260,9 @@ class StudioPluginTests(unittest.TestCase):
                     log_directory=root / "logs",
                     launch_config=AppLaunchConfig(disable_user_plugins=True),
                     flag_backup_directory=root / "backups",
+                    log_name="studio-2",
                 )
+            self.assertTrue((root / "logs" / "studio-2.log").exists())
         command = popen.call_args.args[0]
         self.assertEqual(
             ["--", "-task", "EditFile", "-localPlaceFile", "/Volumes/Host/p.rbxl", "-disableLoadUserPlugins"],

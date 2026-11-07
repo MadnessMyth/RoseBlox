@@ -64,6 +64,7 @@ class RosebloxWindow(Adw.ApplicationWindow):
         self.installer = InstallerService(self.library, version_settings=self.version_settings)
         self.rosemary_status = detect_rosemary()
         self.process_sessions = {}
+        self.extra_sessions = {}
         self.launching_installations = set()
         self.stopping_installations = set()
         self.library_records: list[InstallationRecord] = []

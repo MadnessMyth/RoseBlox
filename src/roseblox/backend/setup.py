@@ -89,6 +89,7 @@ class SetupState:
     skipped_versions: dict[str, str] = field(default_factory=dict)
     appearance: Appearance = field(default_factory=Appearance)
     plain_ctrl_click: bool = True
+    multiple_players: bool = False
     expanded_sections: dict[str, bool] = field(default_factory=dict)
     while_playing: WhilePlaying = field(default_factory=WhilePlaying)
 
@@ -136,6 +137,7 @@ class SetupStore:
             skipped_versions=self._skipped_versions(document.get("skipped_versions", {})),
             appearance=self._appearance(document.get("appearance", {})),
             plain_ctrl_click=self._boolean(document, "plain_ctrl_click", True),
+            multiple_players=self._boolean(document, "multiple_players"),
             expanded_sections=self._expanded_sections(document.get("expanded_sections", {})),
             while_playing=self._while_playing(document.get("while_playing", {})),
         )
@@ -205,6 +207,11 @@ class SetupStore:
         if not isinstance(enabled, bool):
             raise ValueError("The Ctrl + left-click setting must be on or off.")
         return self._update(plain_ctrl_click=enabled)
+
+    def save_multiple_players(self, enabled: bool) -> SetupState:
+        if not isinstance(enabled, bool):
+            raise ValueError("The multiple Player setting must be on or off.")
+        return self._update(multiple_players=enabled)
 
     def save_while_playing(self, settings: WhilePlaying) -> SetupState:
         settings.validate()

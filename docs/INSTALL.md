@@ -82,7 +82,7 @@ Click a section heading in **Settings** to open or close it; Roseblox remembers 
 
 - **Appearance**: **Colors** (Roseblox or System), **Style** (Dark, Light, or Follow system), and **Accent color** (Roseblox pink, your desktop's accent color, or a fixed color). Changes apply immediately.
 - **Rosemary**: Rosemary status, **Ctrl + left-click compatibility** (turn it off if you want Rosemary's default Ctrl + click behavior), and **First-time setup**.
-- **After Launching**: close Roseblox after Player or Studio starts. See [Closing Roseblox after launching](#closing-roseblox-after-launching).
+- **After Launching**: close Roseblox after Player or Studio starts, and **Allow more than one Roblox Player**. See [Closing Roseblox after launching](#closing-roseblox-after-launching) and [More than one Roblox Player](#more-than-one-roblox-player).
 - **While Playing**: Discord Rich Presence, a server location notification, and closing Roblox when you leave a game. See [While Playing](#while-playing).
 - **Roblox Links**: open `roblox://` links with Roseblox.
 - **Updates**: update notifications, **Check Now**, and skipped versions.
@@ -213,6 +213,18 @@ To update by hand, open the **Player** or **Studio** page, click **Refresh Versi
 ### Closing Roseblox after launching
 
 **Settings → After Launching** has a separate switch for Player and for Studio. With **Close after opening Roblox Player** on, Roseblox closes itself five seconds after Player starts; Roblox keeps running. Turn on **Only when opened from a link** to close only when you join a game from the website, and stay open when you press **Play** in Roseblox. Roseblox stays open if the app exits during those five seconds (so you can read the error) or while a download is running.
+
+### More than one Roblox Player
+
+By default Roseblox runs one Player per installation: while it runs, **Launch** becomes **Stop** and Roblox links are refused. Turn on **Settings → After Launching → Allow more than one Roblox Player** to run several, for example to sign in to a different account in each:
+
+![Allow more than one Roblox Player in Settings](screenshots/21-multiple-players.png)
+
+1. Click **Launch** on the **Player** page (or **Play** on Home) as usual.
+2. Click **Launch Another** next to **Stop**. Each click starts one more Player. Opening a Roblox link from the website while Player runs also starts a new Player instead of being refused.
+3. **Stop All** stops every Player started from that installation. Closing a Player window yourself only ends that one.
+
+The setting only changes Roseblox's own one-Player rule; it does not modify Roblox or Rosemary. All Players share the same Rosemary prefix and therefore the same Roblox settings and installed mods. Each extra Player writes its own log (`player-2.log`, `player-3.log`, …) next to `player.log`. Every Player uses its own memory and GPU time, so expect lower frame rates with several open. **Remove** stays unavailable until every Player has exited. Studio still runs one at a time.
 
 ## Tagged releases instead of `master`
 

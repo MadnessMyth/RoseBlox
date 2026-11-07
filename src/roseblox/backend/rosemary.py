@@ -363,10 +363,10 @@ def _read_log_tail(path: Path) -> str:
     return text.strip()
 
 
-def _open_launch_log(log_directory: Path, app_type: str):
-    """Open a fresh log for this application, keeping the previous run as ``.1``."""
+def _open_launch_log(log_directory: Path, name: str):
+    """Open a fresh log, keeping the previous run as ``.1``."""
     log_directory.mkdir(parents=True, exist_ok=True)
-    path = log_directory / f"{app_type}.log"
+    path = log_directory / f"{name}.log"
     if path.exists():
         os.replace(path, path.with_name(path.name + ".1"))
     return path, path.open("wb")
@@ -381,6 +381,7 @@ def launch_application(
     plain_ctrl_click: bool = True,
     launch_config: AppLaunchConfig | None = None,
     flag_backup_directory: Path | None = None,
+    log_name: str | None = None,
 ) -> LaunchSession:
     """Start Rosemary asynchronously and return a bundle-bound process session.
 
@@ -418,7 +419,7 @@ def launch_application(
             raise RosemaryUnavailableError(f"Could not apply FastFlags: {error}") from error
     arguments = build_launch_arguments(status.executable, bundle_path, guest_arguments)
     try:
-        log_path, log_stream = _open_launch_log(log_directory or default_log_directory(), app_type)
+        log_path, log_stream = _open_launch_log(log_directory or default_log_directory(), log_name or app_type)
     except OSError as error:
         raise RosemaryUnavailableError(f"Could not create the Rosemary log file: {error}") from error
     with log_stream:
