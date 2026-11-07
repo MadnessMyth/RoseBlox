@@ -67,6 +67,11 @@ def guest_home(env: Mapping[str, str]) -> Path | None:
     return None if prefix is None else prefix / "root" / "Users" / login_name()
 
 
+def roblox_log_directory(env: Mapping[str, str]) -> Path:
+    """Where the Roblox Player writes its own logs: ``~/Library/Logs/Roblox`` in the guest."""
+    return (guest_home(env) or _home(env)) / "Library" / "Logs" / "Roblox"
+
+
 def shader_cache_directory(env: Mapping[str, str]) -> Path | None:
     value = env.get("ROSEMARY_SHADER_CACHE")
     if value is not None:

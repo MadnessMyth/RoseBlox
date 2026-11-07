@@ -1298,7 +1298,12 @@ class InstallationPage(Gtk.Box):
             return
         try:
             process = _spawn_detached(
-                watcher_arguments(session.process.pid, session.start_time, session.log_path),
+                watcher_arguments(
+                    session.process.pid,
+                    session.start_time,
+                    session.log_path,
+                    getattr(session, "roblox_log_directory", None),
+                ),
                 default_log_directory() / "activity.log",
             )
         except OSError as error:

@@ -1,5 +1,6 @@
 import io
 import json
+import os
 import signal
 import socket
 import struct
@@ -10,7 +11,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from roseblox.activity_service import ActivityWatcher, watcher_arguments
-from roseblox.backend.activity import ActivityTracker, GameJoined, GameLeft, LogFollower, public_address
+from roseblox.backend.activity import ActivityTracker, GameJoined, GameLeft, LogFollower, find_roblox_log, public_address
 from roseblox.backend.discord_rpc import DiscordError, DiscordPresence, build_activity, socket_candidates
 from roseblox.backend.game_info import GameDetails, GameInfoError, fetch_game, locate_server
 from roseblox.backend.setup import SetupSettingsError, SetupStore, WhilePlaying
@@ -310,6 +311,7 @@ class WatcherTests(unittest.TestCase):
             sleep=lambda _seconds: None,
             process_snapshot=lambda pid: SimpleNamespace(start_time=self.start_time),
             kill=lambda pid, sig: self.kills.append((pid, sig)),
+            find_log=lambda *_args: None,
         )
         options.update(overrides)
         return ActivityWatcher(4242, 777, self.log, **options)
@@ -402,6 +404,67 @@ class WatcherTests(unittest.TestCase):
     def test_the_watcher_runs_as_a_roseblox_subcommand(self):
         arguments = watcher_arguments(4242, 777, Path("/tmp/player.log"))
         self.assertEqual(["-m", "roseblox", "--activity-watch", "4242", "777", "/tmp/player.log"], arguments[1:])
+        arguments = watcher_arguments(4242, 777, Path("/tmp/player.log"), Path("/p/Logs/Roblox"))
+        self.assertEqual("/p/Logs/Roblox", arguments[-1])
+
+    def test_the_roblox_log_is_followed_once_found_instead_of_the_launch_log(self):
+        roblox_log = Path(self.directory.name) / "0.700_Player_ab12_last.log"
+        roblox_log.write_text("")
+        searches = []
+        now = [1000.0]
+
+        def find(pid, directory, since):
+            searches.append((pid, directory, since))
+            return roblox_log if len(searches) > 1 else None
+
+        watcher = self._watcher(find_log=find, roblox_logs=Path("/logs"), clock=lambda: now[0])
+        watcher.poll()
+        watcher.poll()
+        self.assertEqual([(4242, Path("/logs"), 995.0)], searches)
+        now[0] += 6
+        self._write(JOIN, CONNECTED)
+        with roblox_log.open("a") as stream:
+            stream.write("\n".join((JOIN, CONNECTED)) + "\n")
+        watcher.poll()
+        self.assertEqual(2, len(searches))
+        self.assertEqual(1, len(FakePresence.instances[0].activities))
+        watcher.poll()
+        self.assertEqual(2, len(searches))
+
+
+class FindRobloxLogTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.directory.name)
+        self.proc = self.root / "proc"
+
+    def tearDown(self):
+        self.directory.cleanup()
+
+    def _fd(self, pid, number, target):
+        fd = self.proc / str(pid) / "fd"
+        fd.mkdir(parents=True, exist_ok=True)
+        (fd / str(number)).symlink_to(target)
+
+    def test_the_log_a_player_has_open_is_found_through_its_process_tree(self):
+        self._fd(10, 1, "/home/me/.local/state/roseblox/logs/player.log")
+        self._fd(11, 3, "/Users/me/Library/Logs/Roblox/old_Player_last.log (deleted)")
+        self._fd(11, 7, "/Users/me/Library/Logs/Roblox/0.700_20261108T040000Z_Player_AB12_last.log")
+        self._fd(12, 4, "/Users/me/Library/Logs/Roblox/other_Player_last.log")
+        found = find_roblox_log(10, None, 0, proc=self.proc, tree=lambda pid, proc: [10, 11])
+        self.assertEqual(self.proc / "11" / "fd" / "7", found)
+
+    def test_without_an_open_log_the_newest_player_log_since_launch_is_used(self):
+        logs = self.root / "Logs" / "Roblox"
+        logs.mkdir(parents=True)
+        for name, modified in (("a_Player_old.log", 100), ("b_Player_new.log", 300), ("c_Studio_new.log", 400),
+                               ("d_Player_mid.log", 250)):
+            (logs / name).write_text("")
+            os.utime(logs / name, (modified, modified))
+        tree = lambda pid, proc: [10]
+        self.assertEqual(logs / "b_Player_new.log", find_roblox_log(10, logs, 200, proc=self.proc, tree=tree))
+        self.assertIsNone(find_roblox_log(10, logs, 350, proc=self.proc, tree=tree))
+        self.assertIsNone(find_roblox_log(10, self.root / "missing", 0, proc=self.proc, tree=tree))
 
 
 if __name__ == "__main__":

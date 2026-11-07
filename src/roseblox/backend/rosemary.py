@@ -21,6 +21,7 @@ from .fast_flags import FastFlagError, write_bundle_flags
 from .gpu import list_gpus
 from .launch_config import AppLaunchConfig, effective_arguments, effective_environment
 from .library import InstallationRecord, validate_bundle
+from .rosemary_paths import roblox_log_directory
 
 
 @dataclass(frozen=True)
@@ -61,6 +62,7 @@ class LaunchSession:
     log_path: Path | None = None
     gamemode_error: str | None = None
     mods_message: str | None = None
+    roblox_log_directory: Path | None = None
 
     def output_text(self) -> str:
         """Rosemary's output so far: the end of its log file, or captured pipe output."""
@@ -482,4 +484,5 @@ def launch_application(
         plain_ctrl_click_active=plain_ctrl_click_active,
         log_path=log_path,
         gamemode_error=gamemode_error,
+        roblox_log_directory=roblox_log_directory(environment) if app_type == "player" else None,
     )

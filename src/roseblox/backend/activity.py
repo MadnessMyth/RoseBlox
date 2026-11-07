@@ -1,16 +1,22 @@
 """Game joins and leaves, read from the Roblox Player's log output.
 
-Rosemary writes Roblox's log lines to the launch log Roseblox keeps (see
-``rosemary.default_log_directory``). The markers below are the ones Roblox has
-printed for years and that Bloxstrap's activity watcher also relies on.
+The Mac Player writes its log to ``~/Library/Logs/Roblox`` in the guest rather
+than to its output, so the watcher follows the log file the Player has open and
+reads Rosemary's launch log only until that file is found. The markers below
+are the ones Roblox has printed for years and that Bloxstrap's activity watcher
+also relies on.
 """
 
 from __future__ import annotations
 
 import ipaddress
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
+
+from .measure import process_tree
 
 _JOIN = re.compile(
     r"! Joining game '(?P<job>[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})'"
@@ -21,6 +27,7 @@ _SERVER_ADDRESS = re.compile(
     r"(?P<address>[0-9A-Fa-f.:]+?)(?:[|,: ]|$)"
 )
 _PRIVATE_REFERRALS = ("RequestPrivateGame", "GameDetailPageJSHybridEvent")
+_ROBLOX_LOG = re.compile(r"/Logs/Roblox/[^/]+\.log$")
 _MAX_LINE = 16 * 1024
 _MAX_READ = 4 * 1024 * 1024
 
@@ -114,6 +121,51 @@ class ActivityTracker:
             return []
         self.in_game = False
         return [GameLeft(to_home)]
+
+
+def find_roblox_log(
+    pid: int,
+    directory: Path | None,
+    since: float,
+    *,
+    proc: Path = Path("/proc"),
+    tree: Callable[..., list[int]] = process_tree,
+) -> Path | None:
+    """The log file this Player has open, or failing that the newest one written since it started.
+
+    The open file is reached through ``/proc/<pid>/fd`` so each of several Players
+    finds its own log, whatever the guest calls the path.
+    """
+    for member in tree(pid, proc):
+        fd_directory = proc / str(member) / "fd"
+        try:
+            entries = sorted(fd_directory.iterdir(), key=lambda entry: int(entry.name) if entry.name.isdigit() else 0)
+        except OSError:
+            continue
+        for entry in entries:
+            try:
+                target = os.readlink(entry)
+            except OSError:
+                continue
+            if _ROBLOX_LOG.search(target) and not target.endswith(" (deleted)"):
+                return entry
+    if directory is None:
+        return None
+    newest: tuple[float, Path] | None = None
+    try:
+        candidates = list(directory.iterdir())
+    except OSError:
+        return None
+    for candidate in candidates:
+        if candidate.suffix != ".log" or "Player" not in candidate.name:
+            continue
+        try:
+            modified = candidate.stat().st_mtime
+        except OSError:
+            continue
+        if modified >= since and (newest is None or modified > newest[0]):
+            newest = (modified, candidate)
+    return None if newest is None else newest[1]
 
 
 class LogFollower:

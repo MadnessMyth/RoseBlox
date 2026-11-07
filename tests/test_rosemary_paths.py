@@ -21,6 +21,7 @@ from roseblox.backend.rosemary_paths import (
     guest_path,
     login_name,
     prefix_directory,
+    roblox_log_directory,
     read_framerate_cap,
     roblox_settings_path,
     shader_cache_directory,
@@ -47,6 +48,15 @@ class PathTests(unittest.TestCase):
             Path(f"/home/me/.local/share/rosemary/prefixes/default/root/Users/{login_name()}"), guest_home(env)
         )
         self.assertEqual(Path("/data/rosemary/prefixes/default"), prefix_directory({"XDG_DATA_HOME": "/data"}))
+
+    def test_roblox_writes_its_own_logs_under_the_guest_library(self):
+        env = {"HOME": "/home/me"}
+        self.assertEqual(guest_home(env) / "Library" / "Logs" / "Roblox", roblox_log_directory(env))
+        self.assertEqual(Path("/home/me/Library/Logs/Roblox"), roblox_log_directory({"HOME": "/home/me", "ROSEMARY_PREFIX": "off"}))
+        self.assertEqual(
+            Path("/home/me/Library/Logs/Roblox"),
+            roblox_log_directory({"HOME": "/home/me", "ROSEMARY_PREFIX_HOME": "host"}),
+        )
 
     def test_prefix_settings_are_followed(self):
         self.assertEqual(Path("/games/prefix"), prefix_directory({"ROSEMARY_PREFIX": "/games/prefix"}))

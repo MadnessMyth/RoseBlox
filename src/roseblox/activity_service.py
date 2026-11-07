@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 from typing import Callable
 
-from .backend.activity import ActivityTracker, GameJoined, GameLeft, LogFollower
+from .backend.activity import ActivityTracker, GameJoined, GameLeft, LogFollower, find_roblox_log
 from .backend.discord_rpc import (
     DiscordError,
     DiscordPresence,
@@ -25,9 +25,10 @@ from .backend.game_info import GameInfoError, fetch_game, locate_server
 from .backend.rosemary import read_process_snapshot
 from .backend.setup import SetupSettingsError, SetupStore, WhilePlaying
 
-USAGE = "Usage: roseblox --activity-watch PID START_TIME LOG"
+USAGE = "Usage: roseblox --activity-watch PID START_TIME LOG [ROBLOX_LOG_DIRECTORY]"
 POLL_SECONDS = 1.0
 DISCORD_RETRY_SECONDS = 30.0
+LOG_SEARCH_SECONDS = 5.0
 
 
 def _log(message: str) -> None:
@@ -63,8 +64,10 @@ class ActivityWatcher:
         pid: int,
         start_time: int,
         log_path: Path,
+        roblox_logs: Path | None = None,
         *,
         settings: Callable[[], WhilePlaying] | None = None,
+        find_log=find_roblox_log,
         presence_factory=DiscordPresence,
         game_lookup=fetch_game,
         locate=locate_server,
@@ -77,6 +80,10 @@ class ActivityWatcher:
         self.pid = pid
         self.start_time = start_time
         self.follower = LogFollower(log_path)
+        self.roblox_logs = roblox_logs
+        self.find_log = find_log
+        self.roblox_follower: LogFollower | None = None
+        self._log_search_at = 0.0
         self.tracker = ActivityTracker()
         self._settings = settings or (lambda: SetupStore().load().while_playing)
         self.presence_factory = presence_factory
@@ -91,6 +98,7 @@ class ActivityWatcher:
         self.activity: dict | None = None
         self._discord_retry_at = 0.0
         self._games: dict[int, object] = {}
+        self._started_at = self.clock()
 
     def settings(self) -> WhilePlaying:
         try:
@@ -104,6 +112,7 @@ class ActivityWatcher:
         return snapshot is not None and snapshot.start_time == self.start_time
 
     def run(self) -> int:
+        _log(f"watching Roblox Player process {self.pid}")
         while self.alive():
             self.poll()
             self.sleep(POLL_SECONDS)
@@ -111,10 +120,27 @@ class ActivityWatcher:
         self._clear_presence()
         return 0
 
+    def _source(self) -> LogFollower:
+        if self.roblox_follower is None and self.clock() >= self._log_search_at:
+            self._log_search_at = self.clock() + LOG_SEARCH_SECONDS
+            found = self.find_log(self.pid, self.roblox_logs, self._started_at - 5)
+            if found is not None:
+                try:
+                    name = os.readlink(found) if found.is_symlink() else str(found)
+                except OSError:
+                    name = str(found)
+                _log(f"following Roblox's log {name}")
+                self.roblox_follower = LogFollower(found)
+        return self.roblox_follower or self.follower
+
     def poll(self) -> None:
-        for line in self.follower.read_lines():
+        source = self._source()
+        if source is not self.follower:
+            self.follower.read_lines()
+        for line in source.read_lines():
             for event in self.tracker.feed(line):
                 if isinstance(event, GameJoined):
+                    _log(f"joined place {event.place_id}")
                     self.joined(event)
                 elif isinstance(event, GameLeft):
                     self.left(event)
@@ -200,14 +226,16 @@ class ActivityWatcher:
             _log(f"notification: {error}")
 
 
-def watcher_arguments(pid: int, start_time: int, log_path: Path) -> list[str]:
-    return [sys.executable, "-m", "roseblox", "--activity-watch", str(pid), str(start_time), str(log_path)]
+def watcher_arguments(pid: int, start_time: int, log_path: Path, roblox_logs: Path | None = None) -> list[str]:
+    arguments = [sys.executable, "-m", "roseblox", "--activity-watch", str(pid), str(start_time), str(log_path)]
+    return arguments if roblox_logs is None else [*arguments, str(roblox_logs)]
 
 
 def main(argv: list[str]) -> int:
     arguments = [item for item in argv[1:] if item != "--activity-watch"]
-    if len(arguments) != 3 or not arguments[0].isdigit() or not arguments[1].isdigit():
+    if len(arguments) not in (3, 4) or not arguments[0].isdigit() or not arguments[1].isdigit():
         print(USAGE, file=sys.stderr)
         return 2
     pid, start_time, log_path = int(arguments[0]), int(arguments[1]), Path(arguments[2])
-    return ActivityWatcher(pid, start_time, log_path).run()
+    roblox_logs = Path(arguments[3]) if len(arguments) == 4 else None
+    return ActivityWatcher(pid, start_time, log_path, roblox_logs).run()

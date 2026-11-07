@@ -100,7 +100,7 @@ These work with Roblox Player and are off until you turn them on. Turn them on b
 - **Server location notification**: when you join a server, a notification says where it is, for example "The server is in Frankfurt am Main, Hessen, Germany." The Roblox server's address (never yours) is looked up with [ipwho.is](https://ipwho.is).
 - **Close Roblox when leaving a game**: Roblox closes when you leave a game, instead of going back to the Roblox home screen. Being disconnected does not close it.
 
-Roseblox reads these events from Roblox's log output in `~/.local/state/roseblox/logs/player.log`. Problems are written to `~/.local/state/roseblox/logs/activity.log`.
+Roseblox reads these events from the log the Roblox Player writes inside the Rosemary prefix (`~/Library/Logs/Roblox` in the guest, normally `~/.local/share/rosemary/prefixes/default/root/Users/<you>/Library/Logs/Roblox`). Each Player's own open log is used, so several Players do not mix up their games. `~/.local/state/roseblox/logs/activity.log` records which log was followed, each game joined, and any problem.
 
 ### Notification center
 
@@ -228,7 +228,7 @@ Roblox treats a second launch of the same installation as a request to show the 
 
 With the setting on, a Roblox link opened from the website while Player runs starts the first installation that is not running, preferring the same version. If every installation is running, Roseblox tells you to make another copy.
 
-Each copy uses as much disk space as the original and is a managed installation, so **Remove → Delete Managed Bundle** deletes it. All Players share one Rosemary prefix, so Roblox settings and mods are shared. The first Player writes `player.log`, and a Player started while that log is in use writes `player-2.log`, `player-3.log`, and so on, so Discord presence and server notifications follow each Player separately. Update downloads do not update copies; duplicate the new version again if you want a copy of it.
+Each copy uses as much disk space as the original and is a managed installation, so **Remove → Delete Managed Bundle** deletes it. All Players share one Rosemary prefix, so Roblox settings and mods are shared. The first Player writes `player.log`, and a Player started while that log is in use writes `player-2.log`, `player-3.log`, and so on, so each Player's output stays in its own file. Update downloads do not update copies; duplicate the new version again if you want a copy of it.
 
 ## Tagged releases instead of `master`
 
@@ -274,6 +274,6 @@ To update after a new release, run `git pull` in `~/RoseBlox`, then `makepkg -si
 | "GameMode was not started" | Install GameMode (`sudo pacman -S gamemode`) and log out and back in. The app still runs, only without GameMode. |
 | The MangoHud overlay does not appear | Check that **Performance → Diagnostics** says the MangoHud layer is installed, and that the overlay is not hidden in `~/.config/MangoHud/MangoHud.conf` (MangoHud's toggle key is Right Shift + F12). With Rosemary's AppImage, also add `ROSEMARY_GLIBC` = `host` under **Performance → Environment → Rosemary**. |
 | A mod has no effect | Mods apply only to installations Roseblox installed, and only from the next start. Check the notification center after starting Roblox; it says if a mod could not be applied. |
-| Discord does not show the game | Make sure the Discord desktop app is running (Roseblox tries again every 30 seconds while you are in a game), and that sharing your detected activities is on in Discord's **Activity Privacy** settings. The browser version of Discord cannot show Rich Presence. See `~/.local/state/roseblox/logs/activity.log`. |
+| Discord does not show the game | Make sure the Discord desktop app is running (Roseblox tries again every 30 seconds while you are in a game), and that sharing your detected activities is on in Discord's **Activity Privacy** settings. The browser version of Discord cannot show Rich Presence. See `~/.local/state/roseblox/logs/activity.log`: it should show `following Roblox's log` and `joined place` lines for the game. If it shows neither, the switch was turned on after that Player started; start it again. |
 | No server location notification | Make sure notifications for "Roseblox" are allowed in your desktop's settings. If ipwho.is cannot be reached, the reason is in `~/.local/state/roseblox/logs/activity.log`. |
 | Clicking **Update** in a notification does nothing | See `~/.local/state/roseblox/logs/roseblox.log` for the window it opened. |
