@@ -95,6 +95,7 @@ class RosebloxWindow(Adw.ApplicationWindow):
         header.add_css_class("main-header")
         self._window_title = Adw.WindowTitle(title="Roseblox", subtitle="Roblox through Rosemary")
         header.set_title_widget(self._window_title)
+        self._header = header
         root.append(header)
 
         content = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
@@ -130,6 +131,13 @@ class RosebloxWindow(Adw.ApplicationWindow):
                 page.set_rosemary_status(self.rosemary_status)
             if page_id == "settings":
                 self.settings_page = _scrolled_content(page)
+
+        from .pages.notification_center import NotificationCenter
+        self.notification_center = NotificationCenter(self)
+        self._header.pack_end(self.notification_center)
+        for page in self.pages.values():
+            if hasattr(page, "add_operation_listener"):
+                page.add_operation_listener(self.notification_center.operation_changed)
 
         from .pages.onboarding import OnboardingPage
         self.onboarding_page = OnboardingPage(self, self.setup_store, self.url_handlers)
@@ -349,6 +357,8 @@ class RosebloxWindow(Adw.ApplicationWindow):
                 )
         self._refresh_in_progress = False
         self._apply_shared_state()
+        if self._library_loaded:
+            self.notification_center.library_ready()
         pending_url = getattr(self, "_pending_roblox_url", None)
         if pending_url is not None and not self.library_loading:
             self._pending_roblox_url = None

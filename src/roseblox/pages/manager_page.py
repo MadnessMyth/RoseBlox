@@ -1727,6 +1727,9 @@ class SettingsPage(Gtk.Box):
         NotificationLog().clear()
         self.window.setup_state = state
         self._show_skipped_versions(state.skipped_versions)
+        center = getattr(self.window, "notification_center", None)
+        if center is not None:
+            center.forget_skipped()
 
     def _show_close_preferences(self, setup_state) -> None:
         self._close_block = True

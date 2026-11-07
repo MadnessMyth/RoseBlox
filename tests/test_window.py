@@ -46,6 +46,11 @@ def _write_library(data_home: Path) -> list[dict]:
     return records
 
 
+def _notify(controller, app_type, state):
+    for listener in list(controller._operation_listeners):
+        listener(app_type, state)
+
+
 @unittest.skipUnless(DISPLAY_AVAILABLE, "GTK needs a display")
 class RealWindowTests(unittest.TestCase):
     """Builds the actual window so wiring between pages is exercised end to end."""
@@ -196,7 +201,7 @@ class RealWindowTests(unittest.TestCase):
         start.assert_called_once_with()
         self.assertEqual("setup", window._stack.get_visible_child_name())
 
-        controller._operation_listeners[0]("player", OperationState(True, "Downloaded 1.0 MiB of 4.0 MiB", 0.25, True))
+        _notify(controller, "player", OperationState(True, "Downloaded 1.0 MiB of 4.0 MiB", 0.25, True))
         self.assertTrue(progress.get_visible())
         self.assertAlmostEqual(0.25, progress.get_fraction())
         self.assertTrue(cancel.get_visible())
@@ -207,7 +212,7 @@ class RealWindowTests(unittest.TestCase):
             cancel.emit("clicked")
         cancel_operation.assert_called_once_with()
 
-        controller._operation_listeners[0]("player", OperationState(False, "Installation failed: offline", None, False))
+        _notify(controller, "player", OperationState(False, "Installation failed: offline", None, False))
         self.assertFalse(progress.get_visible())
         self.assertTrue(action.get_visible())
         self.assertEqual("Installation failed: offline", row.get_subtitle())
@@ -384,6 +389,102 @@ class RealWindowTests(unittest.TestCase):
         self.assertEqual("system", COLOR_THEMES[rows.colors_row.get_selected()])
         self.assertEqual("light", COLOR_STYLES[rows.style_row.get_selected()])
         self.assertEqual("teal", ACCENT_CHOICES[rows.accent_row.get_selected()])
+
+    def _synchronous_center_checks(self):
+        def run_now(target, args=(), daemon=True):
+            return SimpleNamespace(start=lambda: target(*args))
+
+        self.enterContext(patch("roseblox.pages.notification_center.threading.Thread", run_now))
+        self.enterContext(
+            patch("roseblox.pages.notification_center.GLib.idle_add", lambda function, *arguments: function(*arguments))
+        )
+
+    def test_notification_center_follows_downloads(self):
+        window = self._loaded_window()
+        center = window.notification_center
+        self.assertTrue(center.empty_label.get_visible())
+        self.assertFalse(center.badge.get_visible())
+        controller = window.pages["player"]
+
+        _notify(controller, "player", OperationState(True, "Downloaded 1.0 MiB of 4.0 MiB", 0.25, True))
+        self.assertTrue(center.downloads_box.get_visible())
+        self.assertFalse(center.empty_label.get_visible())
+        self.assertEqual("1", center.badge.get_text())
+        row = center.downloads_list.get_row_at_index(0)
+        self.assertEqual("Installing Roblox Player", row.get_title())
+        self.assertEqual("Downloaded 1.0 MiB of 4.0 MiB", row.get_subtitle())
+        with patch.object(controller, "cancel_operation") as cancel_operation:
+            center._cancel_clicked(None, "player")
+        cancel_operation.assert_called_once_with()
+
+        _notify(controller, "player", OperationState(False, "Installation failed: offline", None, False))
+        self.assertFalse(center.downloads_box.get_visible())
+        self.assertEqual("failed", center.recent[0].outcome)
+        self.assertEqual("1", center.badge.get_text())
+        center.popover.popup()
+        self.assertFalse(center.badge.get_visible())
+        center.popover.popdown()
+
+        # Updates to a state that never started (a plain refresh) do not add history.
+        _notify(controller, "player", OperationState(False, "", None, False))
+        self.assertEqual(1, len(center.recent))
+        center.clear_button.emit("clicked")
+        self.assertEqual([], center.recent)
+        self.assertTrue(center.empty_label.get_visible())
+
+    def test_notification_center_offers_updates(self):
+        from roseblox.backend.setup import SetupStore
+        from roseblox.backend.updates import AvailableUpdate
+
+        self._synchronous_center_checks()
+        store = SetupStore(self.config_home / "roseblox" / "setup.json")
+        store.save_update_checks(True)
+        update = AvailableUpdate("player", "version-1111111111111111", "version-0123456789abcdef")
+        checks = []
+
+        def checker(skipped):
+            checks.append(dict(skipped))
+            if skipped.get("player") == update.version:
+                return [], {}
+            return [update], {}
+
+        with patch("roseblox.pages.notification_center.check_for_updates", lambda *_a: checker(_a[-1])):
+            window = self._loaded_window()
+            center = window.notification_center
+            self.assertEqual([{}], checks)
+            self.assertEqual([update], center.updates)
+            self.assertEqual("1", center.badge.get_text())
+            row = center.updates_list.get_row_at_index(0)
+            self.assertEqual("Roblox Player update available", row.get_title())
+            self.assertIn("You have version-0123456789abcdef", row.get_subtitle())
+
+            with patch.object(window, "install_update") as install_update:
+                center._update_clicked(None, "player")
+            install_update.assert_called_once_with("player")
+
+            center._skip_clicked(None, update)
+            self.assertEqual({"player": update.version}, store.load().skipped_versions)
+            self.assertEqual([], center.updates)
+            self.assertIn(update.version, window.settings_page.skipped_row.get_subtitle())
+
+            window.settings_page.ask_again_button.emit("clicked")
+            self.assertEqual({}, checks[-1])
+            self.assertEqual([update], center.updates)
+
+            # A failed lookup keeps showing the update that was already found.
+            with patch.object(center, "_checker", lambda _skipped: ([], {"player": "offline"})):
+                center.check_updates()
+            self.assertEqual([update], center.updates)
+            self.assertIn("offline", center.status_label.get_text())
+
+    def test_notification_center_only_checks_automatically_when_enabled(self):
+        self._synchronous_center_checks()
+        checks = []
+        with patch("roseblox.pages.notification_center.check_for_updates", lambda *_a: checks.append(1) or ([], {})):
+            window = self._loaded_window()
+            self.assertEqual([], checks)
+            window.notification_center.check_button.emit("clicked")
+            self.assertEqual([1], checks)
 
     def test_update_from_notification_installs_and_becomes_preferred(self):
         from roseblox.backend.installer import InstallResult
