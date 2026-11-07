@@ -119,6 +119,8 @@ class RosebloxWindow(Adw.ApplicationWindow):
             )
             self.pages[page_id] = page
             self._stack.add_titled(page, page_id, title)
+            if hasattr(page, "set_rosemary_status"):
+                page.set_rosemary_status(self.rosemary_status)
             if page_id == "settings":
                 self.settings_page = _scrolled_content(page)
 
@@ -429,6 +431,8 @@ class RosebloxWindow(Adw.ApplicationWindow):
         for page in self.pages.values():
             if hasattr(page, "rosemary_status"):
                 page.rosemary_status = status
+            if hasattr(page, "set_rosemary_status"):
+                page.set_rosemary_status(status)
         if self.settings_page is not None:
             self.settings_page.apply_setup_snapshot(
                 status,

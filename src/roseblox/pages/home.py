@@ -6,8 +6,9 @@ from pathlib import Path
 
 import gi
 
+gi.require_version("Adw", "1")
 gi.require_version("Gtk", "4.0")
-from gi.repository import Gtk
+from gi.repository import Adw, Gtk
 
 from ..backend.library import InstallationRecord
 
@@ -81,6 +82,12 @@ class HomePage(Gtk.Overlay):
         content.add_css_class("home-content")
         scroller.set_child(content)
 
+        self.rosemary_banner = Adw.Banner.new("Rosemary isn’t set up yet, so Player and Studio can’t launch.")
+        self.rosemary_banner.set_button_label("Set Up Rosemary")
+        self.rosemary_banner.connect("button-clicked", lambda *_: self.window.navigate_to("setup"))
+        self.rosemary_banner.add_css_class("home-rosemary-banner")
+        content.append(self.rosemary_banner)
+
         introduction = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
         title = Gtk.Label(label="Welcome to Roseblox")
         title.set_xalign(0)
@@ -143,6 +150,9 @@ class HomePage(Gtk.Overlay):
                 resolved_preferred_ids.get(app_type),
                 (preference_errors or {}).get(app_type),
             )
+
+    def set_rosemary_status(self, status) -> None:
+        self.rosemary_banner.set_revealed(not status.available)
 
     def _navigate(self, _button: Gtk.Button, page_id: str) -> None:
         self.window.navigate_to(page_id)

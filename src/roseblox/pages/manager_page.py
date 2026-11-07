@@ -113,7 +113,8 @@ class InstallationPage(Gtk.Box):
         heading_row.append(heading)
         if app_type:
             add_button = Gtk.Button.new_with_label("Add Existing…")
-            add_button.add_css_class("suggested-action")
+            add_button.set_valign(Gtk.Align.CENTER)
+            add_button.set_tooltip_text(f"Register a {APP_BUNDLE_NAMES[app_type]} bundle you already have")
             add_button.set_sensitive(False)
             add_button.connect("clicked", self._on_add_clicked)
             heading_row.append(add_button)
@@ -165,6 +166,7 @@ class InstallationPage(Gtk.Box):
 
         self.list_box = Gtk.ListBox()
         self.list_box.set_selection_mode(Gtk.SelectionMode.NONE)
+        self.list_box.set_valign(Gtk.Align.START)
         self.list_box.add_css_class("boxed-list")
         scroller = Gtk.ScrolledWindow()
         scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
@@ -347,12 +349,14 @@ class InstallationPage(Gtk.Box):
             preferred_button = Gtk.Button.new_with_label(
                 "Preferred" if record.id == preferred_id else "Set as preferred"
             )
+            preferred_button.set_valign(Gtk.Align.CENTER)
             preferred_button.set_sensitive(record.id != preferred_id and not self._preference_busy)
             preferred_button.connect("clicked", self._on_set_preferred_clicked, record)
             self._preferred_buttons[record.id] = preferred_button
             contents.append(preferred_button)
 
             launch_button = Gtk.Button()
+            launch_button.set_valign(Gtk.Align.CENTER)
             launch_button.add_css_class("suggested-action")
             launch_button.connect("clicked", self._on_launch_clicked, record)
             self._launch_buttons[record.id] = launch_button
@@ -360,6 +364,7 @@ class InstallationPage(Gtk.Box):
             contents.append(launch_button)
 
         remove = Gtk.Button.new_with_label("Remove")
+        remove.set_valign(Gtk.Align.CENTER)
         remove.set_tooltip_text("Remove this registration from Roseblox only")
         remove.set_sensitive(
             record.id not in self._launching_ids
@@ -1209,7 +1214,7 @@ class SettingsPage(Gtk.Box):
         setup_store=None,
         url_handlers=None,
     ) -> None:
-        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=14)
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=24)
         self.set_hexpand(True)
         self.set_vexpand(True)
         self.set_margin_top(28)
