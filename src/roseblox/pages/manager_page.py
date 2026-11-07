@@ -37,6 +37,7 @@ from ..backend.rosemary import (
     stop_application,
     wait_for_running,
 )
+from ..backend.transfer_rate import TransferRate, format_size, progress_text
 from ..backend.versions import VersionCacheError, VersionInfo, VersionTestResult
 from ..backend.version_settings import (
     VersionSettingsError,
@@ -55,6 +56,7 @@ class OperationState:
     message: str
     fraction: float | None
     cancellable: bool
+    progress_text: str = ""
 
 
 class InstallationPage(Gtk.Box):
@@ -90,6 +92,7 @@ class InstallationPage(Gtk.Box):
         self._preference_busy = False
         self._busy = False
         self._make_preferred_after_install = False
+        self._transfer_rate = TransferRate()
         self._library_loading = True
         self._cancel_event: threading.Event | None = None
         self._checking_version = False
@@ -755,6 +758,7 @@ class InstallationPage(Gtk.Box):
             message=message,
             fraction=self.progress_bar.get_fraction() if self.progress_bar.get_visible() else None,
             cancellable=self.cancel_button.get_visible() and self.cancel_button.get_sensitive(),
+            progress_text=self.progress_bar.get_text() or "" if self.progress_bar.get_visible() else "",
         )
         for callback in list(self._operation_listeners):
             callback(self.app_type, state)
@@ -889,6 +893,7 @@ class InstallationPage(Gtk.Box):
         self.progress_bar.set_fraction(0.0)
         self.progress_bar.set_text("")
         self.progress_bar.set_visible(True)
+        self._transfer_rate.reset()
         self.cancel_button.set_visible(False)
         self.cancel_button.set_label("Cancel Download")
         if self.app_type:
@@ -907,18 +912,22 @@ class InstallationPage(Gtk.Box):
             message = "Checking the latest Roblox version…"
         elif progress.phase == "downloading":
             message = f"Downloaded {self._format_size(progress.downloaded)}"
+            self._transfer_rate.add(progress.downloaded)
             if progress.total is not None:
                 message += f" of {self._format_size(progress.total)}"
-                fraction = progress.downloaded / progress.total if progress.total else 0.0
-                self.progress_bar.set_fraction(min(max(fraction, 0.0), 1.0))
-                self.progress_bar.set_text(f"{fraction:.0%}")
+                fraction = min(max(progress.downloaded / progress.total if progress.total else 0.0, 0.0), 1.0)
+                self.progress_bar.set_fraction(fraction)
             else:
+                fraction = None
                 self.progress_bar.pulse()
-                self.progress_bar.set_text(self._format_size(progress.downloaded))
+            self.progress_bar.set_text(
+                progress_text(fraction, self._transfer_rate, progress.downloaded, progress.total)
+            )
             self.cancel_button.set_visible(self._cancel_event is not None)
             self.cancel_button.set_sensitive(True)
         elif progress.phase == "extracting":
             message = "Extracting and validating application bundle with bsdtar…"
+            self.progress_bar.set_text("")
             self.cancel_button.set_visible(False)
             self.progress_bar.pulse()
         elif progress.phase == "registering":
@@ -933,6 +942,7 @@ class InstallationPage(Gtk.Box):
             message = "Download complete. Preparing installation…"
             self.cancel_button.set_visible(False)
             self.progress_bar.set_fraction(1.0)
+            self.progress_bar.set_text("100%")
         elif progress.phase == "complete":
             message = "Installation complete."
             self.progress_bar.set_fraction(1.0)
@@ -991,13 +1001,7 @@ class InstallationPage(Gtk.Box):
 
     @staticmethod
     def _format_size(size: int) -> str:
-        units = ("B", "KiB", "MiB", "GiB")
-        value = float(size)
-        for unit in units:
-            if value < 1024 or unit == units[-1]:
-                return f"{value:.1f} {unit}"
-            value /= 1024
-        return f"{size} B"
+        return format_size(size)
 
     def _on_launch_clicked(self, _button: Gtk.Button, record: InstallationRecord) -> None:
         self.request_launch_toggle(record)

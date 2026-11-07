@@ -438,6 +438,32 @@ class RealWindowTests(unittest.TestCase):
         self.assertEqual([], center.recent)
         self.assertTrue(center.empty_label.get_visible())
 
+    def test_download_bar_shows_speed_and_time_left(self):
+        from roseblox.backend.installer import InstallProgress
+        from roseblox.backend.transfer_rate import TransferRate
+
+        window = self._loaded_window()
+        controller = window.pages["player"]
+        clock = SimpleNamespace(now=10.0)
+        controller._transfer_rate = TransferRate(clock=lambda: clock.now)
+        controller._begin_operation("Checking the latest version…", cancellable=True)
+        mib = 1024 * 1024
+        controller._show_progress(InstallProgress("downloading", 0, 100 * mib))
+        self.assertEqual("0%", controller.progress_bar.get_text())
+        clock.now += 2.0
+        controller._show_progress(InstallProgress("downloading", 4 * mib, 100 * mib))
+        expected = "4% · 2.0 MiB/s · 48 s left"
+        self.assertEqual(expected, controller.progress_bar.get_text())
+
+        row = window.notification_center.downloads_list.get_row_at_index(0)
+        bar = row.get_child().get_last_child()
+        self.assertEqual(expected, bar.get_text())
+        setup_row = window.onboarding_page._app_widgets["player"][0]
+        self.assertTrue(setup_row.get_subtitle().endswith(expected))
+
+        controller._show_progress(InstallProgress("extracting"))
+        self.assertEqual("", controller.progress_bar.get_text())
+
     def test_notification_center_offers_updates(self):
         from roseblox.backend.setup import SetupStore
         from roseblox.backend.updates import AvailableUpdate

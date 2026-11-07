@@ -382,7 +382,10 @@ class OnboardingPage(Gtk.Box):
             valid_count = sum(1 for record in records_for_type if self._validation.get(record.id) == "Valid")
             if operation is not None and operation.busy:
                 any_busy = True
-                row.set_subtitle(operation.message or "Installing…")
+                details = operation.message or "Installing…"
+                if getattr(operation, "progress_text", ""):
+                    details += f"\n{operation.progress_text}"
+                row.set_subtitle(details)
                 progress.set_visible(True)
                 if operation.fraction is not None:
                     progress.set_fraction(operation.fraction)

@@ -347,7 +347,7 @@ class NotificationCenter(Gtk.MenuButton):
             progress.pulse()
         else:
             progress.set_fraction(state.fraction)
-            progress.set_text(f"{state.fraction:.0%}")
+            progress.set_text(state.progress_text or f"{state.fraction:.0%}")
             progress.set_show_text(True)
         box.append(progress)
         return row
