@@ -316,6 +316,75 @@ class RealWindowTests(unittest.TestCase):
         self.assertTrue(player_link.get_active())
         self.assertTrue(studio_row.get_enable_expansion())
 
+    def test_settings_are_grouped_into_sections_that_remember_their_state(self):
+        from roseblox.backend.setup import SetupStore
+
+        window = self._loaded_window()
+        settings = window.settings_page
+        self.assertEqual(
+            ["appearance", "rosemary", "launching", "links", "updates", "advanced"], list(settings._sections)
+        )
+        advanced = settings._sections["advanced"]
+        self.assertFalse(advanced.expanded)
+        self.assertFalse(advanced.revealer.get_reveal_child())
+        self.assertTrue(settings._sections["appearance"].expanded)
+
+        advanced.header.emit("clicked")
+        settings._sections["updates"].header.emit("clicked")
+        self.assertTrue(advanced.revealer.get_reveal_child())
+        state = SetupStore(self.config_home / "roseblox" / "setup.json").load()
+        self.assertEqual({"advanced": True, "updates": False}, state.expanded_sections)
+
+        reopened = self._loaded_window()
+        self.assertTrue(reopened.settings_page._sections["advanced"].expanded)
+        self.assertFalse(reopened.settings_page._sections["updates"].expanded)
+
+    def test_ctrl_click_switch_is_saved_and_explained(self):
+        from roseblox.backend.setup import SetupStore
+
+        window = self._loaded_window()
+        settings = window.settings_page
+        settings._show_rosemary_input_status(True, settings._input_check_generation)
+        self.assertTrue(settings.input_switch.get_active())
+        self.assertTrue(settings.input_switch.get_sensitive())
+        self.assertIn("On.", settings.rosemary_input_row.get_subtitle())
+
+        settings.input_switch.set_active(False)
+        store = SetupStore(self.config_home / "roseblox" / "setup.json")
+        self.assertFalse(store.load().plain_ctrl_click)
+        self.assertFalse(window.setup_state.plain_ctrl_click)
+        self.assertIn("Off.", settings.rosemary_input_row.get_subtitle())
+
+        settings._show_rosemary_input_status(False, settings._input_check_generation)
+        self.assertFalse(settings.input_switch.get_sensitive())
+        self.assertIn("Not supported", settings.rosemary_input_row.get_subtitle())
+
+        # A refresh keeps the saved choice instead of switching it back on.
+        window._apply_rosemary_status(window.rosemary_status)
+        self.assertFalse(settings.input_switch.get_active())
+
+    def test_appearance_choices_are_saved_and_applied(self):
+        from roseblox.backend.setup import ACCENT_CHOICES, COLOR_STYLES, COLOR_THEMES, Appearance, SetupStore
+
+        window = self._loaded_window()
+        theme = Mock()
+        with patch.object(window, "get_application", return_value=SimpleNamespace(theme=theme)):
+            settings = window.settings_page
+            settings.style_row.set_selected(COLOR_STYLES.index("light"))
+            settings.accent_row.set_selected(ACCENT_CHOICES.index("teal"))
+            settings.colors_row.set_selected(COLOR_THEMES.index("system"))
+        expected = Appearance("system", "light", "teal")
+        theme.apply.assert_called_with(expected)
+        self.assertEqual(expected, SetupStore(self.config_home / "roseblox" / "setup.json").load().appearance)
+        self.assertEqual(expected, window.setup_state.appearance)
+        self.assertEqual("Your desktop’s standard window colors.", settings.colors_row.get_subtitle())
+
+        reopened = self._loaded_window()
+        rows = reopened.settings_page
+        self.assertEqual("system", COLOR_THEMES[rows.colors_row.get_selected()])
+        self.assertEqual("light", COLOR_STYLES[rows.style_row.get_selected()])
+        self.assertEqual("teal", ACCENT_CHOICES[rows.accent_row.get_selected()])
+
     def test_update_from_notification_installs_and_becomes_preferred(self):
         from roseblox.backend.installer import InstallResult
 
