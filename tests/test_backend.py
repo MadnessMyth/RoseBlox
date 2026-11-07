@@ -498,8 +498,11 @@ class LibraryTests(unittest.TestCase):
             )
 
             with patch("roseblox.backend.rosemary.subprocess.Popen") as popen:
-                popen.return_value.communicate.return_value = (b"", b"")
+                # Real pipes reach EOF; a Mock stream would keep the output reader spinning.
+                popen.return_value.stdout = io.BytesIO()
+                popen.return_value.stderr = io.BytesIO()
                 session = launch_application(record, RosemaryStatus("/usr/bin/rosemary"))
+            self.assertTrue(session.output_done.wait(timeout=5))
 
         args, kwargs = popen.call_args
         self.assertEqual(["/usr/bin/rosemary", f"{bundle.absolute()}{os.sep}"], args[0])
