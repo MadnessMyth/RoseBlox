@@ -218,5 +218,5 @@ To update after a new release, run `git pull` in `~/RoseBlox`, then `makepkg -si
 | A FastFlag has no effect in Player | The Player uses only flags in Roblox's allowlist. Flags outside it have a warning under **Performance → FastFlags** ("Roblox Player ignores this flag"), and work only in Studio. |
 | Roblox stopped starting after you changed Performance settings | Open **Performance → Backups** and **Restore…** the backup from before the change, or click **Reset to Defaults…**. |
 | "GameMode was not started" | Install GameMode (`sudo pacman -S gamemode`) and log out and back in. The app still runs, only without GameMode. |
-| The MangoHud overlay does not appear | Check that **Performance → Diagnostics** says the MangoHud layer is installed, and that the overlay is not hidden in `~/.config/MangoHud/MangoHud.conf` (MangoHud's toggle key is Right Shift + F12). |
+| The MangoHud overlay does not appear | Check that **Performance → Diagnostics** says the MangoHud layer is installed, and that the overlay is not hidden in `~/.config/MangoHud/MangoHud.conf` (MangoHud's toggle key is Right Shift + F12). With Rosemary's AppImage, also add `ROSEMARY_GLIBC` = `host` under **Performance → Environment → Rosemary**. |
 | Clicking **Update** in a notification does nothing | See `~/.local/state/roseblox/logs/roseblox.log` for the window it opened. |

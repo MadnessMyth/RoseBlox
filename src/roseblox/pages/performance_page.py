@@ -598,8 +598,8 @@ class PerformancePage(Gtk.Box):
             self.mangohud_row.switch.set_sensitive(self.mangohud_available or config.mangohud)
             self.mangohud_row.set_subtitle(
                 "Shows frame rate and frame times through MangoHud's Vulkan layer; configure it in "
-                "~/.config/MangoHud/MangoHud.conf. If it does not appear, add ROSEMARY_GLIBC=host to the "
-                "Rosemary environment."
+                "~/.config/MangoHud/MangoHud.conf. With Rosemary's AppImage, add ROSEMARY_GLIBC=host to the "
+                "Rosemary environment if it does not appear."
                 if self.mangohud_available
                 else "MangoHud's Vulkan layer is not installed."
             )
