@@ -2178,9 +2178,14 @@ class SettingsPage(Gtk.Box):
         self.microphone_mode_row.connect("notify::selected", self._microphone_changed)
         self.microphone_row.add_row(self.microphone_mode_row)
 
+        self.microphone_inverted_row = Adw.SwitchRow.new()
+        self.microphone_inverted_row.set_title("Inverted")
+        self.microphone_inverted_row.set_subtitle("Hold the hotkey to mute instead of to talk (push to mute).")
+        self.microphone_inverted_row.connect("notify::active", self._microphone_changed)
+        self.microphone_row.add_row(self.microphone_inverted_row)
+
         self.release_delay_row = Adw.SpinRow.new_with_range(0, MAX_RELEASE_DELAY_MS, 50)
         self.release_delay_row.set_title("Release delay")
-        self.release_delay_row.set_subtitle("Milliseconds the microphone stays on after you let go of the hotkey.")
         self.release_delay_row.connect("notify::value", self._microphone_changed)
         self.microphone_row.add_row(self.release_delay_row)
         group.add(self.microphone_row)
@@ -2201,6 +2206,7 @@ class SettingsPage(Gtk.Box):
             microphone_toggle=enabled,
             microphone_mode=mode,
             microphone_release_delay_ms=int(self.release_delay_row.get_value()),
+            microphone_inverted=self.microphone_inverted_row.get_active(),
         ))
         if enabled:
             self.microphone_hotkey.start()
@@ -2209,10 +2215,22 @@ class SettingsPage(Gtk.Box):
         self.microphone_row.set_enable_expansion(settings.microphone_toggle)
         self.microphone_mode_row.set_selected(MICROPHONE_MODES.index(settings.microphone_mode))
         self.release_delay_row.set_value(settings.microphone_release_delay_ms)
+        self.microphone_inverted_row.set_active(settings.microphone_inverted)
         hold = settings.microphone_mode == MODE_HOLD
+        inverted = hold and settings.microphone_inverted
         self.release_delay_row.set_visible(hold)
-        self.microphone_mode_row.set_subtitle(
-            "Talk while the hotkey is held down." if hold else "Press the hotkey once to talk and again to mute."
+        self.microphone_inverted_row.set_visible(hold)
+        if not hold:
+            description = "Press the hotkey once to talk and again to mute."
+        elif inverted:
+            description = "Your microphone is on, and muted while the hotkey is held down."
+        else:
+            description = "Talk while the hotkey is held down."
+        self.microphone_mode_row.set_subtitle(description)
+        self.release_delay_row.set_subtitle(
+            "Milliseconds you stay muted after you let go of the hotkey."
+            if inverted
+            else "Milliseconds the microphone stays on after you let go of the hotkey."
         )
 
     def _show_while_playing(self, settings: WhilePlaying) -> None:

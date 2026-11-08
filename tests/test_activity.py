@@ -291,7 +291,9 @@ class WhilePlayingSettingsTests(unittest.TestCase):
                 defaults.microphone_toggle, defaults.microphone_mode, defaults.microphone_release_delay_ms,
             ))
             self.assertFalse(defaults.any_enabled)
-            saved = WhilePlaying(microphone_toggle=True, microphone_mode="hold", microphone_release_delay_ms=400)
+            saved = WhilePlaying(
+                microphone_toggle=True, microphone_mode="hold", microphone_release_delay_ms=400, microphone_inverted=True,
+            )
             self.assertTrue(saved.any_enabled)
             self.assertEqual(saved, store.save_while_playing(saved).while_playing)
             for bad in (
@@ -299,6 +301,7 @@ class WhilePlayingSettingsTests(unittest.TestCase):
                 WhilePlaying(microphone_release_delay_ms=-5),
                 WhilePlaying(microphone_release_delay_ms=True),
                 WhilePlaying(microphone_toggle="yes"),
+                WhilePlaying(microphone_inverted=1),
             ):
                 with self.assertRaises(ValueError):
                     store.save_while_playing(bad)
@@ -413,16 +416,16 @@ class WatcherTests(unittest.TestCase):
         created = []
 
         class FakeMicrophone:
-            def __init__(self, mode, delay):
-                self.settings = [(mode, delay)]
+            def __init__(self, mode, delay, inverted):
+                self.settings = [(mode, delay, inverted)]
                 self.started = self.stopped = False
                 created.append(self)
 
             def start(self):
                 self.started = True
 
-            def configure(self, mode, delay):
-                self.settings.append((mode, delay))
+            def configure(self, mode, delay, inverted):
+                self.settings.append((mode, delay, inverted))
 
             def stop(self):
                 self.stopped = True
@@ -436,10 +439,12 @@ class WatcherTests(unittest.TestCase):
         watcher.poll()
         [first] = created
         self.assertTrue(first.started)
-        self.assertEqual([("toggle", 250)], first.settings)
-        self.settings = WhilePlaying(microphone_toggle=True, microphone_mode="hold", microphone_release_delay_ms=500)
+        self.assertEqual([("toggle", 250, False)], first.settings)
+        self.settings = WhilePlaying(
+            microphone_toggle=True, microphone_mode="hold", microphone_release_delay_ms=500, microphone_inverted=True,
+        )
         watcher.poll()
-        self.assertEqual([("toggle", 250), ("hold", 500)], first.settings)
+        self.assertEqual([("toggle", 250, False), ("hold", 500, True)], first.settings)
         self.settings = WhilePlaying()
         watcher.poll()
         self.assertTrue(first.stopped)

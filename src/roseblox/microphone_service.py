@@ -34,6 +34,7 @@ INTERFACE_XML = f"""
     <method name="SetOpen"><arg name="open" type="b" direction="in"/></method>
     <property name="Open" type="b" access="read"/>
     <property name="Mode" type="s" access="read"/>
+    <property name="Inverted" type="b" access="read"/>
     <property name="Hotkey" type="s" access="read"/>
   </interface>
 </node>
@@ -53,6 +54,7 @@ class MicrophoneService:
         self,
         mode: str,
         release_delay_ms: int,
+        inverted: bool = False,
         *,
         log: Callable[[str], None] = lambda message: print(f"roseblox microphone: {message}", file=sys.stderr, flush=True),
         backend_factory=detect_backend,
@@ -61,6 +63,7 @@ class MicrophoneService:
     ) -> None:
         self.mode = mode
         self.release_delay_ms = release_delay_ms
+        self.inverted = inverted
         self.log = log
         self.backend_factory = backend_factory
         self.connection_factory = connection_factory
@@ -87,8 +90,8 @@ class MicrophoneService:
         self.thread.start()
         self._ready.wait(5)
 
-    def configure(self, mode: str, release_delay_ms: int) -> None:
-        self._invoke(lambda: self._configure(mode, release_delay_ms))
+    def configure(self, mode: str, release_delay_ms: int, inverted: bool = False) -> None:
+        self._invoke(lambda: self._configure(mode, release_delay_ms, inverted))
 
     def stop(self, timeout: float = 5.0) -> None:
         self._invoke(self._shutdown)
@@ -137,7 +140,7 @@ class MicrophoneService:
             return
         self.log(f"in charge of Roblox's microphone ({backend.name}, {self.mode} mode)")
         self.gate = MicrophoneGate(
-            backend, self.mode, self.release_delay_ms,
+            backend, self.mode, self.release_delay_ms, self.inverted,
             schedule=self._schedule, cancel=self._cancel, log=self.log, changed=self._open_changed,
         )
         self._registration = connection.register_object(
@@ -180,11 +183,11 @@ class MicrophoneService:
         if self.loop is not None:
             self.loop.quit()
 
-    def _configure(self, mode: str, release_delay_ms: int) -> None:
-        self.mode, self.release_delay_ms = mode, release_delay_ms
+    def _configure(self, mode: str, release_delay_ms: int, inverted: bool) -> None:
+        self.mode, self.release_delay_ms, self.inverted = mode, release_delay_ms, inverted
         if self.gate is not None:
             try:
-                self.gate.configure(mode, release_delay_ms)
+                self.gate.configure(mode, release_delay_ms, inverted)
             except ValueError as error:
                 self.log(str(error))
 
@@ -236,6 +239,8 @@ class MicrophoneService:
             return GLib.Variant("b", bool(self.gate and self.gate.open))
         if name == "Mode":
             return GLib.Variant("s", self.mode)
+        if name == "Inverted":
+            return GLib.Variant("b", self.inverted)
         return GLib.Variant("s", self.hotkey)
 
     def _schedule(self, milliseconds: int, callback: Callable[[], None]) -> GLib.Source:
@@ -331,7 +336,10 @@ def command_main(argv: list[str], bus: Gio.DBusConnection | None = None) -> int:
             properties = reply.unpack()[0]
             state = "open" if properties.get("Open") else "muted"
             hotkey = properties.get("Hotkey") or "none"
-            print(f"{state} ({properties.get('Mode', 'toggle')} mode, hotkey: {hotkey})")
+            mode = properties.get("Mode", "toggle")
+            if mode == "hold" and properties.get("Inverted"):
+                mode = "hold to mute"
+            print(f"{state} ({mode} mode, hotkey: {hotkey})")
             return 0
         method, parameters = {
             "toggle": ("Toggle", None),

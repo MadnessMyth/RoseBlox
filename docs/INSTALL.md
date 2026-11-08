@@ -199,9 +199,10 @@ These work with Roblox Player and are off until you turn them on. Turn them on b
 - **Server location notification**: when you join a server, a notification says where it is, for example "The server is in Frankfurt am Main, Hessen, Germany." The Roblox server's address (never yours) is looked up with [ipwho.is](https://ipwho.is).
 - **Close Roblox when leaving a game**: Roblox closes when you leave a game, instead of going back to the Roblox home screen. Being disconnected does not close it.
 - **Microphone toggle**: Roblox's microphone stays silent until you use a hotkey, like push to talk in other games. Roblox stays connected to voice chat and keeps its own microphone switch; it just receives silence. Discord and other apps keep your microphone as usual.
-  - **Microphone hotkey**: click **Set Hotkey**. Your desktop asks for the key, or opens its shortcut settings with a Roseblox entry (on KDE Plasma: **System Settings → Keyboard → Shortcuts**). The key works while Roblox has focus. Desktops without global shortcuts (the xdg-desktop-portal GlobalShortcuts service) can bind a key to `roseblox --mic toggle` in their keyboard settings instead.
+  - **Microphone hotkey**: click **Set Hotkey** and choose the key in the small dialog your desktop shows (KDE Plasma does this). **Change Hotkey** opens the desktop's shortcut settings; on KDE Plasma the key is also listed under Roseblox in **System Settings → Keyboard → Shortcuts**. The key works while Roblox has focus. Desktops without global shortcuts (the xdg-desktop-portal GlobalShortcuts service) can bind a key to `roseblox --mic toggle` in their keyboard settings instead.
   - **Mode**: **Toggle** turns the microphone on with one press and off with the next. **Hold** keeps it on while the key is held down.
-  - **Release delay** (Hold only): how many milliseconds the microphone stays on after you let go, so the end of a sentence is not cut off.
+  - **Inverted** (Hold only): push to mute. The microphone is on, and muted while the key is held down.
+  - **Release delay** (Hold only): how many milliseconds the microphone stays on after you let go, so the end of a sentence is not cut off. With **Inverted**, how long you stay muted after letting go.
 
   `roseblox --mic status` prints whether the microphone is on, and `roseblox --mic toggle`, `on` and `off` switch it, while a Player runs with the toggle on.
 

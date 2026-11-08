@@ -210,6 +210,35 @@ class GateTests(unittest.TestCase):
         self.assertFalse(microphone.open)
         self.assertEqual({}, timers.pending)
 
+    def test_inverted_hold_mutes_while_held_and_reopens_after_the_delay(self):
+        backend = FakeBackend([CaptureStream("2", True, ROBLOX)])
+        timers = Timers()
+        microphone = MicrophoneGate(
+            backend, MODE_HOLD, 200, True, schedule=timers.schedule, cancel=timers.cancel,
+        )
+        self.assertTrue(microphone.open)
+        microphone.sync()
+        self.assertEqual([("2", False)], backend.calls)
+        microphone.press()
+        self.assertFalse(microphone.open)
+        microphone.release()
+        self.assertFalse(microphone.open)
+        timers.fire_all()
+        self.assertTrue(microphone.open)
+        self.assertEqual([("2", False), ("2", True), ("2", False)], backend.calls)
+
+    def test_switching_inverted_returns_to_the_new_resting_state(self):
+        backend = FakeBackend([CaptureStream("2", True, ROBLOX)])
+        microphone, _timers = gate(backend, MODE_HOLD, 0)
+        microphone.configure(MODE_HOLD, 0, True)
+        self.assertTrue(microphone.open)
+        microphone.configure(MODE_TOGGLE, 0, True)
+        self.assertFalse(microphone.open)
+        microphone.press()
+        self.assertTrue(microphone.open)
+        with self.assertRaises(ValueError):
+            microphone.configure(MODE_HOLD, 0, "yes")
+
     def test_a_replacement_stream_gets_the_current_state(self):
         backend = FakeBackend([CaptureStream("2", True, ROBLOX)])
         microphone, _timers = gate(backend)
@@ -344,6 +373,9 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual((0, "muted (toggle mode, hotkey: none)", ""), self._command("status"))
         self.assertEqual(0, self._command("on")[0])
         self.assertTrue(_wait_for(lambda: second.gate.open))
+        second.configure(MODE_HOLD, 0, True)
+        self.assertTrue(_wait_for(lambda: second.gate.inverted))
+        self.assertEqual((0, "open (hold to mute mode, hotkey: none)", ""), self._command("status"))
 
     def test_the_command_explains_when_nothing_is_running_and_rejects_unknown_actions(self):
         status, _output, error = self._command("toggle")

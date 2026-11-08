@@ -458,12 +458,18 @@ class RealWindowTests(unittest.TestCase):
             self.assertEqual("Hotkey: Ctrl+M.", settings.hotkey_row.get_subtitle())
             self.assertEqual("Change Hotkey", settings.hotkey_button.get_label())
 
+            self.assertFalse(settings.microphone_inverted_row.get_visible())
             settings.microphone_mode_row.set_selected(1)
             self.assertTrue(settings.release_delay_row.get_visible())
+            self.assertTrue(settings.microphone_inverted_row.get_visible())
             settings.release_delay_row.set_value(400)
+            settings.microphone_inverted_row.set_active(True)
+            self.assertIn("muted while the hotkey is held", settings.microphone_mode_row.get_subtitle())
+            self.assertIn("stay muted", settings.release_delay_row.get_subtitle())
         state = SetupStore(self.config_home / "roseblox" / "setup.json").load().while_playing
-        self.assertEqual((True, "hold", 400), (
+        self.assertEqual((True, "hold", 400, True), (
             state.microphone_toggle, state.microphone_mode, state.microphone_release_delay_ms,
+            state.microphone_inverted,
         ))
 
     def test_without_global_shortcuts_the_hotkey_row_points_to_roseblox_mic(self):

@@ -69,6 +69,7 @@ class WhilePlaying:
     microphone_toggle: bool = False
     microphone_mode: str = MODE_TOGGLE
     microphone_release_delay_ms: int = DEFAULT_RELEASE_DELAY_MS
+    microphone_inverted: bool = False
 
     @property
     def any_enabled(self) -> bool:
@@ -77,7 +78,7 @@ class WhilePlaying:
     def validate(self) -> "WhilePlaying":
         for value in (
             self.discord_presence, self.discord_join_button, self.server_location, self.close_on_leave,
-            self.microphone_toggle,
+            self.microphone_toggle, self.microphone_inverted,
         ):
             if not isinstance(value, bool):
                 raise ValueError("While Playing switches must be on or off.")
@@ -242,6 +243,7 @@ class SetupStore:
             "microphone_toggle": settings.microphone_toggle,
             "microphone_mode": settings.microphone_mode,
             "microphone_release_delay_ms": settings.microphone_release_delay_ms,
+            "microphone_inverted": settings.microphone_inverted,
         })
 
     def save_section_expanded(self, section: str, expanded: bool) -> SetupState:
@@ -282,7 +284,7 @@ class SetupStore:
                 for name in (
                     "discord_presence", "discord_join_button", "discord_application_id",
                     "server_location", "close_on_leave", "microphone_toggle", "microphone_mode",
-                    "microphone_release_delay_ms",
+                    "microphone_release_delay_ms", "microphone_inverted",
                 )
             }).validate()
         except ValueError as error:

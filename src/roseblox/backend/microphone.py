@@ -178,6 +178,14 @@ def validate_release_delay(value: object) -> int:
     return value
 
 
+def _validated(mode: object, release_delay_ms: object, inverted: object) -> tuple[str, int, bool]:
+    if mode not in MICROPHONE_MODES:
+        raise ValueError(f"Unknown microphone mode: {mode!r}")
+    if not isinstance(inverted, bool):
+        raise ValueError("Inverted must be on or off.")
+    return mode, validate_release_delay(release_delay_ms), inverted
+
+
 class MicrophoneGate:
     """Keeps every Roblox capture stream muted unless the hotkey has opened the microphone.
 
@@ -190,6 +198,7 @@ class MicrophoneGate:
         backend,
         mode: str = MODE_TOGGLE,
         release_delay_ms: int = DEFAULT_RELEASE_DELAY_MS,
+        inverted: bool = False,
         *,
         schedule: Callable[[int, Callable[[], None]], object],
         cancel: Callable[[object], None],
@@ -197,27 +206,27 @@ class MicrophoneGate:
         changed: Callable[[bool], None] = lambda _open: None,
     ) -> None:
         self.backend = backend
-        self.mode = MODE_TOGGLE
-        self.release_delay_ms = DEFAULT_RELEASE_DELAY_MS
+        self.mode, self.release_delay_ms, self.inverted = _validated(mode, release_delay_ms, inverted)
         self.schedule = schedule
         self.cancel = cancel
         self.log = log
         self.changed = changed
-        self.open = False
+        self.open = self._resting()
         self.active = True
         self._release_timer = None
         self._held = False
-        self.configure(mode, release_delay_ms)
 
-    def configure(self, mode: str, release_delay_ms: int) -> None:
-        if mode not in MICROPHONE_MODES:
-            raise ValueError(f"Unknown microphone mode: {mode!r}")
-        self.release_delay_ms = validate_release_delay(release_delay_ms)
-        if mode != self.mode:
-            self.mode = mode
+    def configure(self, mode: str, release_delay_ms: int, inverted: bool = False) -> None:
+        mode, self.release_delay_ms, inverted = _validated(mode, release_delay_ms, inverted)
+        if (mode, inverted) != (self.mode, self.inverted):
+            self.mode, self.inverted = mode, inverted
             self._held = False
             self._cancel_release()
-            self._set_open(False)
+            self._set_open(self._resting())
+
+    def _resting(self) -> bool:
+        """Hold mode returns here on release: muted, or open when inverted (push to mute)."""
+        return self.mode == MODE_HOLD and self.inverted
 
     def toggle(self) -> None:
         self._cancel_release()
@@ -229,7 +238,7 @@ class MicrophoneGate:
             return
         self._held = True
         self._cancel_release()
-        self._set_open(True)
+        self._set_open(not self._resting())
 
     def release(self) -> None:
         if self.mode != MODE_HOLD or not self._held:
@@ -237,7 +246,7 @@ class MicrophoneGate:
         self._held = False
         self._cancel_release()
         if self.release_delay_ms <= 0:
-            self._set_open(False)
+            self._set_open(self._resting())
         else:
             self._release_timer = self.schedule(self.release_delay_ms, self._release_elapsed)
 
@@ -271,7 +280,7 @@ class MicrophoneGate:
     def _release_elapsed(self) -> bool:
         self._release_timer = None
         if not self._held:
-            self._set_open(False)
+            self._set_open(self._resting())
         return False
 
     def _cancel_release(self) -> None:
