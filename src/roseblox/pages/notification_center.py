@@ -355,7 +355,7 @@ class NotificationCenter(Gtk.MenuButton):
         try:
             self_update.update_appimage(release, target, progress)
             error = None
-        except SelfUpdateError as error_:
+        except Exception as error_:  # noqa: BLE001 - the card must leave its progress state
             error = str(error_)[:300]
         GLib.idle_add(self._roseblox_update_finished, error)
 

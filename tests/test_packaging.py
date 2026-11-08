@@ -68,6 +68,47 @@ class GenericInstallTests(unittest.TestCase):
             self.assertTrue((home / ".local" / "lib" / "roseblox").is_dir())
 
 
+class ReleasePackageTests(unittest.TestCase):
+    def test_release_attaches_what_the_updater_downloads(self):
+        from roseblox.backend import self_update
+
+        workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+        for name in (self_update.APPIMAGE_ASSET, self_update.CHECKSUMS_ASSET, f"{self_update.APPIMAGE_ASSET}.zsync"):
+            self.assertIn(f"dist/{name}", workflow)
+        self.assertIn("sha256sum roseblox_*_all.deb Roseblox-x86_64.AppImage > SHA256SUMS", workflow)
+        self.assertIn("runs-on: ubuntu-24.04", workflow)
+
+        builder = (ROOT / "packaging" / "appimage" / "build_appimage.py").read_text(encoding="utf-8")
+        self.assertIn(f'OUTPUT_NAME = "{self_update.APPIMAGE_ASSET}"', builder)
+        self.assertIn(f"|{self_update.REPOSITORY.replace('/', '|')}|latest|", builder)
+
+    def test_apprun_saves_every_variable_it_changes(self):
+        apprun = (ROOT / "packaging" / "appimage" / "AppRun").read_text(encoding="utf-8")
+        self.assertEqual(0, subprocess.run(["/bin/sh", "-n", str(ROOT / "packaging" / "appimage" / "AppRun")]).returncode)
+        saved = set(re.search(r'ROSEBLOX_HOST_VARS="([^"]+)"', apprun).group(1).replace("\\\n", " ").split())
+        changed = set(re.findall(r"^\s*export ([A-Z_]+)=", apprun, re.MULTILINE))
+        changed -= {"ROSEBLOX_APPDIR", "ROSEBLOX_APPIMAGE"}
+        self.assertTrue(changed)
+        self.assertLessEqual(changed, saved)
+
+    def test_deb_package_installs_into_the_system_python(self):
+        if subprocess.run(["sh", "-c", "command -v dpkg-deb"], capture_output=True).returncode != 0:
+            self.skipTest("needs dpkg-deb")
+        with tempfile.TemporaryDirectory() as directory:
+            result = subprocess.run(
+                ["/bin/sh", str(ROOT / "packaging" / "debian" / "build-deb.sh"), directory],
+                capture_output=True, text=True, timeout=60,
+            )
+            self.assertEqual(0, result.returncode, result.stderr)
+            package = Path(result.stdout.strip())
+            contents = subprocess.run(["dpkg-deb", "--contents", str(package)], capture_output=True, text=True).stdout
+            fields = subprocess.run(["dpkg-deb", "--field", str(package)], capture_output=True, text=True).stdout
+        self.assertIn("./usr/lib/python3/dist-packages/roseblox/__main__.py", contents)
+        self.assertIn("./usr/share/applications/io.github.roseblox.Roseblox.desktop", contents)
+        self.assertNotIn("__pycache__", contents)
+        self.assertIn("gir1.2-adw-1 (>= 1.4)", fields)
+
+
 class ArchPackagingTests(unittest.TestCase):
     def test_recipe_uses_the_versioned_archive_and_real_runtime_dependencies(self):
         recipe = (ROOT / "packaging" / "arch" / "PKGBUILD").read_text(encoding="utf-8")

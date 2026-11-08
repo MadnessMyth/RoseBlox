@@ -1,0 +1,55 @@
+#!/bin/sh
+# Starts Roseblox from the AppImage with the bundled Python, GTK and libadwaita.
+#
+# Every variable changed here is saved as ROSEBLOX_HOST_<name>; Roseblox puts the saved
+# values back once GTK has started (roseblox.backend.appimage), so Rosemary, the browser
+# and other programs it starts do not load the bundled libraries.
+set -eu
+
+APPDIR=${APPDIR:-$(dirname "$(readlink -f "$0")")}
+ROSEBLOX_HOST_VARS="LD_LIBRARY_PATH PYTHONHOME PYTHONPATH PYTHONNOUSERSITE PYTHONDONTWRITEBYTECODE \
+GI_TYPELIB_PATH GDK_PIXBUF_MODULE_FILE GIO_MODULE_DIR GSETTINGS_SCHEMA_DIR GSETTINGS_BACKEND \
+GTK_EXE_PREFIX XDG_DATA_DIRS SSL_CERT_FILE"
+for name in $ROSEBLOX_HOST_VARS; do
+    eval "if [ \"\${$name+set}\" = set ]; then export ROSEBLOX_HOST_$name=\"\$$name\"; else unset ROSEBLOX_HOST_$name; fi"
+done
+export ROSEBLOX_HOST_VARS
+export ROSEBLOX_APPDIR="$APPDIR"
+export ROSEBLOX_APPIMAGE="${APPIMAGE:-}"
+
+usr="$APPDIR/usr"
+export LD_LIBRARY_PATH="$usr/lib/libs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export PYTHONHOME="$usr"
+export PYTHONPATH="$usr/share/roseblox:$usr/lib/python3/dist-packages"
+export PYTHONNOUSERSITE=1
+export PYTHONDONTWRITEBYTECODE=1
+export GI_TYPELIB_PATH="$usr/lib/girepository-1.0"
+export GIO_MODULE_DIR="$usr/lib/gio/modules"
+export GSETTINGS_SCHEMA_DIR="$usr/share/glib-2.0/schemas"
+export GSETTINGS_BACKEND=memory
+export GTK_EXE_PREFIX="$usr"
+export XDG_DATA_DIRS="$usr/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+
+# Python's TLS uses the bundled OpenSSL, which only knows Debian's certificate path.
+if [ -z "${SSL_CERT_FILE:-}" ]; then
+    for bundle in /etc/ssl/certs/ca-certificates.crt /etc/pki/tls/certs/ca-bundle.crt \
+        /etc/ssl/ca-bundle.pem /etc/pki/tls/cacert.pem /etc/ssl/cert.pem; do
+        if [ -r "$bundle" ]; then
+            export SSL_CERT_FILE="$bundle"
+            break
+        fi
+    done
+fi
+
+# The loader list names absolute paths inside this mount, so it is written per run.
+runtime=${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}
+loaders="$runtime/roseblox-pixbuf-loaders-$$.cache"
+if GDK_PIXBUF_MODULEDIR="$usr/lib/gdk-pixbuf/loaders" \
+    "$usr/lib/gdk-pixbuf/gdk-pixbuf-query-loaders" >"$loaders" 2>/dev/null; then
+    export GDK_PIXBUF_MODULE_FILE="$loaders"
+fi
+
+status=0
+"$usr/bin/python3" -s -m roseblox "$@" || status=$?
+rm -f "$loaders"
+exit "$status"

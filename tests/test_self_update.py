@@ -164,6 +164,11 @@ class AppImageUpdateTests(unittest.TestCase):
         self.assertEqual(b"old", self.target.read_bytes())
         self.assertEqual(["Roseblox-x86_64.AppImage"], os.listdir(self.target.parent))
 
+    def test_unwritable_folder_is_reported(self):
+        missing = self.target.parent / "missing" / "Roseblox-x86_64.AppImage"
+        with self.assertRaisesRegex(SelfUpdateError, "cannot write"):
+            self_update.update_appimage(self.release, missing, opener=_opener(self._responses()))
+
     def test_release_without_appimage_or_checksums_is_refused(self):
         for release in (
             Release("9.0.0", self_update.RELEASES_URL),

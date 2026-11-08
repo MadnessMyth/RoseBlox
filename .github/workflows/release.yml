@@ -13,18 +13,70 @@ on:
 permissions:
   contents: write
 
+env:
+  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+  APPIMAGETOOL_URL: https://github.com/AppImage/appimagetool/releases/download/1.9.0/appimagetool-x86_64.AppImage
+  APPIMAGETOOL_SHA256: 46fdd785094c7f6e545b61afcfb0f3d98d8eab243f644b4b17698c01d06083d1
+
 jobs:
+  packages:
+    # The AppImage bundles this system's libraries, so it runs on systems at least as new.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Build packages
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 libgtk-4-1 libadwaita-1-0 librsvg2-common \
+            adwaita-icon-theme libarchive-tools libglib2.0-bin zsync
+          curl -fsSL -o appimagetool "$APPIMAGETOOL_URL"
+          echo "$APPIMAGETOOL_SHA256  appimagetool" | sha256sum -c -
+          chmod +x appimagetool
+          packaging/debian/build-deb.sh dist
+          APPIMAGE_EXTRACT_AND_RUN=1 python3 packaging/appimage/build_appimage.py --appimagetool "$PWD/appimagetool"
+
+      - name: Check that the AppImage starts its bundled Python
+        run: |
+          status=0
+          APPIMAGE_EXTRACT_AND_RUN=1 dist/Roseblox-x86_64.AppImage --activity-watch 2> usage.txt || status=$?
+          cat usage.txt
+          [ "$status" = 2 ] && grep -q '^Usage: roseblox --activity-watch' usage.txt
+
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum roseblox_*_all.deb Roseblox-x86_64.AppImage > SHA256SUMS && cat SHA256SUMS
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages
+          path: |
+            dist/roseblox_*_all.deb
+            dist/Roseblox-x86_64.AppImage
+            dist/Roseblox-x86_64.AppImage.zsync
+            dist/SHA256SUMS
+          if-no-files-found: error
+
   release:
+    needs: packages
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: packages
+          path: dist
+
       - name: Publish the release from packaging/RELEASE.md
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.event.inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
           case "$TAG" in
@@ -47,3 +99,4 @@ jobs:
           else
             gh release create "$TAG" --verify-tag --title "Roseblox $TAG" --notes-file notes.md --latest="$latest"
           fi
+          gh release upload "$TAG" dist/* --clobber

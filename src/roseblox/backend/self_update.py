@@ -150,7 +150,10 @@ def update_appimage(
     if checksum is None:
         raise SelfUpdateError(f"Release {release.version} does not list a checksum for {APPIMAGE_ASSET}.")
 
-    descriptor, temporary_name = tempfile.mkstemp(prefix=".Roseblox-update-", dir=target.parent)
+    try:
+        descriptor, temporary_name = tempfile.mkstemp(prefix=".Roseblox-update-", dir=target.parent)
+    except OSError as error:
+        raise SelfUpdateError(f"Roseblox cannot write to {target.parent}: {error}") from error
     temporary = Path(temporary_name)
     digest = hashlib.sha256()
     received = 0
