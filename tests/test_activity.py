@@ -422,10 +422,10 @@ class WatcherTests(unittest.TestCase):
         self._write(JOIN, PUBLIC, CONNECTED)
         watcher.poll()
         self.assertEqual([], self.notifications)
-        self.assertIn("custom_text=Server: Frankfurt am Main, Hessen, Germany\n", overlay.path.read_text())
+        self.assertIn("custom_text_center=Server: Frankfurt am Main, Hessen, Germany\n", overlay.path.read_text())
         self.now += BANNER_SECONDS - 1
         watcher.poll()
-        self.assertIn("custom_text=", overlay.path.read_text())
+        self.assertIn("custom_text_center=", overlay.path.read_text())
         self.now += 1
         watcher.poll()
         self.assertEqual(HIDDEN, overlay.path.read_text())

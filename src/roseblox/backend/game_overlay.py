@@ -7,7 +7,7 @@ of its own (``MANGOHUD_CONFIGFILE``), which MangoHud watches and re-reads when i
 - resting: the user's own MangoHud config when the MangoHud overlay is on, otherwise a hidden HUD;
 - banner: only one line of text at the top, for ``BANNER_SECONDS``, then back to resting.
 
-MangoHud's default ("legacy") layout ignores ``custom_text``, so the banner briefly replaces a
+MangoHud's default ("legacy") layout ignores custom text, so the banner briefly replaces a
 user's HUD instead of being added to it.
 """
 
@@ -23,6 +23,8 @@ from . import mangohud
 
 CONFIG_VARIABLE = "MANGOHUD_CONFIGFILE"
 BANNER_SECONDS = 10
+BANNER_FONT_SIZE = 36
+MIN_BANNER_WIDTH = 360
 HIDDEN = "legacy_layout=0\nno_display\n"
 MAX_TEXT = 100
 MAX_USER_CONFIG = 64 * 1024
@@ -47,9 +49,13 @@ def clean_text(text: str) -> str:
 
 
 def banner_config(text: str) -> str:
+    line = clean_text(text)
+    # MangoHud does not widen the HUD for custom text, so a long line would be cut off. Its custom text
+    # font is about 0.28 × font_size wide per character.
+    width = max(MIN_BANNER_WIDTH, round(len(line) * BANNER_FONT_SIZE * 0.3) + 40)
     return (
-        "legacy_layout=0\nposition=top-center\nfont_size=36\nbackground_alpha=0.7\nround_corners=10\n"
-        f"custom_text={clean_text(text)}\n"
+        f"legacy_layout=0\nposition=top-center\nfont_size={BANNER_FONT_SIZE}\nbackground_alpha=0.7\n"
+        f"round_corners=10\nwidth={width}\ncustom_text_center={line}\n"
     )
 
 

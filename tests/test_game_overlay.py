@@ -30,8 +30,17 @@ class OverlayTextTests(unittest.TestCase):
         config = banner_config("Server: Frankfurt, Germany")
         self.assertIn("legacy_layout=0\n", config)
         self.assertIn("position=top-center\n", config)
-        self.assertTrue(config.endswith("custom_text=Server: Frankfurt, Germany\n"))
+        self.assertTrue(config.endswith("custom_text_center=Server: Frankfurt, Germany\n"))
+        self.assertIn(f"width={game_overlay.MIN_BANNER_WIDTH}\n", config)
         self.assertNotIn("no_display", config)
+
+    def test_a_long_banner_is_wide_enough_for_its_text(self):
+        line = "Server: Santa Clara, California, United States of America"
+        config = banner_config(line)
+        width = int(config.split("width=")[1].split("\n")[0])
+        # MangoHud drew this line 572 pixels wide.
+        self.assertGreaterEqual(width, 572 + 40)
+        self.assertLess(width, 760)
 
 
 class PrepareLaunchTests(unittest.TestCase):
@@ -55,7 +64,7 @@ class PrepareLaunchTests(unittest.TestCase):
         self.assertEqual(HIDDEN, overlay.path.read_text())
         self.assertEqual(0o600, overlay.path.stat().st_mode & 0o777)
         overlay.show("Server: Tokyo, Japan")
-        self.assertIn("custom_text=Server: Tokyo, Japan", overlay.path.read_text())
+        self.assertIn("custom_text_center=Server: Tokyo, Japan", overlay.path.read_text())
         GameOverlay(overlay.path).hide()
         self.assertEqual(HIDDEN, overlay.path.read_text())
         overlay.remove()
