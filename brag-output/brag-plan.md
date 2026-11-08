@@ -43,7 +43,7 @@ Synthesised in `work/make_brag.py`. 120 BPM (beat = 0.5 s), A minor, chords Am�
 | 1 | 0.0–2.0 | 4 | Hook | Icon, "Roblox on Linux", then "that feels native." | Icon pops on beat 0; line 2 on beat 1.5 |
 | 2 | 2.0–5.0 | 6 | Reveal | ROSEBLOX · "Player and Studio, one click away" + Home | Cursor glides to Launch, click on 4.0 s (ripple + click) |
 | 3 | 5.0–8.5 | 7 | Highlight: Performance | "Tune it like a native game" · Refresh rate · GameMode · MangoHud | Rows light up on beats (6.0, 6.5, 7.0); cursor switches GameMode and MangoHud on (6.5, 7.0) |
-| 4 | 8.5–12.0 | 7 | Highlight: Mods | "Make Roblox yours" · Fonts · cursors · skyboxes · the classic oof | Rows light up on beats (9.5, 10.0, 10.5, 11.0) |
+| 4 | 8.5–12.0 | 7 | Highlight: Mods | "Make Roblox yours" · Fonts · cursors · skyboxes · sounds | Font, mouse cursor and the mods folder light up on beats (9.5, 10.0, 10.5) |
 | 5 | 12.0–15.5 | 7 | Highlight: While playing | "Show friends what you're playing" · Discord presence · Join Server · server location | Rows light up on beats (13.0, 13.5, 14.0) |
 | 6 | 15.5–19.0 | 7 | Highlight: New in 0.4.2 | "Two Players, side by side" · Duplicate an installation, launch both. | Click Duplicate… (16.5), copy appears (17.0), click Launch on the copy (18.0) |
 | 7 | 19.0–23.0 | 8 | Outro | Icon, "Roseblox", github.com/MadnessMyth/RoseBlox, "Free and open source · Arch Linux and CachyOS", "Not affiliated with Roblox Corporation." | Final chord; fade to black over the last 0.5 s |
