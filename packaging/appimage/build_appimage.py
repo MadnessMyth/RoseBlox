@@ -205,6 +205,7 @@ def build_appdir(appdir: AppDir) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--appimagetool", default=os.environ.get("APPIMAGETOOL", "appimagetool"))
+    parser.add_argument("--runtime-file", type=Path, help="AppImage runtime to embed instead of downloading it")
     parser.add_argument("--output", type=Path, default=ROOT / "dist")
     parser.add_argument("--keep-appdir", action="store_true", help="leave the AppDir in the output folder")
     arguments = parser.parse_args()
@@ -218,7 +219,8 @@ def main() -> int:
         bundled = appdir.bundle_libraries()
         print(f"Bundled {len(bundled)} libraries.")
         output = arguments.output / OUTPUT_NAME
-        run(arguments.appimagetool, "--no-appstream", "-u", UPDATE_INFORMATION, appdir.path, output,
+        runtime = ("--runtime-file", arguments.runtime_file.resolve()) if arguments.runtime_file else ()
+        run(arguments.appimagetool, "--no-appstream", *runtime, "-u", UPDATE_INFORMATION, appdir.path, output,
             env={**os.environ, "ARCH": "x86_64", "VERSION": version()}, cwd=arguments.output)
         if arguments.keep_appdir:
             kept = arguments.output / "Roseblox.AppDir"

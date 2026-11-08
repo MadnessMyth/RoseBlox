@@ -17,6 +17,7 @@ env:
   TAG: ${{ github.event.inputs.tag || github.ref_name }}
   APPIMAGETOOL_URL: https://github.com/AppImage/appimagetool/releases/download/1.9.0/appimagetool-x86_64.AppImage
   APPIMAGETOOL_SHA256: 46fdd785094c7f6e545b61afcfb0f3d98d8eab243f644b4b17698c01d06083d1
+  RUNTIME_URL: https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-x86_64
 
 jobs:
   packages:
@@ -34,11 +35,14 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 libgtk-4-1 libadwaita-1-0 librsvg2-common \
             adwaita-icon-theme libarchive-tools libglib2.0-bin zsync desktop-file-utils
-          curl -fsSL -o appimagetool "$APPIMAGETOOL_URL"
+          download() { curl -fsSL --retry 6 --retry-delay 10 --retry-all-errors -o "$1" "$2"; }
+          download appimagetool "$APPIMAGETOOL_URL"
           echo "$APPIMAGETOOL_SHA256  appimagetool" | sha256sum -c -
+          download runtime-x86_64 "$RUNTIME_URL"
           chmod +x appimagetool
           packaging/debian/build-deb.sh dist
-          APPIMAGE_EXTRACT_AND_RUN=1 python3 packaging/appimage/build_appimage.py --appimagetool "$PWD/appimagetool"
+          APPIMAGE_EXTRACT_AND_RUN=1 python3 packaging/appimage/build_appimage.py \
+            --appimagetool "$PWD/appimagetool" --runtime-file runtime-x86_64
 
       - name: Check that the AppImage starts its bundled Python
         run: |
