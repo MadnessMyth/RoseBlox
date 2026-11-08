@@ -39,6 +39,8 @@ from ..backend.setup import (
     WhilePlaying,
 )
 from ..backend.game_info import LOCATION_SERVICE
+from ..backend.microphone import MAX_RELEASE_DELAY_MS, MICROPHONE_MODES, MODE_HOLD
+from .microphone_hotkey import MicrophoneHotkey
 from ..backend.updates import APP_TITLES, NotificationLog, UpdateCheckerError, _spawn_detached
 from ..activity_service import watcher_arguments
 from .rosemary_text import (
@@ -72,6 +74,7 @@ from ..backend.version_settings import (
 
 
 _NOT_CHECKED = object()
+MICROPHONE_MODE_TITLES = {"toggle": "Toggle", "hold": "Hold"}
 
 
 @dataclass(frozen=True)
@@ -1691,6 +1694,7 @@ class SettingsPage(Gtk.Box):
             row.set_activatable_widget(switch)
             playing_group.add(row)
             self._playing_rows[field_name] = (row, switch)
+        self._build_microphone_rows(playing_group)
         self.playing_message = Gtk.Label(xalign=0, wrap=True)
         self.playing_message.add_css_class("dim-label")
         self.playing_message.set_visible(False)
@@ -1976,6 +1980,8 @@ class SettingsPage(Gtk.Box):
             self._show_close_preferences(setup_state)
             self._show_multiple(setup_state.multiple_players)
             self._show_while_playing(setup_state.while_playing)
+            if setup_state.while_playing.microphone_toggle:
+                self.microphone_hotkey.start()
             self._show_skipped_versions(setup_state.skipped_versions)
             self._set_roseblox_updates(setup_state.roseblox_update_checks)
         enabled = bool(setup_state and setup_state.url_handlers_enabled)
@@ -2145,9 +2151,74 @@ class SettingsPage(Gtk.Box):
             subtitle = "Closes after every launch."
         expander.set_subtitle(subtitle)
 
+    def _build_microphone_rows(self, group: Adw.PreferencesGroup) -> None:
+        self.microphone_row = Adw.ExpanderRow.new()
+        self.microphone_row.set_title("Microphone toggle")
+        self.microphone_row.set_subtitle(
+            "Keeps Roblox's microphone silent until you use a hotkey. Roblox stays connected to voice chat, "
+            "and other apps' microphones are not affected."
+        )
+        self.microphone_row.set_show_enable_switch(True)
+        self.microphone_row.set_enable_expansion(False)
+        self.microphone_row.connect("notify::enable-expansion", self._microphone_changed)
+
+        self.hotkey_row = Adw.ActionRow.new()
+        self.hotkey_row.set_title("Microphone hotkey")
+        self.hotkey_row.set_subtitle("Set by your desktop, so it works while Roblox has focus.")
+        self.hotkey_button = Gtk.Button.new_with_label("Set Hotkey")
+        self.hotkey_button.set_valign(Gtk.Align.CENTER)
+        self.hotkey_button.connect("clicked", lambda *_: self.microphone_hotkey.change())
+        self.hotkey_row.add_suffix(self.hotkey_button)
+        self.microphone_row.add_row(self.hotkey_row)
+        self.microphone_hotkey = MicrophoneHotkey(self._hotkey_changed)
+
+        self.microphone_mode_row = Adw.ComboRow.new()
+        self.microphone_mode_row.set_title("Mode")
+        self.microphone_mode_row.set_model(Gtk.StringList.new([MICROPHONE_MODE_TITLES[mode] for mode in MICROPHONE_MODES]))
+        self.microphone_mode_row.connect("notify::selected", self._microphone_changed)
+        self.microphone_row.add_row(self.microphone_mode_row)
+
+        self.release_delay_row = Adw.SpinRow.new_with_range(0, MAX_RELEASE_DELAY_MS, 50)
+        self.release_delay_row.set_title("Release delay")
+        self.release_delay_row.set_subtitle("Milliseconds the microphone stays on after you let go of the hotkey.")
+        self.release_delay_row.connect("notify::value", self._microphone_changed)
+        self.microphone_row.add_row(self.release_delay_row)
+        group.add(self.microphone_row)
+
+    def _hotkey_changed(self, text: str, can_change: bool) -> None:
+        self.hotkey_row.set_subtitle(text)
+        self.hotkey_button.set_visible(not self.microphone_hotkey.unavailable)
+        self.hotkey_button.set_sensitive(can_change)
+        self.hotkey_button.set_label("Change Hotkey" if self.microphone_hotkey.trigger else "Set Hotkey")
+
+    def _microphone_changed(self, *_args) -> None:
+        if self._playing_block:
+            return
+        mode = MICROPHONE_MODES[min(self.microphone_mode_row.get_selected(), len(MICROPHONE_MODES) - 1)]
+        enabled = self.microphone_row.get_enable_expansion()
+        self._save_while_playing(replace(
+            self._current_while_playing(),
+            microphone_toggle=enabled,
+            microphone_mode=mode,
+            microphone_release_delay_ms=int(self.release_delay_row.get_value()),
+        ))
+        if enabled:
+            self.microphone_hotkey.start()
+
+    def _show_microphone(self, settings: WhilePlaying) -> None:
+        self.microphone_row.set_enable_expansion(settings.microphone_toggle)
+        self.microphone_mode_row.set_selected(MICROPHONE_MODES.index(settings.microphone_mode))
+        self.release_delay_row.set_value(settings.microphone_release_delay_ms)
+        hold = settings.microphone_mode == MODE_HOLD
+        self.release_delay_row.set_visible(hold)
+        self.microphone_mode_row.set_subtitle(
+            "Talk while the hotkey is held down." if hold else "Press the hotkey once to talk and again to mute."
+        )
+
     def _show_while_playing(self, settings: WhilePlaying) -> None:
         self._playing_block = True
         try:
+            self._show_microphone(settings)
             for field_name, (_row, switch) in self._playing_rows.items():
                 switch.set_active(getattr(settings, field_name))
             if self.discord_id_row is not None and self.discord_id_row.get_text() != settings.discord_application_id:

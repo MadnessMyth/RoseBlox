@@ -415,6 +415,78 @@ class RealWindowTests(unittest.TestCase):
         )
         self.assertIn("ipwho.is", settings._playing_rows["server_location"][0].get_subtitle())
 
+    def test_microphone_toggle_rows_save_and_ask_the_desktop_for_the_hotkey(self):
+        from roseblox.backend.global_shortcuts import Shortcut
+        from roseblox.backend.setup import SetupStore
+
+        sessions = []
+
+        class FakeSession:
+            def __init__(self, _connection, **handlers):
+                self.handlers = handlers
+                self.configured = 0
+                sessions.append(self)
+
+            def start(self, shortcuts, done):
+                self.shortcuts = shortcuts
+                self.done = done
+
+            def configure(self):
+                self.configured += 1
+                return True
+
+            def close(self):
+                pass
+
+        with patch("roseblox.pages.microphone_hotkey.open_connection", return_value=object()), patch(
+            "roseblox.pages.microphone_hotkey.ShortcutsSession", FakeSession
+        ):
+            window = self._loaded_window()
+            settings = window.settings_page
+            self.assertEqual([], sessions)
+            self.assertFalse(settings.release_delay_row.get_visible())
+            settings.microphone_row.set_enable_expansion(True)
+            [session] = sessions
+            self.assertEqual([("microphone", "Roblox microphone (push to talk or toggle)")], session.shortcuts)
+            self.assertEqual("Asking the desktop…", settings.hotkey_row.get_subtitle())
+            self.assertFalse(settings.hotkey_button.get_sensitive())
+            session.done([Shortcut("microphone", "", "")], None)
+            self.assertEqual("No key assigned yet.", settings.hotkey_row.get_subtitle())
+            settings.hotkey_button.emit("clicked")
+            self.assertEqual(1, session.configured)
+            session.handlers["on_changed"]([Shortcut("microphone", "", "Ctrl+M")])
+            self.assertEqual("Hotkey: Ctrl+M.", settings.hotkey_row.get_subtitle())
+            self.assertEqual("Change Hotkey", settings.hotkey_button.get_label())
+
+            settings.microphone_mode_row.set_selected(1)
+            self.assertTrue(settings.release_delay_row.get_visible())
+            settings.release_delay_row.set_value(400)
+        state = SetupStore(self.config_home / "roseblox" / "setup.json").load().while_playing
+        self.assertEqual((True, "hold", 400), (
+            state.microphone_toggle, state.microphone_mode, state.microphone_release_delay_ms,
+        ))
+
+    def test_without_global_shortcuts_the_hotkey_row_points_to_roseblox_mic(self):
+        sessions = []
+
+        class FakeSession:
+            def __init__(self, _connection, **_handlers):
+                sessions.append(self)
+
+            def start(self, _shortcuts, done):
+                done(None, "This desktop has no global shortcut service.")
+
+        with patch("roseblox.pages.microphone_hotkey.open_connection", return_value=object()), patch(
+            "roseblox.pages.microphone_hotkey.ShortcutsSession", FakeSession
+        ):
+            settings = self._loaded_window().settings_page
+            settings.microphone_row.set_enable_expansion(True)
+        self.assertIn("roseblox --mic toggle", settings.hotkey_row.get_subtitle())
+        self.assertFalse(settings.hotkey_button.get_visible())
+        settings.microphone_row.set_enable_expansion(False)
+        settings.microphone_row.set_enable_expansion(True)
+        self.assertEqual(1, len(sessions))
+
     def test_the_activity_watcher_starts_only_when_a_while_playing_feature_is_on(self):
         from unittest import mock
 
