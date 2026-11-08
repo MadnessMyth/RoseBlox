@@ -1,0 +1,1 @@
+Roblox on Linux that feels native. Roseblox launches Roblox Player and Studio through Rosemary, with GameMode, MangoHud, mods, Discord presence and, new in 0.4.2, two Players side by side. Free and open source: github.com/MadnessMyth/RoseBlox
