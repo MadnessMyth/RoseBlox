@@ -457,6 +457,34 @@ class RealWindowTests(unittest.TestCase):
         )
         self.assertIn("ipwho.is", settings._playing_rows["server_location"][0].get_subtitle())
 
+    def test_in_game_server_location_switch_shows_under_the_notification_and_warns_without_mangohud(self):
+        from roseblox.backend.setup import SetupStore
+
+        window = self._loaded_window()
+        settings = window.settings_page
+        _location_row, location = settings._playing_rows["server_location"]
+        in_game_row, in_game = settings._playing_rows["server_location_in_game"]
+        self.assertEqual("Show inside the game", in_game_row.get_title())
+        self.assertFalse(in_game_row.get_visible())
+        with patch("roseblox.pages.manager_page.mangohud.layer_installed", return_value=False):
+            location.set_active(True)
+        self.assertTrue(in_game_row.get_visible())
+        self.assertTrue(settings.in_game_warning.get_visible())
+        self.assertIn("MangoHud, which is not installed", in_game_row.get_subtitle())
+        self.assertIn("desktop notification", in_game_row.get_subtitle())
+        with patch("roseblox.pages.manager_page.mangohud.layer_installed", return_value=True):
+            in_game.set_active(True)
+        self.assertFalse(settings.in_game_warning.get_visible())
+        self.assertIn("top of the game", in_game_row.get_subtitle())
+        state = SetupStore(self.config_home / "roseblox" / "setup.json").load()
+        self.assertTrue(state.while_playing.server_location_in_game)
+        from roseblox.pages.manager_page import _wants_in_game_banner
+
+        self.assertTrue(_wants_in_game_banner(state))
+        location.set_active(False)
+        self.assertFalse(in_game_row.get_visible())
+        self.assertFalse(_wants_in_game_banner(window.setup_state))
+
     def test_microphone_toggle_rows_save_and_ask_the_desktop_for_the_hotkey(self):
         from roseblox.backend.global_shortcuts import Shortcut
         from roseblox.backend.setup import SetupStore

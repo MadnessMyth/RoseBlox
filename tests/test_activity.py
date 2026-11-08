@@ -9,6 +9,7 @@ import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from roseblox.activity_service import ActivityWatcher, watcher_arguments
 from roseblox.backend.activity import ActivityTracker, GameJoined, GameLeft, LogFollower, find_roblox_log, public_address
@@ -404,6 +405,78 @@ class WatcherTests(unittest.TestCase):
         self._write(DISCONNECT, JOIN, PRIVATE, CONNECTED)
         watcher.poll()
         self.assertEqual(["View Game"], [b["label"] for b in FakePresence.instances[-1].activities[-1][1]["buttons"]])
+
+    def _overlay_watcher(self, **overrides):
+        from roseblox.backend.game_overlay import HIDDEN, GameOverlay
+
+        overlay = GameOverlay.create(Path(self.directory.name) / "overlay", HIDDEN)
+        self.now = 1000.0
+        watcher = self._watcher(overlay=overlay, clock=lambda: self.now, **overrides)
+        return watcher, overlay
+
+    def test_server_location_banner_shows_inside_the_game_then_hides(self):
+        from roseblox.backend.game_overlay import BANNER_SECONDS, HIDDEN
+
+        self.settings = WhilePlaying(server_location=True, server_location_in_game=True)
+        watcher, overlay = self._overlay_watcher()
+        self._write(JOIN, PUBLIC, CONNECTED)
+        watcher.poll()
+        self.assertEqual([], self.notifications)
+        self.assertIn("custom_text=Server: Frankfurt am Main, Hessen, Germany\n", overlay.path.read_text())
+        self.now += BANNER_SECONDS - 1
+        watcher.poll()
+        self.assertIn("custom_text=", overlay.path.read_text())
+        self.now += 1
+        watcher.poll()
+        self.assertEqual(HIDDEN, overlay.path.read_text())
+
+    def test_without_the_in_game_switch_the_location_is_a_desktop_notification(self):
+        from roseblox.backend.game_overlay import HIDDEN
+
+        self.settings = WhilePlaying(server_location=True)
+        watcher, overlay = self._overlay_watcher()
+        self._write(JOIN, PUBLIC, CONNECTED)
+        watcher.poll()
+        self.assertEqual(1, len(self.notifications))
+        self.assertEqual(HIDDEN, overlay.path.read_text())
+
+    def test_a_broken_banner_falls_back_to_a_notification(self):
+        self.settings = WhilePlaying(server_location=True, server_location_in_game=True)
+        watcher, overlay = self._overlay_watcher()
+        overlay.path.chmod(0o400)
+        self._write(JOIN, PUBLIC, CONNECTED)
+        try:
+            with patch("sys.stderr"):
+                watcher.poll()
+        finally:
+            overlay.path.chmod(0o600)
+        self.assertEqual(1, len(self.notifications))
+
+    def test_banner_file_is_removed_only_after_roblox_exits(self):
+        from roseblox.backend.game_overlay import HIDDEN
+
+        self.settings = WhilePlaying(server_location=True, server_location_in_game=True)
+        watcher, overlay = self._overlay_watcher()
+        self._write(JOIN, PUBLIC, CONNECTED)
+        watcher.poll()
+        watcher._finish_overlay()
+        self.assertEqual(HIDDEN, overlay.path.read_text())
+        self.start_time = 1
+        watcher._finish_overlay()
+        self.assertFalse(overlay.path.exists())
+        self.assertFalse(overlay.resting_path.exists())
+
+    def test_overlay_path_is_passed_to_the_watcher(self):
+        from roseblox.activity_service import main, watcher_arguments
+
+        arguments = watcher_arguments(1, 2, Path("/tmp/l"), Path("/tmp/r"), overlay=Path("/run/o.conf"))
+        self.assertEqual(["/tmp/l", "/tmp/r", "--overlay", "/run/o.conf"], arguments[-4:])
+        with patch("roseblox.activity_service.ActivityWatcher") as watcher, patch("signal.signal"):
+            main(["roseblox", "--activity-watch", "1", "2", "/tmp/l", "--overlay", "/run/o.conf"])
+        self.assertEqual(Path("/run/o.conf"), watcher.call_args.kwargs["overlay"].path)
+        self.assertIsNone(watcher.call_args.args[3])
+        with patch("sys.stderr"):
+            self.assertEqual(2, main(["roseblox", "--activity-watch", "1", "2", "/tmp/l", "--overlay"]))
 
     def test_returning_home_closes_roblox_only_when_asked(self):
         watcher = self._watcher()

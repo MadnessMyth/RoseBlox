@@ -75,6 +75,7 @@ class WhilePlaying:
     microphone_sound_volume: int = DEFAULT_VOLUME
     microphone_sound_on: str = ""
     microphone_sound_off: str = ""
+    server_location_in_game: bool = False
 
     @property
     def any_enabled(self) -> bool:
@@ -88,8 +89,8 @@ class WhilePlaying:
 
     def validate(self) -> "WhilePlaying":
         for value in (
-            self.discord_presence, self.discord_join_button, self.server_location, self.close_on_leave,
-            self.microphone_toggle, self.microphone_inverted, self.microphone_sounds,
+            self.discord_presence, self.discord_join_button, self.server_location, self.server_location_in_game,
+            self.close_on_leave, self.microphone_toggle, self.microphone_inverted, self.microphone_sounds,
         ):
             if not isinstance(value, bool):
                 raise ValueError("While Playing switches must be on or off.")
@@ -282,6 +283,7 @@ class SetupStore:
             "discord_join_button": settings.discord_join_button,
             "discord_application_id": settings.discord_application_id,
             "server_location": settings.server_location,
+            "server_location_in_game": settings.server_location_in_game,
             "close_on_leave": settings.close_on_leave,
             "microphone_toggle": settings.microphone_toggle,
             "microphone_mode": settings.microphone_mode,
@@ -330,7 +332,8 @@ class SetupStore:
                 name: value.get(name, getattr(defaults, name))
                 for name in (
                     "discord_presence", "discord_join_button", "discord_application_id",
-                    "server_location", "close_on_leave", "microphone_toggle", "microphone_mode",
+                    "server_location", "server_location_in_game", "close_on_leave", "microphone_toggle",
+                    "microphone_mode",
                     "microphone_release_delay_ms", "microphone_inverted", "microphone_sounds",
                     "microphone_sound_volume", "microphone_sound_on", "microphone_sound_off",
                 )

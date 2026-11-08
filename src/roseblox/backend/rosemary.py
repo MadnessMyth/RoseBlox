@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
 
-from . import gamemode
+from . import game_overlay, gamemode
 from .fast_flags import FastFlagError, write_bundle_flags
 from .gpu import list_gpus
 from .launch_config import AppLaunchConfig, effective_arguments, effective_environment
@@ -66,6 +66,8 @@ class LaunchSession:
     gamemode_error: str | None = None
     mods_message: str | None = None
     roblox_log_directory: Path | None = None
+    game_overlay: object | None = None
+    game_overlay_problem: str | None = None
 
     def output_text(self) -> str:
         """Rosemary's output so far: the end of its log file, or captured pipe output."""
@@ -451,12 +453,14 @@ def launch_application(
     launch_config: AppLaunchConfig | None = None,
     flag_backup_directory: Path | None = None,
     direct: bool = False,
+    in_game_banner: bool = False,
 ) -> LaunchSession:
     """Start Rosemary asynchronously and return a bundle-bound process session.
 
     Rosemary writes to a log file in its own session rather than to pipes, so Roblox
     keeps running (and logging) after Roseblox exits. With ``launch_config`` the
     bundle's FastFlags are written first, and its environment and arguments apply.
+    ``in_game_banner`` prepares MangoHud to show the server location inside the Player.
     """
     app_type = installation.app_type if isinstance(installation, InstallationRecord) else str(installation["app_type"])
     bundle_path = installation.bundle_path if isinstance(installation, InstallationRecord) else str(installation["bundle_path"])
@@ -494,15 +498,24 @@ def launch_application(
         log_path, log_stream = _open_launch_log(log_directory or default_log_directory(), app_type)
     except OSError as error:
         raise RosemaryUnavailableError(f"Could not create the Rosemary log file: {error}") from error
+    overlay, overlay_problem = None, None
+    if in_game_banner and app_type == "player":
+        overlay, changes, overlay_problem = game_overlay.prepare_launch(environment, Path(status.executable).name)
+        environment.update(changes)
     with log_stream:
-        process = subprocess.Popen(
-            arguments,
-            stdin=subprocess.DEVNULL,
-            stdout=log_stream,
-            stderr=subprocess.STDOUT,
-            env=environment,
-            start_new_session=True,
-        )
+        try:
+            process = subprocess.Popen(
+                arguments,
+                stdin=subprocess.DEVNULL,
+                stdout=log_stream,
+                stderr=subprocess.STDOUT,
+                env=environment,
+                start_new_session=True,
+            )
+        except BaseException:
+            if overlay is not None:
+                overlay.remove()
+            raise
     done = threading.Event()
     done.set()
     gamemode_error = None
@@ -521,4 +534,6 @@ def launch_application(
         log_path=log_path,
         gamemode_error=gamemode_error,
         roblox_log_directory=roblox_log_directory(environment) if app_type == "player" else None,
+        game_overlay=overlay,
+        game_overlay_problem=overlay_problem,
     )

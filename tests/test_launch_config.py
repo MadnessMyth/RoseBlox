@@ -358,7 +358,30 @@ class LaunchConfigStoreTests(unittest.TestCase):
 
 
 class LaunchIntegrationTests(unittest.TestCase):
-    def _launch(self, root, config, *, guest_arguments=()):
+    def test_in_game_banner_loads_mangohud_with_its_own_config(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch("roseblox.backend.game_overlay.mangohud.layer_installed", lambda env: True):
+                _bundle, popen, session = self._launch(
+                    root, AppLaunchConfig(), in_game_banner=True, extra_environment={"XDG_RUNTIME_DIR": str(root)}
+                )
+            environment = popen.call_args.kwargs["env"]
+            self.assertEqual("1", environment["MANGOHUD"])
+            self.assertEqual(str(session.game_overlay.path), environment["MANGOHUD_CONFIGFILE"])
+            self.assertTrue(session.game_overlay.path.is_file())
+            self.assertIsNone(session.game_overlay_problem)
+
+            with patch("roseblox.backend.game_overlay.mangohud.layer_installed", lambda env: False):
+                _bundle, popen, session = self._launch(root, AppLaunchConfig(), in_game_banner=True)
+            self.assertNotIn("MANGOHUD", popen.call_args.kwargs["env"])
+            self.assertIsNone(session.game_overlay)
+            self.assertIn("not installed", session.game_overlay_problem)
+
+            _bundle, popen, session = self._launch(root, AppLaunchConfig(), in_game_banner=False)
+            self.assertNotIn("MANGOHUD_CONFIGFILE", popen.call_args.kwargs["env"])
+            self.assertIsNone(session.game_overlay)
+
+    def _launch(self, root, config, *, guest_arguments=(), extra_environment=None, **options):
         bundle = root / "RobloxPlayer.app"
         (bundle / "Contents" / "MacOS").mkdir(parents=True, exist_ok=True)
         executable = root / "rosemary"
@@ -367,17 +390,18 @@ class LaunchIntegrationTests(unittest.TestCase):
         fake_process = subprocess.CompletedProcess([], 0)
         fake_process.pid = 34567
         fake_process.poll = lambda: None
-        with patch.dict(os.environ, {"HOME": str(root)}, clear=True):
+        with patch.dict(os.environ, {"HOME": str(root), **(extra_environment or {})}, clear=True):
             with patch("roseblox.backend.rosemary.subprocess.Popen", return_value=fake_process) as popen:
-                launch_application(
+                session = launch_application(
                     {"app_type": "player", "bundle_path": str(bundle)},
                     RosemaryStatus(str(executable)),
                     guest_arguments=guest_arguments,
                     log_directory=root / "logs",
                     launch_config=config,
                     flag_backup_directory=root / "backups",
+                    **options,
                 )
-        return bundle, popen
+        return (bundle, popen, session) if options or extra_environment else (bundle, popen)
 
     def test_configuration_reaches_rosemary_and_the_bundle(self):
         with tempfile.TemporaryDirectory() as directory:

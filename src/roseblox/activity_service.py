@@ -1,7 +1,7 @@
 """Windowless companion of one Roblox Player launch: Discord presence, server location, close on leave,
 and the microphone toggle.
 
-It runs as ``roseblox --activity-watch PID START_TIME LOG`` so it keeps working
+It runs as ``roseblox --activity-watch PID START_TIME LOG [ROBLOX_LOG_DIRECTORY] [--overlay CONFIG]`` so it keeps working
 after the Roseblox window closes, and exits when that Rosemary process does.
 """
 
@@ -24,10 +24,11 @@ from .backend.discord_rpc import (
     valid_application_id,
 )
 from .backend.game_info import GameInfoError, fetch_game, locate_server
+from .backend.game_overlay import BANNER_SECONDS, GameOverlay
 from .backend.rosemary import read_process_snapshot
 from .backend.setup import SetupSettingsError, SetupStore, WhilePlaying
 
-USAGE = "Usage: roseblox --activity-watch PID START_TIME LOG [ROBLOX_LOG_DIRECTORY]"
+USAGE = "Usage: roseblox --activity-watch PID START_TIME LOG [ROBLOX_LOG_DIRECTORY] [--overlay CONFIG]"
 POLL_SECONDS = 1.0
 DISCORD_RETRY_SECONDS = 30.0
 LOG_SEARCH_SECONDS = 5.0
@@ -79,6 +80,7 @@ class ActivityWatcher:
         process_snapshot=read_process_snapshot,
         kill=os.kill,
         microphone_factory=None,
+        overlay: GameOverlay | None = None,
     ) -> None:
         self.pid = pid
         self.start_time = start_time
@@ -105,6 +107,8 @@ class ActivityWatcher:
         self.microphone_factory = microphone_factory or _microphone_service
         self.microphone = None
         self._microphone_settings: tuple | None = None
+        self.overlay = overlay
+        self._banner_until: float | None = None
 
     def settings(self) -> WhilePlaying:
         try:
@@ -127,6 +131,7 @@ class ActivityWatcher:
         finally:
             self._clear_presence()
             self._stop_microphone()
+            self._finish_overlay()
         return 0
 
     def update_microphone(self) -> None:
@@ -165,6 +170,9 @@ class ActivityWatcher:
 
     def poll(self) -> None:
         self.update_microphone()
+        if self._banner_until is not None and self.clock() >= self._banner_until:
+            self._banner_until = None
+            self._overlay_call(self.overlay.hide)
         source = self._source()
         if source is not self.follower:
             self.follower.read_lines()
@@ -186,7 +194,7 @@ class ActivityWatcher:
             except GameInfoError as error:
                 _log(f"server location: {error}")
             else:
-                self._notify("Connected to a Roblox server", f"The server is in {location}.")
+                self.show_location(location, settings)
         application_id = effective_application_id(settings.discord_application_id)
         if not settings.discord_presence or not valid_application_id(application_id):
             return
@@ -250,6 +258,31 @@ class ActivityWatcher:
         self.presence.close()
         self.presence = None
 
+    def show_location(self, location: str, settings: WhilePlaying) -> None:
+        """Inside the game when its banner is ready, else as a desktop notification."""
+        if (
+            self.overlay is not None and settings.server_location_in_game
+            and self._overlay_call(self.overlay.show, f"Server: {location}")
+        ):
+            self._banner_until = self.clock() + BANNER_SECONDS
+            return
+        self._notify("Connected to a Roblox server", f"The server is in {location}.")
+
+    def _overlay_call(self, method, *arguments) -> bool:
+        try:
+            method(*arguments)
+        except OSError as error:
+            _log(f"in-game banner: {error}")
+            return False
+        return True
+
+    def _finish_overlay(self) -> None:
+        # MangoHud falls back to its full default HUD if its config file disappears mid-game.
+        if self.overlay is None:
+            return
+        self._banner_until = None
+        self._overlay_call(self.overlay.hide if self.alive() else self.overlay.remove)
+
     def _notify(self, summary: str, body: str) -> None:
         try:
             self.notify(summary, body)
@@ -263,15 +296,27 @@ def _microphone_service(mode: str, release_delay_ms: int, inverted: bool, sounds
     return MicrophoneService(mode, release_delay_ms, inverted, sounds)
 
 
-def watcher_arguments(pid: int, start_time: int, log_path: Path, roblox_logs: Path | None = None) -> list[str]:
+def watcher_arguments(
+    pid: int, start_time: int, log_path: Path, roblox_logs: Path | None = None, *, overlay: Path | None = None
+) -> list[str]:
     executable = appimage_path()
     command = [executable] if executable else [sys.executable, "-m", "roseblox"]
     arguments = [*command, "--activity-watch", str(pid), str(start_time), str(log_path)]
-    return arguments if roblox_logs is None else [*arguments, str(roblox_logs)]
+    if roblox_logs is not None:
+        arguments.append(str(roblox_logs))
+    return arguments if overlay is None else [*arguments, "--overlay", str(overlay)]
 
 
 def main(argv: list[str]) -> int:
     arguments = [item for item in argv[1:] if item != "--activity-watch"]
+    overlay = None
+    if "--overlay" in arguments:
+        index = arguments.index("--overlay")
+        if index + 1 >= len(arguments):
+            print(USAGE, file=sys.stderr)
+            return 2
+        overlay = GameOverlay(Path(arguments[index + 1]))
+        del arguments[index:index + 2]
     if len(arguments) not in (3, 4) or not arguments[0].isdigit() or not arguments[1].isdigit():
         print(USAGE, file=sys.stderr)
         return 2
@@ -279,4 +324,4 @@ def main(argv: list[str]) -> int:
     roblox_logs = Path(arguments[3]) if len(arguments) == 4 else None
     # Unwind on logout or `kill` too, so a muted Roblox microphone is opened again.
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
-    return ActivityWatcher(pid, start_time, log_path, roblox_logs).run()
+    return ActivityWatcher(pid, start_time, log_path, roblox_logs, overlay=overlay).run()

@@ -38,7 +38,9 @@ from ..backend.setup import (
     SetupSettingsError,
     WhilePlaying,
 )
+from ..backend import mangohud
 from ..backend.game_info import LOCATION_SERVICE
+from ..backend.system import install_hint
 from ..backend.microphone import MAX_RELEASE_DELAY_MS, MICROPHONE_MODES, MODE_HOLD, microphone_problem
 from ..backend.microphone_sounds import (
     MAX_VOLUME, OFF, ON, SOUND_SUFFIXES, MicrophoneSoundError, SoundPlayer, sound_problem, store_sound,
@@ -78,6 +80,11 @@ from ..backend.version_settings import (
 
 _NOT_CHECKED = object()
 MICROPHONE_MODE_TITLES = {"toggle": "Toggle", "hold": "Hold"}
+
+
+def _wants_in_game_banner(setup_state) -> bool:
+    settings = getattr(setup_state, "while_playing", None)
+    return bool(settings is not None and settings.server_location and settings.server_location_in_game)
 
 
 @dataclass(frozen=True)
@@ -1258,6 +1265,7 @@ class InstallationPage(Gtk.Box):
                 plain_ctrl_click=getattr(setup_state, "plain_ctrl_click", True),
                 launch_config=LaunchConfigStore().load(record.app_type),
                 direct=self._multiple_allowed(record),
+                in_game_banner=_wants_in_game_banner(setup_state),
             )
             session.mods_message = mods_message
             wait_for_running(session)
@@ -1318,6 +1326,7 @@ class InstallationPage(Gtk.Box):
                     session.start_time,
                     session.log_path,
                     getattr(session, "roblox_log_directory", None),
+                    overlay=getattr(getattr(session, "game_overlay", None), "path", None),
                 ),
                 default_log_directory() / "activity.log",
             )
@@ -1698,6 +1707,7 @@ class SettingsPage(Gtk.Box):
             ("discord_presence", "Discord Rich Presence"),
             ("discord_join_button", "Join Server button"),
             ("server_location", "Server location notification"),
+            ("server_location_in_game", "Show inside the game"),
             ("close_on_leave", "Close Roblox when leaving a game"),
         ):
             row = Adw.ActionRow.new()
@@ -1709,6 +1719,10 @@ class SettingsPage(Gtk.Box):
             row.set_activatable_widget(switch)
             playing_group.add(row)
             self._playing_rows[field_name] = (row, switch)
+        self.in_game_warning = Gtk.Image.new_from_icon_name("dialog-warning-symbolic")
+        self.in_game_warning.set_tooltip_text("MangoHud is not installed")
+        self.in_game_warning.set_visible(False)
+        self._playing_rows["server_location_in_game"][0].add_prefix(self.in_game_warning)
         self._build_microphone_rows(playing_group)
         self.playing_message = Gtk.Label(xalign=0, wrap=True)
         self.playing_message.add_css_class("dim-label")
@@ -2377,9 +2391,26 @@ class SettingsPage(Gtk.Box):
             f"Says where the server is when you join one. The server's address, not yours, is looked up with "
             f"{LOCATION_SERVICE}."
         )
+        self._show_in_game_banner(settings)
         self._playing_rows["close_on_leave"][0].set_subtitle(
             "Closes Roblox when you leave a game, instead of going back to the Roblox home screen."
         )
+
+    def _show_in_game_banner(self, settings: WhilePlaying) -> None:
+        row, _switch = self._playing_rows["server_location_in_game"]
+        row.set_visible(settings.server_location)
+        installed = mangohud.layer_installed()
+        self.in_game_warning.set_visible(not installed)
+        if installed:
+            row.set_subtitle(
+                "Shows the location at the top of the game for 10 seconds instead of a desktop notification, "
+                "which is hidden while Roblox is fullscreen. Drawn by MangoHud; applies from the next launch."
+            )
+        else:
+            row.set_subtitle(
+                "Needs MangoHud, which is not installed. " + install_hint("mangohud", "Install MangoHud first.")
+                + " Until then you get a desktop notification."
+            )
 
     def _current_while_playing(self) -> WhilePlaying:
         return getattr(getattr(self.window, "setup_state", None), "while_playing", None) or WhilePlaying()
