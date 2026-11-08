@@ -11,7 +11,7 @@
 - [ ] Run two Players at once with **Allow more than one Roblox Player** and the current Rosemary.
 - [ ] Run the unittest suite and build `packaging/arch-git` with `makepkg` on Arch Linux.
 - [x] Create the annotated `v0.6.0` Git tag on the release commit.
-- [ ] Point `packaging/arch/PKGBUILD` at the `v0.6.0` tag, record the archive checksum, and update `.SRCINFO`.
+- [x] Point `packaging/arch/PKGBUILD` at the `v0.6.0` tag, record the archive checksum, and update `.SRCINFO`.
 - [x] The release workflow builds the `.deb` and the AppImage, and creates the GitHub release for `v0.6.0` from these notes with both attached, when the tag is pushed.
 
 ## Release notes — v0.6.0
