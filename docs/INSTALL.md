@@ -112,6 +112,8 @@ If it says `~/.local/bin` is not in your `PATH`, log out and back in. Most distr
 
 Open **Roseblox** from your application menu. On these systems the Rosemary step offers **Download the AppImage** instead of the AUR:
 
+![Setup on Ubuntu after downloading the Rosemary AppImage](screenshots/23-setup-appimage.png)
+
 1. Click **Open Releases Page**. Rosemary's official releases page opens in your browser.
 2. Download the file ending in `x86_64.AppImage`, for example `Rosemary-0.5.0-x86_64.AppImage`.
 3. Roseblox looks in your Downloads folder, `~/Applications`, `~/.local/bin` and `~/bin`. When it finds the file, **Rosemary AppImage found** appears. Click **Use This File**; Roseblox makes the file executable and uses it from where it is. If you move or delete the file later, choose it again in setup or **Settings → Advanced**.
