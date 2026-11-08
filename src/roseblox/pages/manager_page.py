@@ -48,6 +48,8 @@ from ..backend.microphone_sounds import (
 from .microphone_hotkey import MicrophoneHotkey
 from ..backend.updates import APP_TITLES, NotificationLog, UpdateCheckerError, _spawn_detached
 from ..activity_service import watcher_arguments
+from ..backend.playtime import PlaytimeError, PlaytimeStore, describe as describe_playtime
+from ..playtime_service import tracker_arguments
 from .rosemary_text import (
     ABOUT_ROW_SUBTITLES,
     INSTALL_BUTTON_LABELS,
@@ -247,6 +249,33 @@ class InstallationPage(Gtk.Box):
         self.installed_versions_label.set_wrap(True)
         self.installed_versions_label.add_css_class("dim-label")
         controls.append(self.installed_versions_label)
+        playtime_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        playtime_icon = Gtk.Image.new_from_icon_name("preferences-system-time-symbolic")
+        playtime_icon.add_css_class("dim-label")
+        playtime_row.append(playtime_icon)
+        self.playtime_label = Gtk.Label()
+        self.playtime_label.set_xalign(0)
+        self.playtime_label.set_wrap(True)
+        self.playtime_label.set_hexpand(True)
+        self.playtime_label.add_css_class("dim-label")
+        playtime_row.append(self.playtime_label)
+        self.playtime_reset_button = Gtk.Button.new_with_label("Reset")
+        self.playtime_reset_button.add_css_class("flat")
+        self.playtime_reset_button.set_valign(Gtk.Align.CENTER)
+        self.playtime_reset_button.set_tooltip_text(f"Set the {APP_TITLES[self.app_type]} playtime back to zero")
+        self.playtime_reset_button.connect("clicked", self._on_playtime_reset_clicked)
+        playtime_row.append(self.playtime_reset_button)
+        controls.append(playtime_row)
+        self.playtime_store = PlaytimeStore()
+        self._playtime_monitor = None
+        try:
+            self._playtime_monitor = Gio.File.new_for_path(str(self.playtime_store.path)).monitor_file(
+                Gio.FileMonitorFlags.NONE, None
+            )
+            self._playtime_monitor.connect("changed", lambda *_: self.show_playtime())
+        except GLib.Error:
+            pass
+        self.show_playtime()
         action_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         self.download_button = Gtk.Button.new_with_label("Download and Install Latest")
         self.download_button.add_css_class("suggested-action")
@@ -258,6 +287,40 @@ class InstallationPage(Gtk.Box):
         self.recovery_box.set_visible(False)
         controls.append(self.recovery_box)
         self.append(controls)
+
+    def show_playtime(self) -> None:
+        try:
+            playtime = self.playtime_store.get(self.app_type)
+        except PlaytimeError as error:
+            self.playtime_label.set_text(str(error))
+            self.playtime_reset_button.set_visible(False)
+            return
+        self.playtime_label.set_text(describe_playtime(playtime, APP_TITLES[self.app_type]))
+        self.playtime_reset_button.set_visible(playtime.sessions > 0 or playtime.seconds > 0)
+
+    def _on_playtime_reset_clicked(self, _button: Gtk.Button) -> None:
+        title = APP_TITLES[self.app_type]
+        dialog = Adw.MessageDialog.new(
+            self.window,
+            f"Reset {title} playtime?",
+            f"The time played and the number of sessions for {title} go back to zero. This cannot be undone.",
+        )
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("reset", "Reset")
+        dialog.set_response_appearance("reset", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response("cancel")
+        dialog.set_close_response("cancel")
+        dialog.connect("response", self._on_playtime_reset_response)
+        dialog.present()
+
+    def _on_playtime_reset_response(self, _dialog, response: str) -> None:
+        if response != "reset":
+            return
+        try:
+            self.playtime_store.reset(self.app_type)
+        except PlaytimeError as error:
+            self._show_error("Could not reset playtime", str(error))
+        self.show_playtime()
 
     def refresh(self) -> None:
         if hasattr(self.window, "refresh_pages"):
@@ -1308,6 +1371,7 @@ class InstallationPage(Gtk.Box):
         ).start()
         if app_type == "player":
             self._start_activity_watcher(session)
+        self._start_playtime_tracker(session, app_type)
         started = getattr(self.window, "application_started", None)
         if started is not None and app_type is not None:
             started(app_type, session, from_link)
@@ -1334,6 +1398,22 @@ class InstallationPage(Gtk.Box):
             center = getattr(self.window, "notification_center", None)
             if center is not None:
                 center.notify("player", f"While Playing features did not start: {error}", "failed")
+            return
+        GLib.child_watch_add(GLib.PRIORITY_DEFAULT, process.pid, lambda *_: None)
+
+    def _start_playtime_tracker(self, session: LaunchSession, app_type: str | None) -> None:
+        start_time = getattr(session, "start_time", None)
+        if app_type not in APP_TITLES or start_time is None:
+            return
+        try:
+            process = _spawn_detached(
+                tracker_arguments(app_type, session.process.pid, start_time),
+                default_log_directory() / "playtime.log",
+            )
+        except OSError as error:
+            center = getattr(self.window, "notification_center", None)
+            if center is not None:
+                center.notify(app_type, f"Playtime is not being counted: {error}", "failed")
             return
         GLib.child_watch_add(GLib.PRIORITY_DEFAULT, process.pid, lambda *_: None)
 

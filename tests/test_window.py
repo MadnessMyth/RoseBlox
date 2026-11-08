@@ -652,6 +652,40 @@ class RealWindowTests(unittest.TestCase):
         arguments = spawn.call_args.args[0]
         self.assertEqual(["--activity-watch", "4242", "777", "/tmp/player.log"], arguments[3:])
 
+    def test_each_app_page_shows_its_playtime_and_counts_new_launches(self):
+        from unittest import mock
+
+        from roseblox.backend.playtime import PlaytimeStore
+
+        window = self._loaded_window()
+        player, studio = window.pages["player"], window.pages["studio"]
+        self.assertEqual("You have not played Roblox Player from Roseblox yet.", player.playtime_label.get_text())
+        self.assertFalse(player.playtime_reset_button.get_visible())
+
+        store = PlaytimeStore(self.data_home / "roseblox" / "playtime.json")
+        store.start_session("player")
+        store.add_seconds("player", 3725)
+        self.assertTrue(self._wait_until(lambda: "1 h 2 min" in player.playtime_label.get_text()))
+        self.assertEqual("Played for 1 h 2 min in 1 session. Last played today.", player.playtime_label.get_text())
+        self.assertTrue(player.playtime_reset_button.get_visible())
+        self.assertEqual("You have not played Roblox Studio from Roseblox yet.", studio.playtime_label.get_text())
+
+        player._on_playtime_reset_response(None, "cancel")
+        self.assertEqual(3725, store.get("player").seconds)
+        player._on_playtime_reset_response(None, "reset")
+        self.assertEqual(0, store.get("player").seconds)
+        self.assertFalse(player.playtime_reset_button.get_visible())
+
+        session = SimpleNamespace(process=SimpleNamespace(pid=4242), start_time=777)
+        with mock.patch("roseblox.pages.manager_page._spawn_detached") as spawn, mock.patch(
+            "roseblox.pages.manager_page.GLib.child_watch_add"
+        ):
+            spawn.return_value = SimpleNamespace(pid=5000)
+            studio._start_playtime_tracker(session, "studio")
+            studio._start_playtime_tracker(SimpleNamespace(process=session.process, start_time=None), "studio")
+        spawn.assert_called_once()
+        self.assertEqual(["--playtime", "studio", "4242", "777"], spawn.call_args.args[0][3:])
+
     def test_settings_are_grouped_into_sections_that_remember_their_state(self):
         from roseblox.backend.setup import SetupStore
 
