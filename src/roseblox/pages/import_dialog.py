@@ -25,6 +25,11 @@ def _escape(text: object) -> str:
     return GLib.markup_escape_text(str(text))
 
 
+def _display_path(path: Path) -> str:
+    home = Path.home()
+    return f"~/{path.relative_to(home)}" if path.is_relative_to(home) and path != home else str(path)
+
+
 def _shorten(value: object, limit: int = 80) -> str:
     text = "on" if value is True else "off" if value is False else "not set" if value in (None, "") else str(value)
     return text if len(text) <= limit else text[: limit - 1] + "…"
@@ -104,7 +109,7 @@ class ImportWindow(Adw.Window):
                 found = detection.locations[0]
                 more = len(detection.locations) - 1
                 row.set_subtitle(
-                    _escape(f"Found {found}" + (f" (and {more} more; use Choose… for another)" if more else ""))
+                    _escape(f"Found {_display_path(found)}" + (f" (and {more} more; use Choose… for another)" if more else ""))
                     + "\n" + _escape(detection.importer.description)
                 )
                 preview = Gtk.Button(label="Preview", valign=Gtk.Align.CENTER)
@@ -184,7 +189,7 @@ class ImportWindow(Adw.Window):
         self._checks = []
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
         source = Adw.PreferencesGroup(title=_escape(plan.result.source))
-        source.set_description(_escape(str(plan.result.location)))
+        source.set_description(_escape(_display_path(plan.result.location)))
         for note in plan.result.notes:
             label = Gtk.Label(label=note, wrap=True, xalign=0)
             label.add_css_class("dim-label")
