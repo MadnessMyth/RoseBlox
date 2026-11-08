@@ -1,6 +1,6 @@
 # Installing and updating Roseblox
 
-This guide is for Arch Linux and Arch-based distributions such as CachyOS and EndeavourOS. It installs the latest Roseblox from the `master` branch as the `roseblox-git` package. Updates then take a single command. To learn what Roseblox does behind the scenes, see [How Roseblox works](HOW-IT-WORKS.md).
+This guide is mainly for Arch Linux and Arch-based distributions such as CachyOS and EndeavourOS. It installs the latest Roseblox from the `master` branch as the `roseblox-git` package. Updates then take a single command. On Ubuntu, Debian, Fedora or openSUSE, follow [Other distributions](#other-distributions) instead. To learn what Roseblox does behind the scenes, see [How Roseblox works](HOW-IT-WORKS.md).
 
 ## Install
 
@@ -73,6 +73,75 @@ Open **Roseblox** from your application menu, or run `roseblox` in a terminal. T
 ![Setup complete](screenshots/04-setup-links-enabled.png)
 
 Click **Finish Setup**. You can reopen setup at any time from **Settings → First-time setup → Open Setup**.
+
+## Other distributions
+
+Roseblox 0.5.0 and later also run on Ubuntu 24.04 or newer, Debian 13, Fedora 40 or newer and openSUSE Tumbleweed. Roseblox uses your system's Python, GTK 4 (4.10 or newer) and libadwaita (1.4 or newer); older releases such as Ubuntu 22.04 and Debian 12 ship versions that are too old. These systems are less tested than Arch, so please report anything that does not work.
+
+### 1. Install the libraries Roseblox uses
+
+```sh
+# Ubuntu, Debian, Linux Mint, Pop!_OS
+sudo apt install git python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 libarchive-tools xdg-utils
+
+# Fedora
+sudo dnf install git python3-gobject gtk4 libadwaita bsdtar xdg-utils
+
+# openSUSE Tumbleweed
+sudo zypper install git python3-gobject python3-gobject-Gdk typelib-1_0-Gtk-4_0 typelib-1_0-Adw-1 bsdtar xdg-utils
+```
+
+You also need a Vulkan driver for your GPU. Most desktops already have one: Mesa provides it for AMD and Intel, and NVIDIA's own driver provides it for NVIDIA.
+
+### 2. Download and install Roseblox
+
+```sh
+git clone https://github.com/MadnessMyth/RoseBlox.git ~/RoseBlox
+~/RoseBlox/packaging/generic/install.sh
+```
+
+Run the script as your normal user, not with `sudo`. It checks the libraries from step 1 and tells you the exact command if one is missing. It installs Roseblox for your user only:
+
+- the app in `~/.local/lib/roseblox`
+- the `roseblox` command in `~/.local/bin`
+- the menu entry and icon in `~/.local/share`
+
+If it says `~/.local/bin` is not in your `PATH`, log out and back in. Most distributions add that folder at login once it exists. The `roseblox` command must be found there for Roblox links and update notifications to work.
+
+### 3. Get Rosemary
+
+Open **Roseblox** from your application menu. On these systems the Rosemary step offers **Download the AppImage** instead of the AUR:
+
+1. Click **Open Releases Page**. Rosemary's official releases page opens in your browser.
+2. Download the file ending in `x86_64.AppImage`, for example `Rosemary-0.5.0-x86_64.AppImage`.
+3. Roseblox looks in your Downloads folder, `~/Applications`, `~/.local/bin` and `~/bin`. When it finds the file, **Rosemary AppImage found** appears. Click **Use This File**; Roseblox makes the file executable and uses it from where it is. If you move or delete the file later, choose it again in setup or **Settings → Advanced**.
+
+The first time Roblox starts, Rosemary offers to download its macOS base system (about 180 MB) once.
+
+Other ways to get Rosemary also work, as long as the result is a `rosemary` command in your `PATH` or a file you pick with **Choose…**:
+
+- With Nix: `nix profile install github:microlift/rosemary`
+- Build it from source with the instructions in [Rosemary's README](https://github.com/microlift/rosemary#building). This needs SDL 3.4 or newer.
+
+Rosemary publishes its AppImage only for 64-bit Intel and AMD (x86-64) computers. On ARM computers, setup does not offer the download; use Nix or build Rosemary from source.
+
+Then continue with steps 2 to 4 of [first-time setup](#6-run-first-time-setup).
+
+### Updating on other distributions
+
+```sh
+cd ~/RoseBlox && git pull && packaging/generic/install.sh
+```
+
+Your settings, installations and link choice are kept. To update Rosemary, download the newer AppImage and click **Use This File** again, or choose it in **Settings → Advanced**.
+
+### Uninstalling on other distributions
+
+```sh
+~/RoseBlox/packaging/generic/install.sh --uninstall
+```
+
+Turn off **Open Roblox links with Roseblox** and **Notify me about Roblox updates** first, as in [Uninstall](#uninstall) step 1. Then follow its step 3 if you also want to delete your settings and Roblox apps.
 
 ## Settings
 
@@ -189,9 +258,11 @@ cd ~/RoseBlox && git checkout -- packaging/arch-git/PKGBUILD && git pull && cd p
 
 `makepkg` writes the version it built into `PKGBUILD`, so the `git checkout` line discards that edit before `git pull`; otherwise the pull can refuse to run. `git pull` updates the packaging recipe, and `makepkg` fetches and builds the latest `master`. Your settings, installations and link choice are kept. `pacman -Q roseblox-git` shows the new version, for example `0.2.0.r3.g1a2b3c4-1`, where the last part is the commit it was built from.
 
+On other distributions, see [Updating on other distributions](#updating-on-other-distributions).
+
 ### Rosemary
 
-Rosemary updates with your other AUR packages:
+On Arch, Rosemary updates with your other AUR packages:
 
 ```sh
 paru -Syu    # or: yay -Syu
@@ -250,23 +321,28 @@ To update after a new release, run `git pull` in `~/RoseBlox`, then `makepkg -si
    sudo pacman -R roseblox-git    # or: sudo pacman -R roseblox
    ```
 
+   On other distributions, run `~/RoseBlox/packaging/generic/install.sh --uninstall` instead.
+
 3. Optional: delete downloaded Roblox apps and settings:
 
    ```sh
    rm -rf ~/.local/share/roseblox ~/.config/roseblox ~/.local/state/roseblox
    ```
 
-4. Optional: remove Rosemary with `sudo pacman -R rosemary`.
+4. Optional: remove Rosemary with `sudo pacman -R rosemary`, or delete the Rosemary AppImage you downloaded.
 
 ## Troubleshooting
 
 | Problem | Fix |
 | --- | --- |
 | "No AUR helper found" | Install `paru` (step 2) or `yay`, then click **Try Again**. |
+| The install script says GTK 4, libadwaita or PyGObject is missing | Run the command it prints, or the one for your distribution in [Other distributions](#1-install-the-libraries-roseblox-uses). If it says your version is too old, your distribution release is too old for Roseblox. |
+| **Rosemary AppImage found** does not appear after downloading | Make sure the file name starts with `Rosemary` and ends in `.AppImage`, and that it is in your Downloads folder, `~/Applications`, `~/.local/bin` or `~/bin`. Click **Check Again**, or use **Choose…** to pick it anywhere. |
+| Roblox links or update notifications say the `roseblox` command is not in PATH | Log out and back in so `~/.local/bin` is added to your `PATH`, then turn the switch on again. |
 | "No supported terminal found" | Install a terminal such as `kitty`, `konsole` or `gnome-console`, or set the `TERMINAL` environment variable. |
 | Rosemary installed, but Roseblox says it is missing | Click **Check Again**. If Rosemary is outside `PATH`, use **Settings → Executable → Choose…**. |
 | Roblox links open the wrong app, or a "Choose application" window appears without Roseblox | Make sure **Settings → Roblox Links → Open Roblox links with Roseblox** is on. If it already is, click **Repair** (needed once after updating from v0.2.0), or turn the switch off and on again. If your browser asks, choose **Roseblox** and tick "always". |
-| ZIP import fails with "bsdtar" | `sudo pacman -S --needed libarchive` |
+| ZIP import fails with "bsdtar" | `sudo pacman -S --needed libarchive` (Ubuntu and Debian: `sudo apt install libarchive-tools`; Fedora: `sudo dnf install bsdtar`; openSUSE: `sudo zypper install bsdtar`) |
 | Roblox closed or failed and you want its output | Rosemary's output is in `~/.local/state/roseblox/logs/player.log` or `studio.log`; the previous run is in `player.log.1` or `studio.log.1`. |
 | No update notifications | Check that **Settings → Updates** says "On". If it says the login entry is missing, turn the switch off and on again. Make sure notifications for "Roseblox" are allowed in your desktop's notification settings, then click **Check Now**. You are only notified for apps you have installed, and not for a version you skipped. |
 | A FastFlag has no effect in Player | The Player uses only flags in Roblox's allowlist. Flags outside it have a warning under **Performance → FastFlags** ("Roblox Player ignores this flag"), and work only in Studio. |

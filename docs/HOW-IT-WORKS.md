@@ -18,7 +18,11 @@ Roseblox never changes Roblox's program code. The only things it writes inside a
 
 ## Getting Rosemary
 
-On first launch, setup checks for a `rosemary` executable in `PATH`, or the path saved in Settings → Advanced. When it is missing, **Install Rosemary** opens a visible terminal that runs:
+On first launch, setup checks for a `rosemary` executable in `PATH`, or the path saved in Settings → Advanced. When it is missing, what setup offers depends on the system. Roseblox reads `/etc/os-release` (`ID` and `ID_LIKE`) to tell Arch-based systems from others; a system without that file counts as Arch-based when `pacman` exists.
+
+### On Arch-based systems
+
+**Install Rosemary** opens a visible terminal that runs:
 
 ```sh
 paru -S --needed rosemary sdl3 vulkan-icd-loader    # or yay when paru is absent
@@ -26,9 +30,25 @@ paru -S --needed rosemary sdl3 vulkan-icd-loader    # or yay when paru is absent
 
 The [AUR package](https://aur.archlinux.org/packages/rosemary) lists SDL 3 and the Vulkan loader as optional, but Roblox cannot start without them, so they are installed together. You review the package and type your password in that terminal; Roseblox never runs `sudo` itself. After a successful install the terminal runs `rosemary prefix create`, which downloads Rosemary's macOS base system once. Roseblox notices the new executable when the build finishes.
 
-The terminal is `$TERMINAL` when supported, otherwise the first one found of `xdg-terminal-exec`, GNOME Console, Ptyxis, GNOME Terminal, Konsole, Xfce Terminal, Alacritty, kitty, foot, WezTerm, Ghostty and xterm. You can also choose any existing Rosemary executable or release AppImage instead.
+The terminal is `$TERMINAL` when supported, otherwise the first one found of `xdg-terminal-exec`, GNOME Console, Ptyxis, GNOME Terminal, Konsole, Xfce Terminal, Alacritty, kitty, foot, WezTerm, Ghostty and xterm.
 
-A Vulkan driver for your GPU (for example `vulkan-radeon`, `vulkan-intel` or `nvidia-utils`) is also required.
+### On other systems
+
+Rosemary's official builds for any distribution are the x86-64 AppImages attached to each [Rosemary release](https://github.com/microlift/rosemary/releases). Roseblox never downloads Rosemary itself. Instead:
+
+1. **Open Releases Page** opens `https://github.com/microlift/rosemary/releases/latest` in your browser, and Roseblox starts watching for the download for up to 30 minutes.
+2. It looks for files named `Rosemary*.AppImage` in your Downloads folder (`XDG_DOWNLOAD_DIR` from `~/.config/user-dirs.dirs`, so translated folder names work), `~/Applications`, `~/.local/bin` and `~/bin`. When several are found, it offers the highest version.
+3. **Use This File** adds the user execute permission to that file (downloads are not executable) and saves its path as the Rosemary executable. The file is used where it is; nothing is copied.
+
+On computers that are not x86-64 there is no AppImage, so setup only explains the other options: Nix (`nix profile install github:microlift/rosemary`) or building from source.
+
+### Either way
+
+You can always choose any Rosemary executable or AppImage with **Choose…**; an AppImage chosen this way is made executable too.
+
+A Vulkan driver for your GPU (for example Mesa's `vulkan-radeon` or `vulkan-intel`, or `nvidia-utils`) is also required.
+
+When a tool Roseblox uses is missing (`bsdtar`, `xdg-mime`, GameMode or MangoHud), the message names the install command for the system's package manager: `pacman`, `apt`, `dnf` or `zypper`.
 
 ## Getting Roblox
 
@@ -182,6 +202,13 @@ The paths below use the usual defaults; Roseblox follows `XDG_CONFIG_HOME`, `XDG
 | `~/.cache/roseblox/` | Roblox's FastFlag allowlist and the reviewed avatar editor background |
 
 Uninstalling the package leaves all of these, including downloaded Roblox apps, in place. [Uninstall](INSTALL.md#uninstall) shows how to remove them.
+
+## How Roseblox itself is installed
+
+- **Arch packages** (`packaging/arch` for tagged releases, `packaging/arch-git` for `master`) build a Python wheel and install it into the system Python, with the menu entry, icon and license under `/usr/share`.
+- **The install script** (`packaging/generic/install.sh`) is for other distributions. It copies `src/roseblox` to `~/.local/lib/roseblox` and writes a small `~/.local/bin/roseblox` launcher. The launcher runs the system `python3`, so the system's PyGObject, GTK and libadwaita are used, and it puts the app folder on `PYTHONPATH`, so the background processes started with `python3 -m roseblox` find it too. The menu entry points at the launcher by its full path. A marker file in `~/.local/lib/roseblox` lets `--uninstall` and later updates replace only what the script installed. Nothing is installed system-wide and `sudo` is never used.
+
+Roblox link registration and the update checker's login entry use the `roseblox` command found in `PATH`, so `~/.local/bin` must be in `PATH` for those two features with the install script.
 
 ## Code layout
 

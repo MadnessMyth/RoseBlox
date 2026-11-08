@@ -10,7 +10,13 @@ A viable Flatpak design would need a supported host bridge or a different, expli
 
 AppImage could make the Python application files portable, but would not remove the host requirements for GTK4/libadwaita integration or Rosemary. Bundling the GTK/PyGObject stack and its introspection data adds size and compatibility work across Arch/CachyOS system libraries. It also does not solve the need for Rosemary to access external Roblox bundles and for Roseblox to safely verify the host process.
 
-For the Arch/CachyOS audience, a native package using system GTK and Python is simpler to maintain. AppImage could be reconsidered if there is demonstrated demand for distributions outside Arch, after testing host Rosemary and process identity behavior there.
+For the Arch/CachyOS audience, a native package using system GTK and Python is simpler to maintain. Other distributions are served by `packaging/generic/install.sh`, which installs Roseblox for the user on top of the system's Python, GTK and libadwaita, so an AppImage of Roseblox would add little.
+
+## Other distributions
+
+`packaging/generic/install.sh` supports Ubuntu 24.04 or newer, Debian 13, Fedora 40 or newer and openSUSE Tumbleweed (GTK 4.10 and libadwaita 1.4 or newer). Rosemary comes from its official x86-64 AppImage, which the user downloads from Rosemary's releases page and setup then offers, or from Nix or a source build. Native `.deb` and `.rpm` packages (for example through a Copr repository or the Open Build Service) would be the next step if there is demand; like the install script, they would not include Rosemary.
+
+Butter, Rosemary's own manager, ships as a Flatpak and runs its own copy of Rosemary inside the sandbox. A Roseblox Flatpak would have to do the same, which means downloading Rosemary, and would also need portals or permissions for Roblox link registration, the login entry for update checks, Discord's IPC socket, GameMode and MangoHud.
 
 ## Publishing to the AUR
 

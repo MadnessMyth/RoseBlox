@@ -8,7 +8,7 @@ Click the preview to watch the full 30-second video with sound.
 
 ## How it works, in short
 
-Roblox does not make a Linux version, but it does make a macOS one. Roseblox downloads the official macOS Roblox apps straight from Roblox's own servers and runs them through [Rosemary](https://aur.archlinux.org/packages/rosemary), a separate open-source program that runs macOS apps on Linux, translating Roblox's Metal graphics to Vulkan.
+Roblox does not make a Linux version, but it does make a macOS one. Roseblox downloads the official macOS Roblox apps straight from Roblox's own servers and runs them through [Rosemary](https://github.com/microlift/rosemary), a separate open-source program that runs macOS apps on Linux, translating Roblox's Metal graphics to Vulkan.
 
 Roseblox does the rest for you: it sets up Rosemary, installs and updates Player and Studio, opens **Play** buttons on roblox.com, and keeps your settings and mods in one place. It never changes Roblox's code.
 
@@ -18,13 +18,18 @@ Want the details? See [How Roseblox works](docs/HOW-IT-WORKS.md).
 
 | | |
 | --- | --- |
-| **Works on** | Arch Linux and Arch-based systems such as CachyOS and EndeavourOS |
-| **You need** | A graphics driver with Vulkan (AMD, Intel or NVIDIA), and an AUR helper such as `paru` or `yay` (the install guide shows how to get one) |
-| **Not yet** | Ubuntu, Debian, Fedora, Flatpak or AppImage |
+| **Arch Linux and Arch-based systems** such as CachyOS, EndeavourOS and Manjaro | Fully supported. Roseblox and Rosemary install as packages. |
+| **Ubuntu 24.04 or newer, Debian 13, Fedora 40 or newer, openSUSE Tumbleweed** | New in 0.5.0. Roseblox installs with a script, and Rosemary comes from its official AppImage. Less tested than Arch, so please report problems. |
+| **You need** | A graphics driver with Vulkan (AMD, Intel or NVIDIA). Outside Arch, a 64-bit Intel or AMD (x86-64) computer, because Rosemary's AppImage is made only for those. |
+| **Not yet** | Flatpak, older releases such as Ubuntu 22.04 or Debian 12 (their GTK libraries are too old), and ARM computers unless you build Rosemary yourself |
 
 ## Install
 
-The AUR package has not been published yet, so `paru -S roseblox` does not find it; you build the package from this repository instead. The full walkthrough, with screenshots, is in **[the install guide](docs/INSTALL.md)**. If you already have `git`, `base-devel` and an AUR helper, it comes down to:
+The full walkthrough, with screenshots, is in **[the install guide](docs/INSTALL.md)**.
+
+### Arch Linux and Arch-based systems
+
+The AUR package has not been published yet, so `paru -S roseblox` does not find it; you build the package from this repository instead. If you already have `git`, `base-devel` and an AUR helper such as `paru` or `yay`, it comes down to:
 
 ```sh
 git clone https://github.com/MadnessMyth/RoseBlox.git ~/RoseBlox
@@ -32,9 +37,23 @@ cd ~/RoseBlox/packaging/arch-git
 makepkg -si
 ```
 
-Then open **Roseblox** from your application menu. A short setup walks you through four steps:
+### Ubuntu, Debian, Fedora and openSUSE
 
-1. **Install Rosemary.** One click opens a terminal that installs it from the AUR. It builds from source, so this takes a while the first time.
+Install Git and the GTK libraries Roseblox uses, then run the install script. On Ubuntu and Debian:
+
+```sh
+sudo apt install git python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 libarchive-tools xdg-utils
+git clone https://github.com/MadnessMyth/RoseBlox.git ~/RoseBlox
+~/RoseBlox/packaging/generic/install.sh
+```
+
+The commands for Fedora and openSUSE are in [the install guide](docs/INSTALL.md#other-distributions). The script installs Roseblox for your user only, in `~/.local`, and does not need `sudo`.
+
+### First launch
+
+Open **Roseblox** from your application menu. A short setup walks you through four steps:
+
+1. **Get Rosemary.** On Arch, one click opens a terminal that installs it from the AUR; it builds from source, so this takes a while the first time. Elsewhere, Roseblox opens Rosemary's download page and picks up the AppImage you download.
 2. **Open Roblox links with Roseblox** (optional), so **Play** on roblox.com starts the game.
 3. **Install Roblox Player, Studio, or both**, with a progress bar.
 4. **Update notifications** (optional), so you hear when Roblox releases a new version.
@@ -58,14 +77,16 @@ Something not working? Start with [Troubleshooting](docs/INSTALL.md#troubleshoot
 
 ## For developers
 
-To run Roseblox from a checkout without installing it, install `gtk4`, `libadwaita` and `python-gobject`, then run:
+To run Roseblox from a checkout without installing it, install GTK 4, libadwaita and PyGObject (on Arch, `gtk4`, `libadwaita` and `python-gobject`), then run:
 
 ```sh
 PYTHONPATH=src python3 -m roseblox
 ```
 
+Run the tests with `PYTHONPATH=src python3 -m unittest discover -s tests`.
+
 [How Roseblox works](docs/HOW-IT-WORKS.md) covers the launch flow, where files are stored and how each feature works. See also the [release checklist](packaging/RELEASE.md) and [Flatpak and AppImage notes](packaging/DISTRIBUTION.md).
 
 ## License
 
-Roseblox is licensed under the MIT License; see [LICENSE](LICENSE). It does not include Rosemary or Roblox: Rosemary comes from the AUR, and Roblox is downloaded from Roblox. Roseblox is not affiliated with Roblox Corporation.
+Roseblox is licensed under the MIT License; see [LICENSE](LICENSE). It does not include Rosemary or Roblox: Rosemary comes from the AUR or from Rosemary's own releases, and Roblox is downloaded from Roblox. Roseblox is not affiliated with Roblox Corporation.
