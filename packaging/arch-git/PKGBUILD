@@ -13,6 +13,7 @@ optdepends=(
   'libarchive: required for importing or extracting Roblox ZIP archives (bsdtar)'
   'gamemode: Performance → GameMode'
   'mangohud: Performance → MangoHud overlay'
+  'libpulse: While Playing → Microphone toggle (pactl)'
 )
 provides=("$_pkgname")
 conflicts=("$_pkgname")

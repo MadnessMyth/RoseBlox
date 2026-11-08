@@ -172,15 +172,27 @@ The avatar editor background comes from [Bloxstrap](https://github.com/bloxstrap
 
 ## While Playing
 
-Discord Rich Presence, the server location notification and closing Roblox when you leave a game are off by default. When one is on, each Player launch also starts `roseblox --activity-watch`, a small process without a window. It:
+Discord Rich Presence, the server location notification, closing Roblox when you leave a game and the microphone toggle are off by default. When one is on, each Player launch also starts `roseblox --activity-watch`, a small process without a window. It:
 
 1. Follows the log file that this Player has open in the prefix's `~/Library/Logs/Roblox`, so several Players never mix up their games.
 2. Looks up the game's name, creator and icon from Roblox's public APIs (`apis.roblox.com`, `games.roblox.com`, `thumbnails.roblox.com`).
 3. Talks to the Discord desktop app over its local IPC socket.
 4. Looks up the Roblox server's address (never yours) with [ipwho.is](https://ipwho.is) for the location notification.
-5. Exits when that Rosemary process exits.
+5. Runs the microphone toggle, described below.
+6. Exits when that Rosemary process exits.
 
 Because it runs on its own, these features keep working after Roseblox closes. It logs to `~/.local/state/roseblox/logs/activity.log`.
+
+### Microphone toggle
+
+Roblox records through its own capture stream: a "source output" in PulseAudio terms, a `Stream/Input/Audio` node in PipeWire's. Every capture stream has its own mute, separate from the microphone itself. Roseblox mutes Roblox's stream, so Roblox gets digital silence while the device, Roblox's voice connection and every other app's microphone keep running.
+
+- **Finding Roblox's stream.** The Mac Player names its stream with `application.id = "com.roblox.RobloxPlayer"`. Streams without an application ID are matched by `application.name = "Roblox"`. Discord and other apps are never touched.
+- **Muting.** With `pactl` (PulseAudio, or PipeWire through pipewire-pulse): `pactl set-source-output-mute`. Without it: `pw-dump` to find the stream and `wpctl set-mute`.
+- **New streams.** Roblox opens a new stream every time its microphone is switched on or off, often before closing the old one. Roseblox listens to `pactl subscribe` (or `pw-dump --monitor`) and gives every new stream the current state within milliseconds. Nothing is polled.
+- **Leaving no mute behind.** PipeWire remembers a stream's mute for the app's next stream. When the Player closes, Roseblox unmutes Roblox's streams so the next session does not start silent.
+- **The hotkey.** Roseblox asks the desktop for a global shortcut through the xdg-desktop-portal GlobalShortcuts interface (KDE Plasma, GNOME 48 and later, Hyprland). The desktop stores the key and reports both press and release, which Hold mode needs. The window and the watcher each register as `io.github.roseblox.Roseblox` first, so the desktop files the shortcut under Roseblox even when Roseblox was started from a terminal.
+- **Several Players.** Each watcher queues for the session-bus name `io.github.roseblox.Roseblox.Microphone`. Only the owner mutes; when its Player closes, the next watcher takes over. `roseblox --mic` calls the owner over D-Bus.
 
 ## Where Roseblox keeps things
 

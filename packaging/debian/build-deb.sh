@@ -55,7 +55,7 @@ Architecture: all
 Maintainer: Roseblox contributors <https://github.com/MadnessMyth/RoseBlox/issues>
 Installed-Size: $SIZE
 Depends: python3 (>= 3.10), python3-gi, gir1.2-gtk-4.0, gir1.2-adw-1 (>= 1.4), xdg-utils, libarchive-tools
-Suggests: gamemode, mangohud
+Suggests: gamemode, mangohud, pulseaudio-utils
 Section: games
 Priority: optional
 Homepage: https://github.com/MadnessMyth/RoseBlox

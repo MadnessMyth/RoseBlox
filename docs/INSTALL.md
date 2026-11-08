@@ -182,7 +182,7 @@ Click a section heading in **Settings** to open or close it; Roseblox remembers 
 - **Appearance**: **Colors** (Roseblox or System), **Style** (Dark, Light, or Follow system), and **Accent color** (Roseblox pink, your desktop's accent color, or a fixed color). Changes apply immediately.
 - **Rosemary**: Rosemary status, **Ctrl + left-click compatibility** (turn it off if you want Rosemary's default Ctrl + click behavior), and **First-time setup**.
 - **After Launching**: close Roseblox after Player or Studio starts, and **Allow more than one Roblox Player**. See [Closing Roseblox after launching](#closing-roseblox-after-launching) and [More than one Roblox Player](#more-than-one-roblox-player).
-- **While Playing**: Discord Rich Presence, a server location notification, and closing Roblox when you leave a game. See [While Playing](#while-playing).
+- **While Playing**: Discord Rich Presence, a server location notification, closing Roblox when you leave a game, and the microphone toggle. See [While Playing](#while-playing).
 - **Roblox Links**: open `roblox://` links with Roseblox.
 - **Updates**: update notifications, **Check Now**, skipped versions, and **Check for new Roseblox versions**.
 - **Advanced** (closed by default): the Rosemary executable path, the Player and Studio version sources, and the Discord application ID. You normally do not need to change these.
@@ -198,6 +198,12 @@ These work with Roblox Player and are off until you turn them on. Turn them on b
 - **Discord Rich Presence**: your Discord profile shows "Playing Roseblox" with the game's name, creator and icon, and how long you have been in it. Other people see a **View Game** button and, while **Join Server button** is on, a **Join Server** button that opens Roblox's own join page for your server. Private servers never get a Join Server button. The Discord desktop app must be running; the regular, Flatpak and Snap builds all work. Discord only shows the buttons to other people, not to you.
 - **Server location notification**: when you join a server, a notification says where it is, for example "The server is in Frankfurt am Main, Hessen, Germany." The Roblox server's address (never yours) is looked up with [ipwho.is](https://ipwho.is).
 - **Close Roblox when leaving a game**: Roblox closes when you leave a game, instead of going back to the Roblox home screen. Being disconnected does not close it.
+- **Microphone toggle**: Roblox's microphone stays silent until you use a hotkey, like push to talk in other games. Roblox stays connected to voice chat and keeps its own microphone switch; it just receives silence. Discord and other apps keep your microphone as usual.
+  - **Microphone hotkey**: click **Set Hotkey**. Your desktop asks for the key, or opens its shortcut settings with a Roseblox entry (on KDE Plasma: **System Settings → Keyboard → Shortcuts**). The key works while Roblox has focus. Desktops without global shortcuts (the xdg-desktop-portal GlobalShortcuts service) can bind a key to `roseblox --mic toggle` in their keyboard settings instead.
+  - **Mode**: **Toggle** turns the microphone on with one press and off with the next. **Hold** keeps it on while the key is held down.
+  - **Release delay** (Hold only): how many milliseconds the microphone stays on after you let go, so the end of a sentence is not cut off.
+
+  `roseblox --mic status` prints whether the microphone is on, and `roseblox --mic toggle`, `on` and `off` switch it, while a Player runs with the toggle on.
 
 Roseblox reads these events from the log the Roblox Player writes inside the Rosemary prefix (`~/Library/Logs/Roblox` in the guest, normally `~/.local/share/rosemary/prefixes/default/root/Users/<you>/Library/Logs/Roblox`). Each Player's own open log is used, so several Players do not mix up their games. `~/.local/state/roseblox/logs/activity.log` records which log was followed, each game joined, and any problem.
 
@@ -385,4 +391,6 @@ To update after a new release, run `git pull` in `~/RoseBlox`, then `makepkg -si
 | A mod has no effect | Mods apply only to installations Roseblox installed, and only from the next start. Check the notification center after starting Roblox; it says if a mod could not be applied. |
 | Discord does not show the game | Make sure the Discord desktop app is running (Roseblox tries again every 30 seconds while you are in a game), and that sharing your detected activities is on in Discord's **Activity Privacy** settings. The browser version of Discord cannot show Rich Presence. See `~/.local/state/roseblox/logs/activity.log`: it should show `following Roblox's log` and `joined place` lines for the game. If it shows neither, the switch was turned on after that Player started; start it again. |
 | No server location notification | Make sure notifications for "Roseblox" are allowed in your desktop's settings. If ipwho.is cannot be reached, the reason is in `~/.local/state/roseblox/logs/activity.log`. |
+| The microphone toggle does nothing | Turn it on before starting the Player, then check `roseblox --mic status`. If it says the toggle is not running, start the Player again. `pactl` (from `libpulse`) or PipeWire's `pw-dump` and `wpctl` must be installed. `~/.local/state/roseblox/logs/activity.log` has `roseblox microphone:` lines with the hotkey your desktop reports and each mute. |
+| Roblox's microphone stays silent after Roseblox | Roseblox turns it back on when the Player closes. If Roblox was killed together with Roseblox, run `pactl list source-outputs` while Roblox is open and unmute its stream with `pactl set-source-output-mute NUMBER 0`. |
 | Clicking **Update** in a notification does nothing | See `~/.local/state/roseblox/logs/roseblox.log` for the window it opened. |

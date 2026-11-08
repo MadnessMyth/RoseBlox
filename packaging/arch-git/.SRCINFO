@@ -18,6 +18,7 @@ pkgbase = roseblox-git
 	optdepends = libarchive: required for importing or extracting Roblox ZIP archives (bsdtar)
 	optdepends = gamemode: Performance → GameMode
 	optdepends = mangohud: Performance → MangoHud overlay
+	optdepends = libpulse: While Playing → Microphone toggle (pactl)
 	provides = roseblox
 	conflicts = roseblox
 	source = RoseBlox::git+https://github.com/MadnessMyth/RoseBlox.git#branch=master
