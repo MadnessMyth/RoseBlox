@@ -19,7 +19,7 @@ Want the details? See [How Roseblox works](docs/HOW-IT-WORKS.md).
 | | |
 | --- | --- |
 | **Arch Linux and Arch-based systems** such as CachyOS, EndeavourOS and Manjaro | Fully supported. Roseblox and Rosemary install as packages. |
-| **Ubuntu 24.04 or newer, Debian 13, Fedora 40 or newer, openSUSE Tumbleweed** | New in 0.5.0. Roseblox installs with a script, and Rosemary comes from its official AppImage. Less tested than Arch, so please report problems. |
+| **Ubuntu 24.04 or newer, Debian 13, Fedora 40 or newer, openSUSE Tumbleweed** | Download the Roseblox AppImage (any of these) or the .deb (Ubuntu and Debian) from [Releases](https://github.com/MadnessMyth/RoseBlox/releases/latest). Rosemary comes from its official AppImage. Less tested than Arch, so please report problems. |
 | **You need** | A graphics driver with Vulkan (AMD, Intel or NVIDIA). Outside Arch, a 64-bit Intel or AMD (x86-64) computer, because Rosemary's AppImage is made only for those. |
 | **Not yet** | Flatpak, older releases such as Ubuntu 22.04 or Debian 12 (their GTK libraries are too old), and ARM computers unless you build Rosemary yourself |
 
@@ -39,15 +39,12 @@ makepkg -si
 
 ### Ubuntu, Debian, Fedora and openSUSE
 
-Install Git and the GTK libraries Roseblox uses, then run the install script. On Ubuntu and Debian:
+Get Roseblox from the [latest release](https://github.com/MadnessMyth/RoseBlox/releases/latest). Pick one:
 
-```sh
-sudo apt install git python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 libarchive-tools xdg-utils
-git clone https://github.com/MadnessMyth/RoseBlox.git ~/RoseBlox
-~/RoseBlox/packaging/generic/install.sh
-```
+- **AppImage** (`Roseblox-x86_64.AppImage`), for any of these systems. It contains everything Roseblox needs. Make it executable (right-click → Properties → "Allow executing as program", or `chmod +x Roseblox-x86_64.AppImage`) and open it. On first start it adds Roseblox to your application menu, and when a new version comes out, the bell in Roseblox offers to update it in place.
+- **.deb** (`roseblox_<version>_all.deb`), for Ubuntu and Debian. Install it with `sudo apt install ./roseblox_*_all.deb` in the folder you downloaded it to; apt also installs the GTK libraries it needs.
 
-The commands for Fedora and openSUSE are in [the install guide](docs/INSTALL.md#other-distributions). The script installs Roseblox for your user only, in `~/.local`, and does not need `sudo`.
+Prefer to install from source? The [install script](docs/INSTALL.md#install-script) puts Roseblox in `~/.local` for your user only.
 
 ### First launch
 

@@ -8,13 +8,19 @@ A viable Flatpak design would need a supported host bridge or a different, expli
 
 ## AppImage
 
-AppImage could make the Python application files portable, but would not remove the host requirements for GTK4/libadwaita integration or Rosemary. Bundling the GTK/PyGObject stack and its introspection data adds size and compatibility work across Arch/CachyOS system libraries. It also does not solve the need for Rosemary to access external Roblox bundles and for Roseblox to safely verify the host process.
+Since 0.6.0, every release includes `Roseblox-x86_64.AppImage`, built by `packaging/appimage/build_appimage.py` on Ubuntu 24.04 in the release workflow. It bundles Python, PyGObject, GTK 4, libadwaita and `bsdtar`, and leaves glibc, graphics drivers, display client libraries and fontconfig to the host, so it runs on glibc 2.39 or newer. It does not contain Rosemary, which still comes from Rosemary's own releases.
 
-For the Arch/CachyOS audience, a native package using system GTK and Python is simpler to maintain. Other distributions are served by `packaging/generic/install.sh`, which installs Roseblox for the user on top of the system's Python, GTK and libadwaita, so an AppImage of Roseblox would add little.
+What makes it work with Rosemary and the host (see "How Roseblox itself is installed" in `docs/HOW-IT-WORKS.md`):
+
+- `AppRun` saves every environment variable it changes, and Roseblox restores them after GTK starts, so Rosemary and other programs it starts see the host environment.
+- Processes that outlive the window (the activity watcher, the update checker, Roblox links) start the AppImage file, because the mounted image disappears when Roseblox exits.
+- Process verification reads the host `/proc` as before; nothing is sandboxed.
+- The AppImage writes its own menu entry and icon to `~/.local/share` on start.
+- It updates itself from GitHub releases after checking `SHA256SUMS`, and carries zsync update information for AppImageUpdate.
 
 ## Other distributions
 
-`packaging/generic/install.sh` supports Ubuntu 24.04 or newer, Debian 13, Fedora 40 or newer and openSUSE Tumbleweed (GTK 4.10 and libadwaita 1.4 or newer). Rosemary comes from its official x86-64 AppImage, which the user downloads from Rosemary's releases page and setup then offers, or from Nix or a source build. Native `.deb` and `.rpm` packages (for example through a Copr repository or the Open Build Service) would be the next step if there is demand; like the install script, they would not include Rosemary.
+Each release also includes `roseblox_<version>_all.deb` for Ubuntu 24.04 or newer and Debian 13, built by `packaging/debian/build-deb.sh`. It installs into the system Python and depends on Debian's PyGObject, GTK 4 and libadwaita packages. `packaging/generic/install.sh` supports Ubuntu 24.04 or newer, Debian 13, Fedora 40 or newer and openSUSE Tumbleweed (GTK 4.10 and libadwaita 1.4 or newer). Rosemary comes from its official x86-64 AppImage, which the user downloads from Rosemary's releases page and setup then offers, or from Nix or a source build. An `.rpm` (for example through a Copr repository or the Open Build Service) would be the next step if there is demand; like the others, it would not include Rosemary.
 
 Butter, Rosemary's own manager, ships as a Flatpak and runs its own copy of Rosemary inside the sandbox. A Roseblox Flatpak would have to do the same, which means downloading Rosemary, and would also need portals or permissions for Roblox link registration, the login entry for update checks, Discord's IPC socket, GameMode and MangoHud.
 

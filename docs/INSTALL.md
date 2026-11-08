@@ -76,9 +76,31 @@ Click **Finish Setup**. You can reopen setup at any time from **Settings → Fir
 
 ## Other distributions
 
-Roseblox 0.5.0 and later also run on Ubuntu 24.04 or newer, Debian 13, Fedora 40 or newer and openSUSE Tumbleweed. Roseblox uses your system's Python, GTK 4 (4.10 or newer) and libadwaita (1.4 or newer); older releases such as Ubuntu 22.04 and Debian 12 ship versions that are too old. These systems are less tested than Arch, so please report anything that does not work.
+Roseblox 0.5.0 and later also run on Ubuntu 24.04 or newer, Debian 13, Fedora 40 or newer and openSUSE Tumbleweed. These systems are less tested than Arch, so please report anything that does not work. There are three ways to install Roseblox on them; the AppImage is the easiest.
 
-### 1. Install the libraries Roseblox uses
+You also need a Vulkan driver for your GPU. Most desktops already have one: Mesa provides it for AMD and Intel, and NVIDIA's own driver provides it for NVIDIA.
+
+### AppImage
+
+1. Download `Roseblox-x86_64.AppImage` from the [latest release](https://github.com/MadnessMyth/RoseBlox/releases/latest). Keep it somewhere it can stay, for example `~/Applications`.
+2. Make it executable: right-click it, open **Properties** and turn on **Allow executing as program** (the wording differs between file managers), or run `chmod +x ~/Applications/Roseblox-x86_64.AppImage`.
+3. Double-click it. On first start, Roseblox adds itself to your application menu with its icon, so afterwards you can open it from there. If you move the file, open it once from its new place and the menu entry follows.
+
+The AppImage contains Python, GTK 4, libadwaita and `bsdtar`, so nothing else has to be installed. It needs a system at least as new as Ubuntu 24.04 (glibc 2.39), and a 64-bit Intel or AMD (x86-64) computer. It opens through FUSE, which desktop systems include; if it does not start, install the `fuse3` package.
+
+### .deb package (Ubuntu and Debian)
+
+Download `roseblox_<version>_all.deb` from the [latest release](https://github.com/MadnessMyth/RoseBlox/releases/latest), then install it from the folder you downloaded it to:
+
+```sh
+sudo apt install ./roseblox_*_all.deb
+```
+
+apt installs the GTK libraries it needs. Roseblox then appears in your application menu. Ubuntu's App Center can open the file too.
+
+### Install script
+
+This installs Roseblox from the source code for your user only, using your system's Python, GTK 4 (4.10 or newer) and libadwaita (1.4 or newer). First install Git and those libraries:
 
 ```sh
 # Ubuntu, Debian, Linux Mint, Pop!_OS
@@ -91,16 +113,14 @@ sudo dnf install git python3-gobject gtk4 libadwaita bsdtar xdg-utils
 sudo zypper install git python3-gobject python3-gobject-Gdk typelib-1_0-Gtk-4_0 typelib-1_0-Adw-1 bsdtar xdg-utils
 ```
 
-You also need a Vulkan driver for your GPU. Most desktops already have one: Mesa provides it for AMD and Intel, and NVIDIA's own driver provides it for NVIDIA.
-
-### 2. Download and install Roseblox
+Then download Roseblox and run the script:
 
 ```sh
 git clone https://github.com/MadnessMyth/RoseBlox.git ~/RoseBlox
 ~/RoseBlox/packaging/generic/install.sh
 ```
 
-Run the script as your normal user, not with `sudo`. It checks the libraries from step 1 and tells you the exact command if one is missing. It installs Roseblox for your user only:
+Run the script as your normal user, not with `sudo`. It checks the libraries above and tells you the exact command if one is missing. It installs:
 
 - the app in `~/.local/lib/roseblox`
 - the `roseblox` command in `~/.local/bin`
@@ -108,7 +128,7 @@ Run the script as your normal user, not with `sudo`. It checks the libraries fro
 
 If it says `~/.local/bin` is not in your `PATH`, log out and back in. Most distributions add that folder at login once it exists. The `roseblox` command must be found there for Roblox links and update notifications to work.
 
-### 3. Get Rosemary
+### Get Rosemary
 
 Open **Roseblox** from your application menu. On these systems the Rosemary step offers **Download the AppImage** instead of the AUR:
 
@@ -118,7 +138,7 @@ Open **Roseblox** from your application menu. On these systems the Rosemary step
 2. Download the file ending in `x86_64.AppImage`, for example `Rosemary-0.5.0-x86_64.AppImage`.
 3. Roseblox looks in your Downloads folder, `~/Applications`, `~/.local/bin` and `~/bin`. When it finds the file, **Rosemary AppImage found** appears. Click **Use This File**; Roseblox makes the file executable and uses it from where it is. If you move or delete the file later, choose it again in setup or **Settings → Advanced**.
 
-The first time Roblox starts, Rosemary offers to download its macOS base system (about 180 MB) once.
+This is Rosemary's AppImage, separate from Roseblox's own. The first time Roblox starts, Rosemary offers to download its macOS base system (about 180 MB) once.
 
 Other ways to get Rosemary also work, as long as the result is a `rosemary` command in your `PATH` or a file you pick with **Choose…**:
 
@@ -131,19 +151,27 @@ Then continue with steps 2 to 4 of [first-time setup](#6-run-first-time-setup).
 
 ### Updating on other distributions
 
-```sh
-cd ~/RoseBlox && git pull && packaging/generic/install.sh
-```
+Roseblox looks for new versions of itself once a day while it is open, and the bell shows **Roseblox X.Y.Z is available** when there is one. Turn this off in **Settings → Updates → Check for new Roseblox versions**.
+
+- **AppImage**: click **Update** in the bell. Roseblox downloads the new AppImage, checks it against the release's checksums, replaces the old file, and offers **Restart**.
+- **.deb**: click **Open Release**, download the new `.deb` and install it with `sudo apt install ./roseblox_*_all.deb` again.
+- **Install script**: run
+
+  ```sh
+  cd ~/RoseBlox && git pull && packaging/generic/install.sh
+  ```
 
 Your settings, installations and link choice are kept. To update Rosemary, download the newer AppImage and click **Use This File** again, or choose it in **Settings → Advanced**.
 
 ### Uninstalling on other distributions
 
-```sh
-~/RoseBlox/packaging/generic/install.sh --uninstall
-```
+Turn off **Open Roblox links with Roseblox** and **Notify me about Roblox updates** first, as in [Uninstall](#uninstall) step 1. Then:
 
-Turn off **Open Roblox links with Roseblox** and **Notify me about Roblox updates** first, as in [Uninstall](#uninstall) step 1. Then follow its step 3 if you also want to delete your settings and Roblox apps.
+- **AppImage**: delete the AppImage file, `~/.local/share/applications/io.github.roseblox.Roseblox.desktop` and `~/.local/share/icons/hicolor/scalable/apps/io.github.roseblox.Roseblox.svg`.
+- **.deb**: `sudo apt remove roseblox`
+- **Install script**: `~/RoseBlox/packaging/generic/install.sh --uninstall`
+
+Follow [Uninstall](#uninstall) step 3 if you also want to delete your settings and Roblox apps.
 
 ## Settings
 
@@ -156,7 +184,7 @@ Click a section heading in **Settings** to open or close it; Roseblox remembers 
 - **After Launching**: close Roseblox after Player or Studio starts, and **Allow more than one Roblox Player**. See [Closing Roseblox after launching](#closing-roseblox-after-launching) and [More than one Roblox Player](#more-than-one-roblox-player).
 - **While Playing**: Discord Rich Presence, a server location notification, and closing Roblox when you leave a game. See [While Playing](#while-playing).
 - **Roblox Links**: open `roblox://` links with Roseblox.
-- **Updates**: update notifications, **Check Now**, and skipped versions.
+- **Updates**: update notifications, **Check Now**, skipped versions, and **Check for new Roseblox versions**.
 - **Advanced** (closed by default): the Rosemary executable path, the Player and Studio version sources, and the Discord application ID. You normally do not need to change these.
 
 ![Light style with System colors and a teal accent](screenshots/12-system-colors-teal.png)
@@ -182,6 +210,7 @@ Click the bell at the top right. The badge counts the items in the center:
 - **Downloads**: what is downloading or installing, with progress, speed, time left, and **Cancel**. The arrow opens the Player or Studio page.
 - **Updates**: new Player and Studio versions, with **Update** and **Skip**, the same as the desktop notification.
 - **Recent**: installs that finished or failed. Use **Clear** to remove them.
+- **Roseblox**: a new version of Roseblox itself, with **Update** for the AppImage, or the way to update the .deb, install script or package. **Not Now** hides it until Roseblox restarts.
 
 **Check for Updates** looks for new versions right away.
 
@@ -260,6 +289,8 @@ cd ~/RoseBlox && git checkout -- packaging/arch-git/PKGBUILD && git pull && cd p
 
 `makepkg` writes the version it built into `PKGBUILD`, so the `git checkout` line discards that edit before `git pull`; otherwise the pull can refuse to run. `git pull` updates the packaging recipe, and `makepkg` fetches and builds the latest `master`. Your settings, installations and link choice are kept. `pacman -Q roseblox-git` shows the new version, for example `0.2.0.r3.g1a2b3c4-1`, where the last part is the commit it was built from.
 
+Roseblox shows **Roseblox X.Y.Z is available** in the bell when a new release is out; on Arch, update with the commands above.
+
 On other distributions, see [Updating on other distributions](#updating-on-other-distributions).
 
 ### Rosemary
@@ -289,7 +320,7 @@ To update by hand, open the **Player** or **Studio** page, click **Refresh Versi
 
 ### More than one Roblox Player
 
-Roblox treats a second launch of the same installation as a request to show the window that is already open. To run two Players at once, for example to sign in to a different account in each, run them from two installations. Two different versions work, and so does a copy:
+Roblox Player allows only one copy of itself, and Rosemary enforces that: opening Player again shows the window that is already open, even from another installation and even with `rosemary --new-instance`. With the setting below on, Roseblox starts Player through the program inside the app bundle instead, which Rosemary always allows. To run two Players at once, for example to sign in to a different account in each, run them from two installations, so Roseblox can track and stop each one. Two different versions work, and so does a copy:
 
 ![Allow more than one Roblox Player in Settings](screenshots/21-multiple-players.png)
 
@@ -323,7 +354,7 @@ To update after a new release, run `git pull` in `~/RoseBlox`, then `makepkg -si
    sudo pacman -R roseblox-git    # or: sudo pacman -R roseblox
    ```
 
-   On other distributions, run `~/RoseBlox/packaging/generic/install.sh --uninstall` instead.
+   On other distributions, see [Uninstalling on other distributions](#uninstalling-on-other-distributions) instead.
 
 3. Optional: delete downloaded Roblox apps and settings:
 
