@@ -1,6 +1,6 @@
 pkgbase = roseblox
 	pkgdesc = Native GTK launcher and installation manager for Roblox through Rosemary
-	pkgver = 0.4.2
+	pkgver = 0.5.0
 	pkgrel = 1
 	url = https://github.com/MadnessMyth/RoseBlox
 	arch = any
@@ -17,10 +17,10 @@ pkgbase = roseblox
 	optdepends = libarchive: required for importing or extracting Roblox ZIP archives (bsdtar)
 	optdepends = gamemode: Performance → GameMode
 	optdepends = mangohud: Performance → MangoHud overlay
-	source = roseblox-0.4.2.tar.gz::https://github.com/MadnessMyth/RoseBlox/archive/refs/tags/v0.4.2.tar.gz
+	source = roseblox-0.5.0.tar.gz::https://github.com/MadnessMyth/RoseBlox/archive/refs/tags/v0.5.0.tar.gz
 	source = io.github.roseblox.Roseblox.desktop
 	source = io.github.roseblox.Roseblox.svg
-	sha256sums = ec65a90e1892c2d3484cad535ccbf92b5494bdc2ec466b168d5841885c07105e
+	sha256sums = 7ebbb72730fd384b946900615626c22d1889cf7ae8c4642d90cc7e3f380bd512
 	sha256sums = cd9e1e127ca6ccb21056d185527be2ca2bbf45ebe44540020ca8438ea579045d
 	sha256sums = d95259e28df1478d01c8555180e83dc2d8064b8fc95110a03104152d3278a863
 
