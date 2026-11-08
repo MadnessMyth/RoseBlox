@@ -1,6 +1,6 @@
 # Roseblox brag plan
 
-Made with /brag-slim (latent-spaces/brag). Format: landscape 1920×1080, 30 fps, 22.5 s.
+Made with /brag-slim (latent-spaces/brag). Format: landscape 1920×1080, 30 fps, 23 s.
 
 ## Answers
 
@@ -23,6 +23,14 @@ A sneak peek: "Roblox on Linux that feels native", then four quick proofs from t
 - Font: Cantarell (GNOME's UI font, the one the app uses).
 - Real screenshots from `docs/screenshots`, shown as rounded cards with a soft shadow, a slow push-in, and animated highlights, cursor moves and clicks on top.
 - The screenshots come from the test environment: paths like `/tmp/rbx-…` and versions like `version-0123456789abcdef` are fictional test data, not anyone's real system. No personal data appears.
+- The Performance screenshot was taken on a machine without GameMode and MangoHud, so its rows said "not installed" with the switches off. The video swaps in the subtitles the page shows when they are installed (from `performance_page.py`; MangoHud's is shortened to its first clause) and the real "on" switch from the While Playing screenshot, which the cursor clicks on.
+
+## Motion
+
+- A camera in every app scene zooms in on the action and follows it (onto Launch, down the rows as they light up, onto Duplicate… then the copy's Launch). The titles stay fixed; the app passes under a soft header scrim, so text stays readable.
+- While zoomed, the camera keeps the screenshot filling the frame instead of showing its edges.
+- Push transitions: the outgoing scene zooms forward 10% as it dips; the incoming one settles in from 94%.
+- The background glow drifts slowly; the hook and outro push in gently and the icon bobs on the bar.
 
 ## Music
 
@@ -34,10 +42,10 @@ Synthesised in `work/make_brag.py`. 120 BPM (beat = 0.5 s), A minor, chords Am�
 |---|---|---|---|---|---|
 | 1 | 0.0–2.0 | 4 | Hook | Icon, "Roblox on Linux", then "that feels native." | Icon pops on beat 0; line 2 on beat 1.5 |
 | 2 | 2.0–5.0 | 6 | Reveal | ROSEBLOX · "Player and Studio, one click away" + Home | Cursor glides to Launch, click on 4.0 s (ripple + click) |
-| 3 | 5.0–8.5 | 7 | Highlight: Performance | "Tune it like a native game" · Refresh rate · GameMode · MangoHud | Rows light up on beats (6.0, 6.5, 7.0) |
+| 3 | 5.0–8.5 | 7 | Highlight: Performance | "Tune it like a native game" · Refresh rate · GameMode · MangoHud | Rows light up on beats (6.0, 6.5, 7.0); cursor switches GameMode and MangoHud on (6.5, 7.0) |
 | 4 | 8.5–12.0 | 7 | Highlight: Mods | "Make Roblox yours" · Fonts · cursors · skyboxes · the classic oof | Rows light up on beats (9.5, 10.0, 10.5, 11.0) |
 | 5 | 12.0–15.5 | 7 | Highlight: While playing | "Show friends what you're playing" · Discord presence · Join Server · server location | Rows light up on beats (13.0, 13.5, 14.0) |
 | 6 | 15.5–19.0 | 7 | Highlight: New in 0.4.2 | "Two Players, side by side" · Duplicate an installation, launch both. | Click Duplicate… (16.5), copy appears (17.0), click Launch on the copy (18.0) |
-| 7 | 19.0–22.5 | 7 | Outro | Icon, "Roseblox", github.com/MadnessMyth/RoseBlox, "Free and open source · Arch Linux and CachyOS", "Not affiliated with Roblox Corporation." | Final chord; fade to black over the last 0.5 s |
+| 7 | 19.0–23.0 | 8 | Outro | Icon, "Roseblox", github.com/MadnessMyth/RoseBlox, "Free and open source · Arch Linux and CachyOS", "Not affiliated with Roblox Corporation." | Final chord; fade to black over the last 0.5 s |
 
 Transitions dip through the background: each scene fades its content out over the last 0.25 s before the cut, and the next scene builds in from empty background on the beat.

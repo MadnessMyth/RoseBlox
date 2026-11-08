@@ -35,6 +35,7 @@ BG_DARK = (22, 17, 26)
 TEXT = (246, 238, 244)
 MUTED = (190, 176, 188)
 PAGE_BG = (29, 26, 32)
+ROW_BG = (47, 44, 49)
 
 
 @dataclass
@@ -57,6 +58,9 @@ class Scene:
     reveal: tuple[float, list[tuple[int, int, int, int]]] | None = None
     crop: tuple[int, int, int, int] | None = None
     portrait_crop: tuple[int, int, int, int] | None = None
+    camera: list[tuple[float, float | None, float | None, float]] = field(default_factory=list)
+    patches: list[tuple[tuple[int, int, int, int], str, tuple[float, float]]] = field(default_factory=list)
+    toggles: list[tuple[float, tuple[int, int]]] = field(default_factory=list)
 
     @property
     def duration(self) -> float:
@@ -67,25 +71,42 @@ class Scene:
 SCENES = [
     Scene(4, "", "Roblox on Linux", "that feels native.", kind="hook"),
     Scene(6, "ROSEBLOX", "Player and Studio, one click away", "", "07-home.png",
-          clicks=[Click(2.0, 296, 335)], crop=(0, 0, 1292, 660), portrait_crop=(170, 60, 1292, 700)),
+          clicks=[Click(2.0, 296, 335)], crop=(0, 0, 1292, 660), portrait_crop=(170, 60, 1292, 700),
+          camera=[(0.9, None, None, 1.0), (1.8, 400, 320, 1.75), (3.0, 380, 320, 1.85)]),
     Scene(7, "PERFORMANCE", "Tune it like a native game",
           "Refresh rate  ·  GameMode  ·  MangoHud", "14-performance.png",
           highlights=[(1.0, (231, 501, 1212, 553)), (1.5, (231, 611, 1212, 663)),
-                      (2.0, (231, 665, 1212, 717))], portrait_crop=(205, 200, 1245, 750)),
+                      (2.0, (231, 665, 1212, 717))], portrait_crop=(205, 200, 1245, 750),
+          camera=[(0.6, None, None, 1.0), (1.1, 740, 527, 1.6), (1.6, 760, 600, 1.65),
+                  (2.2, 760, 640, 1.7), (3.5, 760, 640, 1.75)],
+          clicks=[Click(1.5, 1176, 636), Click(2.0, 1176, 690)],
+          toggles=[(1.5, (1176, 636)), (2.0, (1176, 690))],
+          # The screenshot was taken without GameMode and MangoHud installed; show the
+          # subtitles the page uses when they are (performance_page.py).
+          patches=[((240, 638, 1100, 654), "Asks Feral GameMode to tune the system while the application runs.",
+                    (246, 640.5)),
+                   ((240, 693, 1100, 709), "Shows frame rate and frame times through MangoHud's Vulkan layer.",
+                    (246, 695.5))]),
     Scene(7, "MODS", "Make Roblox yours",
           "Fonts  ·  cursors  ·  skyboxes  ·  the classic oof", "17-mods.png",
           highlights=[(1.0, (231, 273, 1231, 326)), (1.5, (231, 326, 1231, 380)),
                       (2.0, (231, 380, 1231, 434)), (2.5, (231, 631, 1231, 683))],
-          crop=(0, 0, 1264, 730), portrait_crop=(205, 80, 1264, 720)),
+          crop=(0, 0, 1264, 730), portrait_crop=(205, 80, 1264, 720),
+          camera=[(0.6, None, None, 1.0), (1.1, 730, 300, 1.55), (2.2, 730, 400, 1.5),
+                  (2.7, 730, 600, 1.5), (3.5, 730, 620, 1.55)]),
     Scene(7, "WHILE PLAYING", "Show friends what you're playing",
           "Discord presence  ·  Join Server  ·  server location", "16-while-playing.png",
           highlights=[(1.0, (231, 455, 1224, 509)), (1.5, (231, 509, 1224, 563)),
-                      (2.0, (231, 563, 1224, 617))], portrait_crop=(205, 300, 1257, 750)),
+                      (2.0, (231, 563, 1224, 617))], portrait_crop=(205, 300, 1257, 750),
+          camera=[(0.6, None, None, 1.0), (1.1, 728, 482, 1.65), (2.2, 728, 560, 1.7),
+                  (3.5, 728, 560, 1.8)]),
     Scene(7, "NEW IN 0.4.2", "Two Players, side by side",
           "Duplicate an installation, launch both.", "22-player-duplicate.png",
           clicks=[Click(1.0, 1221, 358), Click(2.5, 1113, 453)],
           reveal=(1.5, [(230, 404, 1396, 502), (228, 278, 1010, 298), (228, 200, 1040, 226)]),
-          crop=(0, 0, 1428, 560), portrait_crop=(200, 60, 1428, 520)),
+          crop=(0, 0, 1428, 560), portrait_crop=(200, 60, 1428, 520),
+          camera=[(0.35, None, None, 1.0), (0.9, 1050, 370, 1.7), (1.6, 900, 410, 1.45),
+                  (2.3, 1000, 440, 1.7), (3.5, 1000, 440, 1.8)]),
     Scene(8, "", "Roseblox", "github.com/MadnessMyth/RoseBlox", kind="cta"),
 ]
 
@@ -170,49 +191,59 @@ def eyebrow_img(text: str, size: int, width: int) -> Image.Image:
 
 
 class ShotCard:
-    """A screenshot card whose overlays (highlights, reveal masks) depend on time."""
+    """A screenshot card at the screenshot's own resolution; overlays depend on time."""
 
-    def __init__(self, scene: Scene, max_w: int, max_h: int, crop):
+    def __init__(self, scene: Scene, crop):
         src = Image.open(SHOTS / scene.shot).convert("RGB")
+        if scene.patches:
+            d = ImageDraw.Draw(src)
+            f = ImageFont.truetype(str(FONT_DIR / "Cantarell-Regular.otf"), 11.5)
+            for box, text, pos in scene.patches:
+                d.rectangle(box, fill=ROW_BG)
+                d.text(pos, text, font=f, fill=(155, 152, 157))
+        self.toggle_on = None
+        if scene.toggles:
+            self.toggle_on = Image.open(SHOTS / "16-while-playing.png").convert("RGB").crop((1161, 466, 1213, 498))
         self.ox, self.oy = 0, 0
         if crop:
             self.ox, self.oy = crop[0], crop[1]
             src = src.crop(crop)
-        self.scale = min(max_w / src.width, max_h / src.height)
-        self.src = src
-        self.size = (round(src.width * self.scale), round(src.height * self.scale))
-        self.base = src.resize(self.size, Image.LANCZOS)
+        self.base = src
+        self.size = src.size
         self.scene = scene
         if scene.reveal:
             masked = src.copy()
             d = ImageDraw.Draw(masked)
             for box in scene.reveal[1]:
                 d.rectangle(self.local(box), fill=PAGE_BG)
-            self.masked = masked.resize(self.size, Image.LANCZOS)
+            self.masked = masked
         w, h = self.size
         self.radius = max(10, w // 70)
         self.mask = Image.new("L", self.size, 0)
         ImageDraw.Draw(self.mask).rounded_rectangle((0, 0, w - 1, h - 1), self.radius, fill=255)
-        self.pad = 60
+        self.pad = 70
         frame = Image.new("RGBA", (w + self.pad * 2, h + self.pad * 2), (0, 0, 0, 0))
         shadow = Image.new("L", frame.size, 0)
         ImageDraw.Draw(shadow).rounded_rectangle(
-            (self.pad, self.pad + 18, self.pad + w, self.pad + h + 18), self.radius, fill=170)
-        frame.paste((0, 0, 0, 255), (0, 0), shadow.filter(ImageFilter.GaussianBlur(26)))
+            (self.pad, self.pad + 22, self.pad + w, self.pad + h + 22), self.radius, fill=170)
+        frame.paste((0, 0, 0, 255), (0, 0), shadow.filter(ImageFilter.GaussianBlur(30)))
         self.frame = frame
+
+    @property
+    def card_size(self) -> tuple[int, int]:
+        return self.frame.size
 
     def local(self, box):
         x0, y0, x1, y1 = box
         return (x0 - self.ox, y0 - self.oy, x1 - self.ox, y1 - self.oy)
 
     def to_card(self, x: float, y: float) -> tuple[float, float]:
-        return (self.pad + (x - self.ox) * self.scale, self.pad + (y - self.oy) * self.scale)
+        return (self.pad + x - self.ox, self.pad + y - self.oy)
 
     def render(self, t: float) -> Image.Image:
         s = self.scene
         if s.reveal:
-            a = ease_out((t - s.reveal[0]) / 0.35)
-            shot = Image.blend(self.masked, self.base, a)
+            shot = Image.blend(self.masked, self.base, ease_out((t - s.reveal[0]) / 0.35))
         else:
             shot = self.base.copy()
         shot = shot.convert("RGBA")
@@ -222,11 +253,21 @@ class ShotCard:
             a = ease_out((t - at) / 0.25)
             if a <= 0:
                 continue
-            x0, y0, x1, y1 = [v * self.scale for v in self.local(box)]
             pulse = 1 - clamp01((t - at) / 0.5)
-            d.rounded_rectangle((x0, y0, x1, y1), 8, fill=(*ACCENT, int(34 * a + 40 * pulse)))
-            d.rounded_rectangle((x0, y0, x1, y1), 8, outline=(*ACCENT, int(255 * a)), width=3)
+            grow = 6 * pulse
+            x0, y0, x1, y1 = self.local(box)
+            d.rounded_rectangle((x0 - grow, y0 - grow, x1 + grow, y1 + grow), 9,
+                                fill=(*ACCENT, int(34 * a + 40 * pulse)))
+            d.rounded_rectangle((x0 - grow, y0 - grow, x1 + grow, y1 + grow), 9,
+                                outline=(*ACCENT, int(255 * a)), width=3)
         shot.alpha_composite(overlay)
+        for at, (x, y) in s.toggles:
+            a = ease_out((t - at) / 0.12)
+            if a > 0:
+                lx, ly = x - self.ox, y - self.oy
+                tw, th = self.toggle_on.size
+                shot.alpha_composite(with_alpha(self.toggle_on.convert("RGBA"), a),
+                                     (int(lx - tw / 2 + 0.5), int(ly - th / 2)))
         card = self.frame.copy()
         card.paste(shot, (self.pad, self.pad), self.mask)
         w, h = self.size
@@ -252,15 +293,35 @@ def cursor_sprite(scale: float) -> Image.Image:
     return shadow.resize(size, Image.LANCZOS)
 
 
+def camera_at(s: Scene, t: float, center: tuple[float, float]) -> tuple[float, float, float]:
+    """Focus point (screenshot pixels) and zoom, eased between keyframes."""
+    keys = [(k[0], center[0] if k[1] is None else k[1], center[1] if k[2] is None else k[2], k[3])
+            for k in s.camera] or [(0.0, center[0], center[1], 1.0)]
+    if t <= keys[0][0]:
+        return keys[0][1:]
+    for (t0, x0, y0, z0), (t1, x1, y1, z1) in zip(keys, keys[1:]):
+        if t <= t1:
+            k = ease_in_out((t - t0) / (t1 - t0))
+            return x0 + (x1 - x0) * k, y0 + (y1 - y0) * k, z0 + (z1 - z0) * k
+    return keys[-1][1:]
+
+
 class Renderer:
     def __init__(self, w: int, h: int):
         self.w, self.h = w, h
         self.portrait = h > w
-        self.bg = background(w, h).convert("RGBA")
+        self.bg_margin = (int(w * 0.08), int(h * 0.08))
+        self.bg_big = background(w + 2 * self.bg_margin[0], h + 2 * self.bg_margin[1]).convert("RGBA")
         icon = Image.open(WORK / "icon.png").convert("RGBA")
         self.icon_big = icon.resize((280, 280), Image.LANCZOS)
         self.cursor = cursor_sprite(1.15 if self.portrait else 1.0)
         self.cache: dict[int, dict] = {}
+
+    def bg_at(self, gt: float) -> Image.Image:
+        mx, my = self.bg_margin
+        x = mx + mx * 0.8 * math.sin(2 * math.pi * gt / 17)
+        y = my + my * 0.8 * math.sin(2 * math.pi * gt / 13 + 1.1)
+        return self.bg_big.crop((int(x), int(y), int(x) + self.w, int(y) + self.h))
 
     def prepare(self, i: int) -> dict:
         if i in self.cache:
@@ -273,10 +334,10 @@ class Renderer:
             p["eyebrow"] = eyebrow_img(s.eyebrow, sizes[0], tw)
             p["title"] = text_lines(s.title, font("ExtraBold", sizes[1]), TEXT, tw)
             p["sub"] = text_lines(s.subtitle, font("Regular", sizes[2]), MUTED, tw) if s.subtitle else None
-            if self.portrait:
-                p["card"] = ShotCard(s, w - 40, int(h * 0.55), s.portrait_crop)
-            else:
-                p["card"] = ShotCard(s, 1480, int(h * 0.64), s.crop)
+            sc = ShotCard(s, s.portrait_crop if self.portrait else s.crop)
+            max_w, max_h = (w - 40, h * 0.55) if self.portrait else (1480, h * 0.64)
+            p["card"] = sc
+            p["fit"] = min(max_w / sc.size[0], max_h / sc.size[1])
         elif s.kind == "hook":
             big = 150 if self.portrait else 132
             p["title"] = text_lines(s.title, font("ExtraBold", big), TEXT, w - 120)
@@ -296,16 +357,18 @@ class Renderer:
         if layer is not None and a > 0:
             img.alpha_composite(with_alpha(layer, a), (int(x), int(y)))
 
-    def frame(self, i: int, t: float) -> Image.Image:
+    def frame(self, i: int, t: float, gt: float) -> Image.Image:
         s = SCENES[i]
         p = self.prepare(i)
         w, h = self.w, self.h
-        img = self.bg.copy()
+        bg = self.bg_at(gt)
+        layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
 
         def rise(start: float, dur: float = 0.45) -> tuple[float, int]:
             a = ease_out((t - start) / dur)
             return a, int((1 - a) * 34)
 
+        push = 1.0
         if s.kind == "hook":
             ia = ease_out(t / 0.35)
             pop = 1 + 0.18 * math.sin(math.pi * clamp01(t / 0.35)) if t < 0.35 else 1.0
@@ -314,75 +377,144 @@ class Renderer:
             gap = 50
             block = 280 + gap + p["title"].height + p["sub"].height
             y0 = (h - block) // 2
-            self.place(img, ib, (w - size) // 2, y0 + (280 - size) // 2, ia)
+            bob = 8 * math.sin(2 * math.pi * t / (BEAT * 4))
+            self.place(layer, ib, (w - size) // 2, y0 + (280 - size) // 2 + bob, ia)
             a, dy = rise(0.1)
             ty = y0 + 280 + gap
-            self.place(img, p["title"], (w - p["title"].width) // 2, ty + dy, a)
+            self.place(layer, p["title"], (w - p["title"].width) // 2, ty + dy, a)
             a, dy = rise(0.75)
-            self.place(img, p["sub"], (w - p["sub"].width) // 2, ty + p["title"].height + dy, a)
+            self.place(layer, p["sub"], (w - p["sub"].width) // 2, ty + p["title"].height + dy, a)
+            push = 1.0 + 0.07 * ease_out(t / s.duration)
         elif s.kind == "shot":
-            eb, ti, su = p["eyebrow"], p["title"], p["sub"]
-            top = int(h * 0.09) if self.portrait else 46
-            a, dy = rise(0.05)
-            self.place(img, eb, (w - eb.width) // 2, top + dy, a)
-            a, dy = rise(0.12)
-            ty = top + eb.height + 6
-            self.place(img, ti, (w - ti.width) // 2, ty + dy, a)
-            text_bottom = ty + ti.height
-            if su is not None:
-                a, dy = rise(0.3)
-                self.place(img, su, (w - su.width) // 2, text_bottom + 4 + dy, a)
-                text_bottom += su.height + 4
-            sc: ShotCard = p["card"]
-            card = sc.render(t)
-            zoom = 1.0 + 0.03 * (t / s.duration)
-            cw, ch = int(card.width * zoom), int(card.height * zoom)
-            card = card.resize((cw, ch), Image.BILINEAR)
-            ca = ease_out((t - 0.15) / 0.5)
-            area_top = text_bottom - 20
-            area_h = h - area_top - (int(h * 0.05) if self.portrait else 0)
-            cx = (w - cw) // 2
-            cy = area_top + (area_h - ch) // 2 + int((1 - ca) * 70)
-            self.place(img, card, cx, cy, ca)
-            self.draw_cursor(img, s, sc, t, cx, cy, zoom)
+            layer = self.shot_frame(s, p, t, bg)
         else:
             ia = ease_out(t / 0.4)
             pop = 1 + 0.12 * math.sin(math.pi * clamp01(t / 0.4)) if t < 0.4 else 1.0
-            breathe = 1 + 0.015 * math.sin(2 * math.pi * t / (BEAT * 4))
+            breathe = 1 + 0.02 * math.sin(2 * math.pi * t / (BEAT * 4))
             size = int(240 * (0.7 + 0.3 * ia) * pop * breathe)
             ib = self.icon_big.resize((size, size), Image.LANCZOS)
-            layers = [p["title"], p["tag"], p["url"]]
-            block = 240 + 40 + sum(l.height for l in layers) + 30
+            texts = [p["title"], p["tag"], p["url"]]
+            block = 240 + 40 + sum(l.height for l in texts) + 30
             y0 = (h - block) // 2 - (80 if self.portrait else 50)
-            self.place(img, ib, (w - size) // 2, y0 + (240 - size) // 2, ia)
+            bob = 6 * math.sin(2 * math.pi * t / (BEAT * 4))
+            self.place(layer, ib, (w - size) // 2, y0 + (240 - size) // 2 + bob, ia)
             y = y0 + 240 + 40
-            for k, layer in enumerate(layers):
+            for k, txt in enumerate(texts):
                 a, dy = rise(0.15 + 0.25 * k)
-                self.place(img, layer, (w - layer.width) // 2, y + dy, a)
-                y += layer.height + (12 if k == 1 else 0)
+                self.place(layer, txt, (w - txt.width) // 2, y + dy, a)
+                y += txt.height + (12 if k == 1 else 0)
             a, _ = rise(1.0, 0.6)
             ny = h - (260 if self.portrait else 130)
-            self.place(img, p["note1"], (w - p["note1"].width) // 2, ny, a)
-            self.place(img, p["note2"], (w - p["note2"].width) // 2, ny + p["note1"].height + 6, a)
+            self.place(layer, p["note1"], (w - p["note1"].width) // 2, ny, a)
+            self.place(layer, p["note2"], (w - p["note2"].width) // 2, ny + p["note1"].height + 6, a)
+            push = 1.0 + 0.05 * ease_out(t / s.duration)
 
+        fade = 1.0
+        if i > 0:
+            push *= 0.94 + 0.06 * ease_out(t / 0.45)
         if i < len(SCENES) - 1 and t > s.duration - DIP:
             k = ease_in_out((t - (s.duration - DIP)) / DIP)
-            img = Image.blend(img, self.bg, k)
-        return img.convert("RGB")
+            push *= 1 + 0.1 * k
+            fade = 1 - k
+        if abs(push - 1.0) > 1e-3:
+            lw, lh = int(w * push), int(h * push)
+            big = layer.resize((lw, lh), Image.BILINEAR)
+            if push >= 1:
+                ox, oy = (lw - w) // 2, (lh - h) // 2
+                layer = big.crop((ox, oy, ox + w, oy + h))
+            else:
+                layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+                layer.alpha_composite(big, ((w - lw) // 2, (h - lh) // 2))
+        bg.alpha_composite(with_alpha(layer, fade))
+        return bg.convert("RGB")
 
-    def draw_cursor(self, img, s: Scene, sc: ShotCard, t: float, cx: int, cy: int, zoom: float):
+    def shot_frame(self, s: Scene, p: dict, t: float, bg: Image.Image) -> Image.Image:
+        w, h = self.w, self.h
+        layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        eb, ti, su = p["eyebrow"], p["title"], p["sub"]
+        top = int(h * 0.09) if self.portrait else 46
+
+        def rise(start: float, dur: float = 0.45) -> tuple[float, int]:
+            a = ease_out((t - start) / dur)
+            return a, int((1 - a) * 34)
+
+        ty = top + eb.height + 6
+        text_bottom = ty + ti.height + ((su.height + 4) if su is not None else 0)
+
+        sc: ShotCard = p["card"]
+        card = sc.render(t)
+        cw, ch = sc.card_size
+        fit = p["fit"]
+        area_top = text_bottom - 20
+        area_h = h - area_top - (int(h * 0.05) if self.portrait else 0)
+        anchor = (w / 2, area_top + area_h / 2)
+        center = (sc.ox + sc.size[0] / 2, sc.oy + sc.size[1] / 2)
+        fx, fy, z = camera_at(s, t, center)
+        z *= 1 + 0.025 * (t / s.duration)
+        scale = fit * z
+        fcx, fcy = sc.to_card(fx, fy)
+        fill = clamp01((z - 1.0) / 0.3)
+        if fill > 0:
+            c_left, c_top = sc.pad, sc.pad
+            c_right, c_bottom = sc.pad + sc.size[0], sc.pad + sc.size[1]
+
+            def keep_filled(f, lo_edge, hi_edge, before, after):
+                lo, hi = lo_edge + before / scale, hi_edge - after / scale
+                return (lo + hi) / 2 if lo > hi else min(max(f, lo), hi)
+
+            fcx += (keep_filled(fcx, c_left, c_right, anchor[0], w - anchor[0]) - fcx) * fill
+            fcy += (keep_filled(fcy, c_top, c_bottom, anchor[1] - area_top, h - anchor[1]) - fcy) * fill
+        ca = ease_out((t - 0.15) / 0.5)
+        lift = (1 - ca) * 80
+
+        def to_screen(cx: float, cy: float) -> tuple[float, float]:
+            return anchor[0] + (cx - fcx) * scale, anchor[1] + (cy - fcy) * scale + lift
+
+        x0c = max(0.0, fcx - anchor[0] / scale)
+        y0c = max(0.0, fcy - (anchor[1] + lift) / scale)
+        x1c = min(cw, fcx + (w - anchor[0]) / scale)
+        y1c = min(ch, fcy + (h - anchor[1] - lift) / scale)
+        if x1c > x0c and y1c > y0c:
+            region = card.crop((int(x0c), int(y0c), math.ceil(x1c), math.ceil(y1c)))
+            rw = max(1, round(region.width * scale))
+            rh = max(1, round(region.height * scale))
+            region = region.resize((rw, rh), Image.BICUBIC if scale > 1 else Image.LANCZOS)
+            sx, sy = to_screen(int(x0c), int(y0c))
+            self.place(layer, region, sx, sy, ca)
+
+        self.draw_cursor(layer, s, sc, t, to_screen)
+
+        scrim_k = clamp01((z - 1.02) / 0.25)
+        if scrim_k > 0:
+            mask = Image.new("L", (1, h), 0)
+            solid, soft = text_bottom - 10, text_bottom + 50
+            for y in range(h):
+                v = 1.0 if y < solid else max(0.0, 1 - (y - solid) / (soft - solid))
+                mask.putpixel((0, y), int(255 * v * scrim_k))
+            mask = mask.resize((w, h))
+            header = bg.copy()
+            header.putalpha(mask)
+            layer.alpha_composite(header)
+
+        a, dy = rise(0.05)
+        self.place(layer, eb, (w - eb.width) // 2, top + dy, a)
+        a, dy = rise(0.12)
+        self.place(layer, ti, (w - ti.width) // 2, ty + dy, a)
+        if su is not None:
+            a, dy = rise(0.3)
+            self.place(layer, su, (w - su.width) // 2, ty + ti.height + 4 + dy, a)
+        return layer
+
+    def draw_cursor(self, img, s: Scene, sc: ShotCard, t: float, to_screen):
         if not s.clicks:
             return
-        pts = []
-        for c in s.clicks:
-            x, y = sc.to_card(c.x, c.y)
-            pts.append((c.at, cx + x * zoom, cy + y * zoom))
+        pts = [(c.at, *to_screen(*sc.to_card(c.x, c.y))) for c in s.clicks]
         enter_at = max(0.4, pts[0][0] - 0.8)
         if t < enter_at:
             return
-        sx, sy = pts[0][1] + 260, pts[0][2] + 200
-        x, y = sx, sy
-        prev_t, prev_x, prev_y = enter_at, sx, sy
+        start = (pts[0][1] + 260, pts[0][2] + 200)
+        x, y = start
+        prev_t, prev_x, prev_y = enter_at, start[0], start[1]
         for at, px, py in pts:
             move_start = max(prev_t + 0.15, at - 0.65)
             if t <= at:
@@ -426,7 +558,7 @@ def total_duration() -> float:
 
 def frame_at(r: Renderer, t: float, st: list[float]) -> Image.Image:
     i = max(j for j, v in enumerate(st) if v <= t + 1e-9)
-    img = r.frame(i, t - st[i])
+    img = r.frame(i, t - st[i], t)
     total = total_duration()
     if t > total - 0.5:
         img = Image.blend(Image.new("RGB", img.size, (0, 0, 0)), img, clamp01((total - t) / 0.5))
