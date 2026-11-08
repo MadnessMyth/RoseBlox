@@ -99,6 +99,25 @@ class SetupStoreTests(unittest.TestCase):
             self.assertEqual({}, store.clear_skipped_versions().skipped_versions)
             self.assertTrue(store.load().update_checks_enabled)
 
+    def test_auto_updates_are_off_by_default_and_need_update_checks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = SetupStore(Path(directory) / "setup.json")
+            self.assertFalse(store.load().auto_update("player"))
+            store.save_auto_update("player", True)
+            self.assertFalse(store.load().auto_update("player"))
+            store.save_update_checks(True)
+            loaded = SetupStore(store.path).load()
+            self.assertTrue(loaded.auto_update("player"))
+            self.assertFalse(loaded.auto_update("studio"))
+            self.assertEqual({"player": True}, loaded.auto_updates)
+            with self.assertRaises(ValueError):
+                store.save_auto_update("player", "yes")
+            with self.assertRaises(ValueError):
+                store.save_auto_update("mobile", True)
+            store.path.write_text('{"auto_updates": {"player": "on"}}', encoding="utf-8")
+            with self.assertRaises(SetupSettingsError):
+                store.load()
+
     def test_invalid_new_preferences_are_reported_without_overwriting(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "setup.json"

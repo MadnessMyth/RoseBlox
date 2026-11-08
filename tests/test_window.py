@@ -928,6 +928,28 @@ class RealWindowTests(unittest.TestCase):
         self.assertTrue(self._wait_until(lambda: not window._refresh_in_progress))
         self.assertEqual("disk full", settings_row.get_subtitle())
 
+    def test_auto_update_switches_show_with_update_checks_and_save(self):
+        from roseblox.backend.updates import UpdateCheckerStatus
+
+        window = self._loaded_window()
+        player, studio = window.settings_page.auto_update_rows
+        setup_player, _setup_studio = window.onboarding_page.auto_update_rows
+        self.assertEqual("Auto updates for Roblox Player", player.get_title())
+        self.assertEqual("Auto updates for Roblox Studio", studio.get_title())
+        window.apply_update_checker_status(UpdateCheckerStatus(False, "Off."), reload=False)
+        self.assertFalse(player.get_visible())
+        self.assertFalse(studio.get_visible())
+
+        window.apply_update_checker_status(UpdateCheckerStatus(True, "On."), reload=False)
+        self.assertTrue(player.get_visible())
+        self.assertFalse(player.get_active())
+        self.assertFalse(studio.get_active())
+        player.set_active(True)
+        saved = window.setup_store.load()
+        self.assertEqual({"player": True}, saved.auto_updates)
+        self.assertTrue(setup_player.get_active())
+        self.assertFalse(studio.get_active())
+
     def test_skipped_versions_can_be_asked_again(self):
         from roseblox.backend.setup import SetupStore
 

@@ -9,6 +9,7 @@ gi.require_version("Adw", "1")
 gi.require_version("Gtk", "4.0")
 from gi.repository import Adw, GLib, Gtk
 
+from ..backend.setup import APP_TYPES, SetupSettingsError
 from ..backend.updates import UpdateCheckerError, UpdateCheckerStatus
 
 
@@ -78,3 +79,61 @@ class UpdateCheckRow(Adw.ActionRow):
         self.busy = False
         self.window.apply_update_checker_status(status, message, source=self)
         return GLib.SOURCE_REMOVE
+
+
+AUTO_UPDATE_TITLES = {"player": "Auto updates for Roblox Player", "studio": "Auto updates for Roblox Studio"}
+
+
+class AutoUpdateRow(Adw.ActionRow):
+    """Install new versions of one app without asking; shown only while update checks are on."""
+
+    def __init__(self, window, app_type: str) -> None:
+        super().__init__()
+        self.window = window
+        self.app_type = app_type
+        self.set_title(AUTO_UPDATE_TITLES[app_type])
+        self._subtitle = (
+            "Off: the notification asks first. "
+            "On: the new version installs by itself, then a notification says it is done."
+        )
+        self.set_subtitle(self._subtitle)
+        self.switch = Gtk.Switch()
+        self.switch.set_valign(Gtk.Align.CENTER)
+        self.add_suffix(self.switch)
+        self.set_activatable_widget(self.switch)
+        self._block = False
+        self.switch.connect("notify::active", self._changed)
+        window.update_check_rows.append(self)
+        self.apply_status(window.update_checker_status)
+
+    def get_active(self) -> bool:
+        return self.switch.get_active()
+
+    def set_active(self, active: bool) -> None:
+        self.switch.set_active(active)
+
+    def apply_status(self, status: UpdateCheckerStatus | None, message: str | None = None) -> None:
+        self.set_visible(bool(status is not None and status.enabled))
+        self._block = True
+        self.set_active(self.window.setup_state.auto_updates.get(self.app_type, False))
+        self._block = False
+
+    def _changed(self, _row, _param) -> None:
+        if self._block:
+            return
+        try:
+            self.window.setup_state = self.window.setup_store.save_auto_update(self.app_type, self.get_active())
+        except (SetupSettingsError, OSError, ValueError) as error:
+            self.set_subtitle(f"Could not save: {str(error)[:300]}")
+            self._block = True
+            self.set_active(not self.get_active())
+            self._block = False
+            return
+        self.set_subtitle(self._subtitle)
+        for row in self.window.update_check_rows:
+            if row is not self and isinstance(row, AutoUpdateRow) and row.app_type == self.app_type:
+                row.apply_status(self.window.update_checker_status)
+
+
+def auto_update_rows(window) -> list[AutoUpdateRow]:
+    return [AutoUpdateRow(window, app_type) for app_type in APP_TYPES]

@@ -114,6 +114,7 @@ class SetupState:
     update_checks_enabled: bool = False
     roseblox_update_checks: bool = True
     skipped_versions: dict[str, str] = field(default_factory=dict)
+    auto_updates: dict[str, bool] = field(default_factory=dict)
     appearance: Appearance = field(default_factory=Appearance)
     plain_ctrl_click: bool = True
     multiple_players: bool = False
@@ -122,6 +123,10 @@ class SetupState:
 
     def close_preference(self, app_type: str) -> ClosePreference:
         return self.close_after_launch.get(app_type, ClosePreference())
+
+    def auto_update(self, app_type: str) -> bool:
+        """Install new versions of ``app_type`` without asking; only while update checks are on."""
+        return self.update_checks_enabled and self.auto_updates.get(app_type, False)
 
 
 _LOCKS: dict[Path, threading.RLock] = {}
@@ -163,6 +168,7 @@ class SetupStore:
             update_checks_enabled=self._boolean(document, "update_checks_enabled"),
             roseblox_update_checks=self._boolean(document, "roseblox_update_checks", True),
             skipped_versions=self._skipped_versions(document.get("skipped_versions", {})),
+            auto_updates=self._auto_updates(document.get("auto_updates", {})),
             appearance=self._appearance(document.get("appearance", {})),
             plain_ctrl_click=self._boolean(document, "plain_ctrl_click", True),
             multiple_players=self._boolean(document, "multiple_players"),
@@ -224,6 +230,16 @@ class SetupStore:
 
     def clear_skipped_versions(self) -> SetupState:
         return self._update(skipped_versions={})
+
+    def save_auto_update(self, app_type: str, enabled: bool) -> SetupState:
+        self._require_app_type(app_type)
+        if not isinstance(enabled, bool):
+            raise ValueError("Automatic updates must be on or off.")
+
+        def change(document: dict) -> None:
+            document["auto_updates"] = {**(document.get("auto_updates") or {}), app_type: enabled}
+
+        return self._modify(change)
 
     @staticmethod
     def _require_app_type(app_type: str) -> None:
@@ -346,6 +362,14 @@ class SetupStore:
             key not in APP_TYPES or not isinstance(version, str) for key, version in value.items()
         ):
             raise SetupSettingsError("Saved skipped Roblox versions are invalid; the file was not changed.")
+        return dict(value)
+
+    @staticmethod
+    def _auto_updates(value: object) -> dict[str, bool]:
+        if not isinstance(value, dict) or any(
+            key not in APP_TYPES or not isinstance(enabled, bool) for key, enabled in value.items()
+        ):
+            raise SetupSettingsError("Saved automatic update settings are invalid; the file was not changed.")
         return dict(value)
 
     def _update(self, **updates: object) -> SetupState:

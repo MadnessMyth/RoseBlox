@@ -22,7 +22,7 @@ from .rosemary_text import (
     INSTALL_ROW_TITLES,
     rosemary_install_method,
 )
-from .update_checks import UpdateCheckRow
+from .update_checks import UpdateCheckRow, auto_update_rows
 
 _ICON_PATH = Path(__file__).resolve().parent.parent / "resources" / "roseblox-icon.svg"
 _BADGE_STATES = ("badge-done", "badge-attention", "badge-optional", "badge-working")
@@ -270,6 +270,9 @@ class OnboardingPage(Gtk.Box):
         )
         self.update_row = UpdateCheckRow(self.window, icon_name="software-update-available-symbolic")
         group.add(self.update_row)
+        self.auto_update_rows = auto_update_rows(self.window)
+        for row in self.auto_update_rows:
+            group.add(row)
         return group
 
     def _build_import_step(self) -> Gtk.Widget:

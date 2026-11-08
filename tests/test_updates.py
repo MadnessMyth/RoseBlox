@@ -262,6 +262,69 @@ class UpdateNotifierTests(unittest.TestCase):
         self.application.check()
         self.assertIn("update-player", self.withdrawn)
 
+    def _run_synchronously(self):
+        import threading
+
+        synchronous = SimpleNamespace(
+            Thread=lambda target, args=(), daemon=True: SimpleNamespace(start=lambda: target(*args)),
+            Event=threading.Event,
+        )
+        self.enterContext(patch("roseblox.update_service.threading", synchronous))
+        self.enterContext(patch("roseblox.update_service.GLib.idle_add", lambda function, *a: function(*a)))
+
+    def test_auto_update_installs_and_makes_the_new_version_preferred(self):
+        self.store.save_update_checks(True)
+        self.store.save_auto_update("player", True)
+        installer = Mock()
+
+        def download(app_type, _cancel):
+            self.records = [*self.records, _record("player", NEW, 2)]
+            return SimpleNamespace(record=self.records[-1])
+
+        installer.download_latest.side_effect = download
+        self.application.installer_factory = lambda: installer
+        self.application.preferences = Mock()
+        self._run_synchronously()
+        self.application.check()
+        self.assertEqual("player", installer.download_latest.call_args.args[0])
+        self.application.preferences.set_preferred.assert_called_once_with(
+            "player", "player-2", self.application.library
+        )
+        self.assertEqual(["update-player", "update-player", "update-studio"], self.sent)
+        self.assertEqual([], self.spawned)
+        self.assertEqual(set(), self.application.installing)
+        self.application.check()
+        self.assertEqual(1, installer.download_latest.call_count)
+
+    def test_failed_auto_update_falls_back_to_the_update_notification(self):
+        self.store.save_update_checks(True)
+        self.store.save_auto_update("studio", True)
+        installer = Mock()
+        installer.download_latest.side_effect = RuntimeError("network is down")
+        self.application.installer_factory = lambda: installer
+        self.application.preferences = Mock()
+        self._run_synchronously()
+        with patch("sys.stderr") as stderr:
+            self.application.check()
+        self.assertIn("network is down", "".join(call.args[0] for call in stderr.write.call_args_list))
+        self.application.preferences.set_preferred.assert_not_called()
+        self.assertEqual(["update-player", "update-studio", "update-studio"], self.sent)
+        self.assertEqual(set(), self.application.installing)
+        self.application.check()
+        self.assertEqual(1, installer.download_latest.call_count)
+        self.assertEqual(3, len(self.sent))
+
+    def test_auto_update_waits_for_a_running_install(self):
+        self.store.save_update_checks(True)
+        self.store.save_auto_update("player", True)
+        self.application.installing.add("player")
+        installer = Mock()
+        self.application.installer_factory = lambda: installer
+        self._run_synchronously()
+        self.application.check()
+        installer.download_latest.assert_not_called()
+        self.assertEqual(["update-studio"], self.sent)
+
     def test_disabled_while_running_stops_at_the_next_check(self):
         self.store.save_update_checks(True)
         command_line, _errors = self._command_line()

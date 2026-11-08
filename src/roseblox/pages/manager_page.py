@@ -55,7 +55,7 @@ from .rosemary_text import (
     rosemary_install_method,
 )
 from .sections import CollapsibleSection
-from .update_checks import UpdateCheckRow
+from .update_checks import UpdateCheckRow, auto_update_rows
 from ..theme import ACCENT_NAMES, system_accent_available
 from ..backend.rosemary import (
     LaunchSession,
@@ -1752,6 +1752,9 @@ class SettingsPage(Gtk.Box):
         updates_group = Adw.PreferencesGroup.new()
         self.update_row = UpdateCheckRow(window)
         updates_group.add(self.update_row)
+        self.auto_update_rows = auto_update_rows(window)
+        for row in self.auto_update_rows:
+            updates_group.add(row)
         self.check_now_row = Adw.ActionRow.new()
         self.check_now_row.set_title("Check for updates now")
         self.check_now_row.set_subtitle("Get a notification right away if a newer version is available.")
