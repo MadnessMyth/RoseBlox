@@ -283,6 +283,31 @@ class WhilePlayingSettingsTests(unittest.TestCase):
             with self.assertRaises(SetupSettingsError):
                 store.load()
 
+    def test_microphone_settings_round_trip_and_reject_bad_values(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = SetupStore(Path(directory) / "setup.json")
+            defaults = store.load().while_playing
+            self.assertEqual((False, "toggle", 250), (
+                defaults.microphone_toggle, defaults.microphone_mode, defaults.microphone_release_delay_ms,
+            ))
+            self.assertFalse(defaults.any_enabled)
+            saved = WhilePlaying(microphone_toggle=True, microphone_mode="hold", microphone_release_delay_ms=400)
+            self.assertTrue(saved.any_enabled)
+            self.assertEqual(saved, store.save_while_playing(saved).while_playing)
+            for bad in (
+                WhilePlaying(microphone_mode="sometimes"),
+                WhilePlaying(microphone_release_delay_ms=-5),
+                WhilePlaying(microphone_release_delay_ms=True),
+                WhilePlaying(microphone_toggle="yes"),
+            ):
+                with self.assertRaises(ValueError):
+                    store.save_while_playing(bad)
+            document = json.loads(store.path.read_text())
+            document["while_playing"]["microphone_release_delay_ms"] = 1e9
+            store.path.write_text(json.dumps(document))
+            with self.assertRaises(SetupSettingsError):
+                store.load()
+
 
 class FakePresence:
     instances = []

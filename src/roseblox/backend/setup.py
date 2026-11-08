@@ -11,6 +11,8 @@ import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .microphone import DEFAULT_RELEASE_DELAY_MS, MICROPHONE_MODES, MODE_TOGGLE, validate_release_delay
+
 APP_TYPES = ("player", "studio")
 
 
@@ -64,15 +66,24 @@ class WhilePlaying:
     discord_application_id: str = ""
     server_location: bool = False
     close_on_leave: bool = False
+    microphone_toggle: bool = False
+    microphone_mode: str = MODE_TOGGLE
+    microphone_release_delay_ms: int = DEFAULT_RELEASE_DELAY_MS
 
     @property
     def any_enabled(self) -> bool:
-        return self.discord_presence or self.server_location or self.close_on_leave
+        return self.discord_presence or self.server_location or self.close_on_leave or self.microphone_toggle
 
     def validate(self) -> "WhilePlaying":
-        for value in (self.discord_presence, self.discord_join_button, self.server_location, self.close_on_leave):
+        for value in (
+            self.discord_presence, self.discord_join_button, self.server_location, self.close_on_leave,
+            self.microphone_toggle,
+        ):
             if not isinstance(value, bool):
                 raise ValueError("While Playing switches must be on or off.")
+        if self.microphone_mode not in MICROPHONE_MODES:
+            raise ValueError("The microphone mode must be Toggle or Hold.")
+        validate_release_delay(self.microphone_release_delay_ms)
         application_id = self.discord_application_id
         if not isinstance(application_id, str) or (application_id and not application_id.isdigit()) or len(application_id) > 22:
             raise ValueError("The Discord application ID must be a number.")
@@ -228,6 +239,9 @@ class SetupStore:
             "discord_application_id": settings.discord_application_id,
             "server_location": settings.server_location,
             "close_on_leave": settings.close_on_leave,
+            "microphone_toggle": settings.microphone_toggle,
+            "microphone_mode": settings.microphone_mode,
+            "microphone_release_delay_ms": settings.microphone_release_delay_ms,
         })
 
     def save_section_expanded(self, section: str, expanded: bool) -> SetupState:
@@ -267,7 +281,8 @@ class SetupStore:
                 name: value.get(name, getattr(defaults, name))
                 for name in (
                     "discord_presence", "discord_join_button", "discord_application_id",
-                    "server_location", "close_on_leave",
+                    "server_location", "close_on_leave", "microphone_toggle", "microphone_mode",
+                    "microphone_release_delay_ms",
                 )
             }).validate()
         except ValueError as error:
