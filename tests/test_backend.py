@@ -161,6 +161,21 @@ class RosemaryTests(unittest.TestCase):
             with patch("roseblox.backend.rosemary.os.path.samefile", return_value=True):
                 self.assertFalse(_matches_session(session))
 
+        direct = LaunchSession(
+            process, "/usr/bin/rosemary", "/apps/RobloxPlayer.app", start_time=987,
+            launch_target="/apps/RobloxPlayer.app/Contents/MacOS/RobloxPlayer",
+        )
+        executable = ProcessSnapshot(
+            "/usr/bin/rosemary",
+            ("/usr/bin/rosemary", "/apps/RobloxPlayer.app/Contents/MacOS/RobloxPlayer", "--", "roblox-player:1"),
+            987,
+        )
+        with patch("roseblox.backend.rosemary.os.path.samefile", return_value=True):
+            with patch("roseblox.backend.rosemary.read_process_snapshot", return_value=executable):
+                self.assertTrue(_matches_session(direct))
+            with patch("roseblox.backend.rosemary.read_process_snapshot", return_value=snapshot):
+                self.assertFalse(_matches_session(direct))
+
     def test_release_launcher_reexecuting_through_elf_loader_is_verified(self):
         process = unittest.mock.Mock()
         process.pid = 1234
@@ -549,6 +564,43 @@ class LibraryTests(unittest.TestCase):
         self.assertEqual(str(root / "logs" / "studio.log"), kwargs["stdout"].name)
         self.assertEqual(os.environ.get("PATH"), kwargs["env"].get("PATH"))
         self.assertEqual(os.environ.get("HOME"), kwargs["env"].get("HOME"))
+        self.assertEqual(str(bundle.absolute()), session.bundle_path)
+
+    def test_direct_launch_runs_the_executable_named_by_info_plist(self):
+        import plistlib
+
+        from roseblox.backend.rosemary import RosemaryUnavailableError, bundle_executable
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bundle = make_bundle(root, "player")
+            store = LibraryStore(root / "library.json")
+            record = store.add("player", bundle, "Player")
+            with self.assertRaises(RosemaryUnavailableError):
+                launch_application(record, RosemaryStatus("/usr/bin/rosemary"), log_directory=root / "logs", direct=True)
+
+            macos = bundle / "Contents" / "MacOS"
+            macos.mkdir()
+            (macos / "RobloxPlayer").write_bytes(b"")
+            self.assertEqual(macos / "RobloxPlayer", bundle_executable(bundle))
+            (macos / "Roblox").write_bytes(b"")
+            with open(bundle / "Contents" / "Info.plist", "wb") as stream:
+                plistlib.dump({"CFBundleExecutable": "Roblox"}, stream)
+            self.assertEqual(macos / "Roblox", bundle_executable(bundle))
+            with open(bundle / "Contents" / "Info.plist", "wb") as stream:
+                plistlib.dump({"CFBundleExecutable": "../../evil"}, stream)
+            self.assertEqual(macos / "RobloxPlayer", bundle_executable(bundle))
+
+            self.assertEqual(
+                ["/usr/bin/rosemary", str(macos / "RobloxPlayer"), "--", "roblox-player:1"],
+                build_launch_arguments("/usr/bin/rosemary", bundle, ["roblox-player:1"], direct=True),
+            )
+            with patch("roseblox.backend.rosemary.subprocess.Popen") as popen:
+                session = launch_application(
+                    record, RosemaryStatus("/usr/bin/rosemary"), log_directory=root / "logs", direct=True
+                )
+        self.assertEqual(str(macos / "RobloxPlayer"), popen.call_args[0][0][1])
+        self.assertEqual(str(macos / "RobloxPlayer"), session.launch_target)
         self.assertEqual(str(bundle.absolute()), session.bundle_path)
 
 

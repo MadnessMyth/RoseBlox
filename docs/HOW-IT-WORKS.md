@@ -112,7 +112,13 @@ Studio's **Open Place…** passes `-task EditFile -localPlaceFile <path>`, with 
 
 ### More than one Player
 
-Roblox brings its existing window forward when the same app is launched twice. So with **Allow more than one Roblox Player** on, each extra Player runs from its own installation: a copy made with **Duplicate…**, or another version. A Roblox link opened while a Player runs goes to an installation that is not running yet.
+Roblox Player's `Info.plist` sets `LSMultipleInstancesProhibited`, and Rosemary follows the Mac rule for it: opening a Player bundle while any Player runs hands the launch to the running one, even with Rosemary's `--new-instance` and even from a copy of the bundle in another folder. Running the bundle's executable is never refused. So with **Allow more than one Roblox Player** on, Roseblox starts Player as
+
+```
+rosemary /path/to/RobloxPlayer.app/Contents/MacOS/RobloxPlayer -- <Roblox link> <your extra arguments>
+```
+
+with the executable name taken from `CFBundleExecutable`. Each extra Player still runs from its own installation, so Roseblox can track and stop each one: a copy made with **Duplicate…**, or another version. A Roblox link opened while a Player runs goes to an installation that is not running yet.
 
 ### Closing Roseblox after launching
 

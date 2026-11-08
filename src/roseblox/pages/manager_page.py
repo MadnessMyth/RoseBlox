@@ -1251,6 +1251,7 @@ class InstallationPage(Gtk.Box):
                 guest_arguments=guest_arguments,
                 plain_ctrl_click=getattr(setup_state, "plain_ctrl_click", True),
                 launch_config=LaunchConfigStore().load(record.app_type),
+                direct=self._multiple_allowed(record),
             )
             session.mods_message = mods_message
             wait_for_running(session)

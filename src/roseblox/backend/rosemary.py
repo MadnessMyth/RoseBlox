@@ -5,6 +5,7 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import plistlib
 import re
 import signal
 import shutil
@@ -55,6 +56,8 @@ class LaunchSession:
     rosemary_path: str
     bundle_path: str
     start_time: int | None = None
+    # What Rosemary was given: the bundle, or its executable for a direct launch.
+    launch_target: str | None = None
     stdout: bytes = b""
     stderr: bytes = b""
     output_done: threading.Event | None = None
@@ -136,7 +139,7 @@ def _matches_session(session: LaunchSession) -> bool:
     if snapshot is None:
         return False
 
-    expected_bundle = os.path.normpath(session.bundle_path)
+    expected_bundle = os.path.normpath(session.launch_target or session.bundle_path)
     bundle_index = next(
         (
             index
@@ -234,22 +237,50 @@ def detect_rosemary(config_path: Path | None = None) -> RosemaryStatus:
     return RosemaryStatus(os.path.abspath(executable) if executable else None)
 
 
+def bundle_executable(bundle_path: str | Path) -> Path:
+    """The program inside an .app bundle, as its Info.plist names it."""
+    bundle = Path(os.path.abspath(os.fspath(bundle_path)))
+    name = bundle.name.removesuffix(".app")
+    try:
+        with open(bundle / "Contents" / "Info.plist", "rb") as stream:
+            declared = plistlib.load(stream).get("CFBundleExecutable")
+    except (OSError, plistlib.InvalidFileException, ValueError, AttributeError):
+        declared = None
+    if isinstance(declared, str) and declared and "/" not in declared and declared not in {".", ".."}:
+        name = declared
+    executable = bundle / "Contents" / "MacOS" / name
+    if not executable.is_file():
+        raise ValueError(f"The bundle has no executable at {executable}.")
+    return executable
+
+
 def build_launch_arguments(
     rosemary_path: str,
     bundle_path: str | Path,
     guest_arguments: tuple[str, ...] | list[str] = (),
+    *,
+    direct: bool = False,
 ) -> list[str]:
     """Build the Rosemary invocation without invoking a shell.
 
     Rosemary reads its own flags (such as ``-n``) anywhere after the bundle, so
     guest arguments always follow ``--`` and reach Roblox unchanged.
+
+    Rosemary follows the Mac rule that an app whose Info.plist sets
+    ``LSMultipleInstancesProhibited``, as Roblox Player does, runs once per bundle
+    identifier: opening any copy of the bundle hands the launch to the running one,
+    even with ``--new-instance``. Running the bundle's executable (``direct``) is
+    never refused, which is how more than one Player runs at a time.
     """
-    absolute_bundle = os.path.abspath(os.fspath(bundle_path))
-    if not absolute_bundle.endswith(os.sep):
-        absolute_bundle += os.sep
+    if direct:
+        target = os.fspath(bundle_executable(bundle_path))
+    else:
+        target = os.path.abspath(os.fspath(bundle_path))
+        if not target.endswith(os.sep):
+            target += os.sep
     if any(not isinstance(argument, str) or "\0" in argument for argument in guest_arguments):
         raise ValueError("Rosemary arguments must be valid strings without NUL characters.")
-    return [rosemary_path, absolute_bundle, *(("--", *guest_arguments) if guest_arguments else ())]
+    return [rosemary_path, target, *(("--", *guest_arguments) if guest_arguments else ())]
 
 
 def validate_rosemary_executable(path: str | Path) -> str:
@@ -419,6 +450,7 @@ def launch_application(
     plain_ctrl_click: bool = True,
     launch_config: AppLaunchConfig | None = None,
     flag_backup_directory: Path | None = None,
+    direct: bool = False,
 ) -> LaunchSession:
     """Start Rosemary asynchronously and return a bundle-bound process session.
 
@@ -454,7 +486,10 @@ def launch_application(
             )
         except FastFlagError as error:
             raise RosemaryUnavailableError(f"Could not apply FastFlags: {error}") from error
-    arguments = build_launch_arguments(status.executable, bundle_path, guest_arguments)
+    try:
+        arguments = build_launch_arguments(status.executable, bundle_path, guest_arguments, direct=direct)
+    except ValueError as error:
+        raise RosemaryUnavailableError(str(error)) from error
     try:
         log_path, log_stream = _open_launch_log(log_directory or default_log_directory(), app_type)
     except OSError as error:
@@ -480,6 +515,7 @@ def launch_application(
         process=process,
         rosemary_path=status.executable,
         bundle_path=os.path.abspath(bundle_path),
+        launch_target=arguments[1],
         output_done=done,
         plain_ctrl_click_active=plain_ctrl_click_active,
         log_path=log_path,

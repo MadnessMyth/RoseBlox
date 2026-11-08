@@ -20,6 +20,7 @@ class LaunchPageWorkerTests(unittest.TestCase):
             _launching_ids={"install-id"},
             _refresh_all=Mock(),
             _show_error=Mock(),
+            _multiple_allowed=lambda _record: False,
         )
         page._launch_failed = MethodType(InstallationPage._launch_failed, page)
         record = SimpleNamespace(app_type="player")
@@ -45,6 +46,24 @@ class LaunchPageWorkerTests(unittest.TestCase):
         self.assertNotIn("install-id", page._launching_ids)
         page._show_error.assert_called_once()
 
+    def test_player_runs_its_executable_when_multiple_players_are_allowed(self):
+        for allowed in (False, True):
+            page = SimpleNamespace(
+                rosemary_status=object(),
+                window=SimpleNamespace(setup_state=SimpleNamespace(multiple_players=allowed, plain_ctrl_click=True)),
+                _launch_ready=Mock(),
+            )
+            page._multiple_allowed = MethodType(InstallationPage._multiple_allowed, page)
+            record = SimpleNamespace(app_type="player")
+            with patch("roseblox.pages.manager_page.launch_application") as launch, patch(
+                "roseblox.pages.manager_page.LaunchConfigStore"
+            ), patch("roseblox.pages.manager_page.prepare_mods", return_value=None), patch(
+                "roseblox.pages.manager_page.wait_for_running"
+            ), patch("roseblox.pages.manager_page.GLib.idle_add"):
+                InstallationPage._launch_worker(page, "install-id", record)
+            with self.subTest(allowed=allowed):
+                self.assertIs(allowed, launch.call_args.kwargs["direct"])
+
     def test_unreadable_launch_configuration_fails_the_launch_with_its_message(self):
         page = SimpleNamespace(
             rosemary_status=object(),
@@ -52,6 +71,7 @@ class LaunchPageWorkerTests(unittest.TestCase):
             _launching_ids={"install-id"},
             _refresh_all=Mock(),
             _show_error=Mock(),
+            _multiple_allowed=lambda _record: False,
         )
         page._launch_failed = MethodType(InstallationPage._launch_failed, page)
         dispatched = []
