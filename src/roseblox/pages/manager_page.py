@@ -1621,6 +1621,18 @@ class SettingsPage(Gtk.Box):
         setup_button.connect("clicked", lambda *_: self.window.navigate_to("setup"))
         setup_row.add_suffix(setup_button)
         rosemary_group.add(setup_row)
+
+        import_row = Adw.ActionRow.new()
+        import_row.set_title("Import from another app")
+        import_row.set_subtitle(
+            "FastFlags and settings from Roséline, Quadra, Sober, Vinegar, Bloxstrap and other tools, "
+            "with a preview first."
+        )
+        import_button = Gtk.Button.new_with_label("Import…")
+        import_button.set_valign(Gtk.Align.CENTER)
+        import_button.connect("clicked", lambda *_: self.window.open_import())
+        import_row.add_suffix(import_button)
+        rosemary_group.add(import_row)
         rosemary.add(rosemary_group)
         self._input_check_path: object = _NOT_CHECKED
         self._input_check_generation = 0

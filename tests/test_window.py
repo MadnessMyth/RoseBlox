@@ -134,6 +134,48 @@ class RealWindowTests(unittest.TestCase):
         self.assertTrue(self._wait_until(lambda: not window._refresh_in_progress and not window.library_loading))
         return window
 
+    def test_import_from_another_app_previews_then_applies(self):
+        source = self.config_home / "roseline" / "settings.toml"
+        source.parent.mkdir(parents=True)
+        source.write_text(
+            '[user_flags]\nFFlagDebugSkyGray = "True"\n[behavior]\ngamemode = true\nmystery = 1\n',
+            encoding="utf-8",
+        )
+        window = self._loaded_window()
+        onboarding = window.onboarding_page
+        self.assertTrue(self._wait_until(lambda: "Roséline" in (onboarding.import_row.get_subtitle() or "")))
+        self.assertEqual("Optional", onboarding.import_badge.get_text())
+
+        onboarding.import_button.emit("clicked")
+        dialog = window.import_window
+        self.addCleanup(dialog.destroy)
+        self.assertTrue(self._wait_until(lambda: bool(dialog._source_rows)))
+        self.assertIn("Roséline", dialog._source_rows[0].get_title())
+        from roseblox.backend.importers import importer
+
+        dialog.read(importer("roseline"), source)
+        self.assertTrue(self._wait_until(lambda: dialog.plan is not None))
+        self.assertEqual(2, len(dialog._checks))
+        self.assertTrue(all(check.get_active() for check, _change in dialog._checks))
+        self.assertIn("behavior.mystery", {problem.source_key for problem in dialog.plan.problems})
+        dialog.import_button.emit("clicked")
+        self.assertTrue(self._wait_until(lambda: dialog.navigation.get_visible_page().get_tag() == "done"))
+
+        from roseblox.backend.launch_config import LaunchConfigStore
+
+        config = LaunchConfigStore().load("player")
+        self.assertEqual({"FFlagDebugSkyGray": "True"}, config.fast_flags)
+        self.assertTrue(config.gamemode)
+        self.assertTrue(self._wait_until(lambda: onboarding.import_badge.get_text() == "Imported"))
+        self.assertTrue(self._wait_until(lambda: window.performance_page.saved["player"].gamemode))
+
+        dialog.plan = None
+        dialog.read(importer("roseline"), source)
+        self.assertTrue(self._wait_until(lambda: dialog.plan is not None))
+        self.assertEqual([], dialog.plan.actionable)
+        self.assertFalse(dialog.import_button.get_sensitive())
+        self.assertEqual("same", dialog.plan.changes[0].status)
+
     def test_setup_hides_navigation_until_another_page_is_opened(self):
         window = self._loaded_window()
         self.assertFalse(window._sidebar.get_visible())

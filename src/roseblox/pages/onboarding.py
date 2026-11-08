@@ -79,6 +79,7 @@ class OnboardingPage(Gtk.Box):
         content.append(self._build_links_step())
         content.append(self._build_apps_step())
         content.append(self._build_updates_step())
+        content.append(self._build_import_step())
 
         self.error_label = Gtk.Label()
         self.error_label.set_xalign(0)
@@ -271,6 +272,55 @@ class OnboardingPage(Gtk.Box):
         group.add(self.update_row)
         return group
 
+    def _build_import_step(self) -> Gtk.Widget:
+        group, self.import_badge = self._step_group(
+            "5 · Settings from Another App",
+            "Optional. Used Roséline, Quadra, Sober, Vinegar, Bloxstrap or a FastFlag tool before? "
+            "Bring its FastFlags and settings over. You see a preview before anything is saved.",
+        )
+        self.import_row = Adw.ActionRow.new()
+        self.import_row.set_title("Import from another app")
+        self.import_row.set_subtitle("Looking for other launchers…")
+        self.import_row.add_prefix(Gtk.Image.new_from_icon_name("document-import-symbolic"))
+        self.import_button = Gtk.Button.new_with_label("Import…")
+        self.import_button.set_valign(Gtk.Align.CENTER)
+        self.import_button.connect("clicked", lambda *_: self.window.open_import())
+        self.import_row.add_suffix(self.import_button)
+        group.add(self.import_row)
+        self._detected_apps: list[str] | None = None
+        threading.Thread(target=self._detect_worker, daemon=True).start()
+        return group
+
+    def _detect_worker(self) -> None:
+        from ..backend.importers import detect_all
+
+        try:
+            found = [detection.importer.title for detection in detect_all() if detection.locations]
+        except Exception:
+            found = []
+        GLib.idle_add(self._detected, found)
+
+    def _detected(self, found: list[str]) -> bool:
+        self._detected_apps = found
+        self._render_import()
+        return GLib.SOURCE_REMOVE
+
+    def _render_import(self) -> None:
+        found = self._detected_apps
+        if getattr(self.window, "imported_settings", False):
+            _set_badge(self.import_badge, "Imported", "done")
+        else:
+            _set_badge(self.import_badge, "Optional", "optional")
+        if found is None:
+            return
+        if found:
+            names = ", ".join(found[:-1]) + (" and " if len(found) > 1 else "") + found[-1]
+            self.import_row.set_subtitle(f"Found settings from {names}.")
+            self.import_button.add_css_class("suggested-action")
+        else:
+            self.import_row.set_subtitle("No other launcher found automatically. You can still choose its files.")
+            self.import_button.remove_css_class("suggested-action")
+
     def _render_updates(self) -> None:
         status = self.update_row.status
         if status is not None and status.enabled and not status.error:
@@ -318,6 +368,7 @@ class OnboardingPage(Gtk.Box):
         self._render_links()
         self._render_apps()
         self._render_updates()
+        self._render_import()
         completed = self._setup_state is not None and self._setup_state.onboarding_completed
         self.skip_button.set_visible(not completed)
         self.finish_button.set_label("Done" if completed else "Finish Setup")

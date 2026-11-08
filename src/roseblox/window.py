@@ -103,6 +103,7 @@ class RosebloxWindow(Adw.ApplicationWindow):
         self.rosemary_install = RosemaryInstallState()
         self._rosemary_install_process = None
         self._rosemary_install_deadline = 0.0
+        self.imported_settings = False
 
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.set_content(root)
@@ -437,6 +438,19 @@ class RosebloxWindow(Adw.ApplicationWindow):
             self._stack.set_visible_child_name("setup")
         elif page_id in self.pages:
             self._stack.set_visible_child_name(page_id)
+
+    def open_import(self) -> None:
+        from .pages.import_dialog import ImportWindow
+
+        self.import_window = ImportWindow(self, on_imported=self._settings_imported)
+        self.import_window.present()
+
+    def _settings_imported(self) -> None:
+        for page in (self.performance_page, self.mods_page):
+            if page is not None and hasattr(page, "reload"):
+                page.reload()
+        self.imported_settings = True
+        self.refresh_pages(reload_library=False, reload_preferences=True)
 
     def choose_rosemary_executable(self) -> None:
         dialog = Gtk.FileDialog.new()
