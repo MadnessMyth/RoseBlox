@@ -4,6 +4,12 @@ Roseblox is a native Linux desktop launcher and installation manager for Roblox 
 
 Roseblox is licensed under the MIT License; see [LICENSE](LICENSE).
 
+## Sneak peek
+
+[![Roseblox sneak peek: launching Roblox, performance options, mods and side-by-side Players](marketing/video/roseblox-sneak-peek-preview.gif)](marketing/video/roseblox-sneak-peek.mp4)
+
+Click the preview to watch the full 30-second video with sound ([MP4](marketing/video/roseblox-sneak-peek.mp4)).
+
 ## Run from a checkout
 
 Install the system GTK 4, libadwaita, and Python GObject bindings, then run:
