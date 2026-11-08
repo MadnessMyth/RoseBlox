@@ -43,7 +43,7 @@ jobs:
           latest=false
           [ "$TAG" = "$newest" ] && latest=true
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release edit "$TAG" --title "Roseblox ${TAG#v}" --notes-file notes.md --latest="$latest"
+            gh release edit "$TAG" --title "Roseblox $TAG" --notes-file notes.md --latest="$latest"
           else
-            gh release create "$TAG" --verify-tag --title "Roseblox ${TAG#v}" --notes-file notes.md --latest="$latest"
+            gh release create "$TAG" --verify-tag --title "Roseblox $TAG" --notes-file notes.md --latest="$latest"
           fi
