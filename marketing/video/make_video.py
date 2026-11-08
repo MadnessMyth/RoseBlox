@@ -352,7 +352,7 @@ PERF = Shot("14-performance.png", patches=[
     ((240, 638, 1100, 654), "Asks Feral GameMode to tune the system while the application runs.", (246, 640.5)),
     ((240, 693, 1100, 709), "Shows frame rate and frame times through MangoHud's Vulkan layer.", (246, 695.5)),
 ])
-MODS = Shot("17-mods.png", crop=(0, 0, 1264, 730), toggles_off=[(1194, 407)])
+MODS = Shot("17-mods.png")
 PLAY = Shot("16-while-playing.png", toggles_off=[(1187, 482), (1187, 590)])
 DUP = Shot("22-player-duplicate.png", crop=(0, 0, 1428, 560))
 HOME = Shot("07-home.png", crop=(0, 0, 1292, 660))
@@ -373,13 +373,14 @@ SEGMENTS = [
             toggles=[(b1, (1176, 636)), (bars(1) + b1, (1176, 690))],
             highlights=[(b1, (231, 611, 1212, 663)), (bars(1) + b1, (231, 665, 1212, 717))]),
     Segment(7, 2, MODS,
-            labels=[(0.0, "MODS", "Your fonts."), (bars(1), "MODS", "The classic oof.")],
-            camera=[(0.0, 700, 300, 1.5), (b1, 720, 300, 1.7), (bars(1) - 0.1, 720, 330, 1.7),
-                    (bars(1) + b1, 700, 407, 1.62), (bars(2), 700, 407, 1.7)],
+            labels=[(0.0, "MODS", "Your fonts."), (bars(1), "MODS", "Skyboxes, sounds, textures.")],
+            camera=[(0.0, 700, 300, 2.0), (b1, 720, 300, 2.3), (bars(1) - 0.1, 720, 400, 2.15),
+                    (bars(1) + b1, 720, 660, 2.15), (bars(1) + b2 + 0.1, 720, 800, 2.2),
+                    (bars(2), 720, 820, 2.3)],
             tilt=[(0.0, 3, -10, 0), (bars(1), 2, 3, 0), (bars(2), 4, 9, -1)],
-            clicks=[(bars(1) + b1, 1194, 407)],
-            toggles=[(bars(1) + b1, (1194, 407))],
-            highlights=[(b1, (231, 273, 1231, 326)), (bars(1) + b1, (231, 380, 1231, 434))]),
+            clicks=[(bars(1) + b1, 1063, 657)],
+            highlights=[(b1, (231, 273, 1231, 326)), (bars(1) + b1, (231, 631, 1231, 683)),
+                        (bars(1) + b2, (231, 797, 1231, 902))]),
     Segment(9, 2, PLAY,
             labels=[(0.0, "WHILE PLAYING", "Discord presence."), (bars(1), "WHILE PLAYING", "Server location.")],
             camera=[(0.0, 720, 470, 1.45), (b1, 720, 482, 1.62), (bars(1) - 0.1, 720, 520, 1.62),
