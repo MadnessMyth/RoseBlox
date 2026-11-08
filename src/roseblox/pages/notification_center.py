@@ -238,14 +238,18 @@ class NotificationCenter(Gtk.MenuButton):
             self._timer_id = 0
 
     def _automatic_checks_enabled(self) -> bool:
+        return bool(self._automatic_apps())
+
+    def _automatic_apps(self) -> tuple[str, ...]:
         state = getattr(self.window, "setup_state", None)
-        return bool(getattr(state, "update_checks_enabled", False))
+        checks = getattr(state, "checks_updates", None)
+        return tuple(app for app in ("player", "studio") if checks is not None and checks(app))
 
     def check_updates(self, *, automatic: bool = False) -> None:
         """Look for new Player and Studio versions in the background.
 
-        Automatic checks follow the "Notify me about Roblox updates" setting; the
-        Check for Updates button always works.
+        Automatic checks follow the per-app "Notify me about … updates" switches; the
+        Check for Updates button always checks both.
         """
         self.check_roseblox(automatic=automatic)
         if automatic and not self._automatic_checks_enabled():
@@ -257,7 +261,8 @@ class NotificationCenter(Gtk.MenuButton):
         self.check_button.set_sensitive(False)
         self.check_button.set_tooltip_text("Checking for updates…")
         skipped = dict(getattr(getattr(self.window, "setup_state", None), "skipped_versions", {}) or {})
-        threading.Thread(target=self._check_worker, args=(skipped,), daemon=True).start()
+        apps = self._automatic_apps() if automatic else None
+        threading.Thread(target=self._check_worker, args=(skipped, apps), daemon=True).start()
 
     def _check_with_window(self, skipped: dict[str, str]):
         installer = self.window.installer
@@ -266,11 +271,14 @@ class NotificationCenter(Gtk.MenuButton):
             installer.version_cache, skipped,
         )
 
-    def _check_worker(self, skipped: dict[str, str]) -> None:
+    def _check_worker(self, skipped: dict[str, str], apps: tuple[str, ...] | None = None) -> None:
         try:
             updates, errors = self._checker(skipped)
         except Exception as error:
             updates, errors = [], {"library": str(error)[:500]}
+        if apps is not None:
+            updates = [update for update in updates if update.app_type in apps]
+            errors = {key: value for key, value in errors.items() if key in apps or key not in ("player", "studio")}
         GLib.idle_add(self._check_finished, updates, errors)
 
     def _check_finished(self, updates: list[AvailableUpdate], errors: dict[str, str]) -> bool:

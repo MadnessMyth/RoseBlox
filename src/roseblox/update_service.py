@@ -130,9 +130,10 @@ class UpdateNotifierApplication(Gio.Application):
 
     def _enabled(self) -> bool:
         try:
-            return self.setup_store.load().update_checks_enabled
+            state = self.setup_store.load()
         except SetupSettingsError:
             return False
+        return any(state.checks_updates(app_type) for app_type in APP_TYPES)
 
     def _scheduled_check(self) -> bool:
         self._timer_id = GLib.timeout_add(int(self.check_interval * 1000), self._scheduled_check)
@@ -153,9 +154,10 @@ class UpdateNotifierApplication(Gio.Application):
 
     def _check_worker(self) -> None:
         try:
-            skipped = self.setup_store.load().skipped_versions
+            state = self.setup_store.load()
             updates, errors = check_for_updates(
-                self.library, self.version_client, self.version_settings, self.version_cache, skipped
+                self.library, self.version_client, self.version_settings, self.version_cache,
+                state.skipped_versions, [app for app in APP_TYPES if state.checks_updates(app)],
             )
         except Exception as error:
             updates, errors = [], {"library": str(error)[:500]}

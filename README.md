@@ -60,7 +60,7 @@ To update Roseblox later, see [Update](docs/INSTALL.md#update). To remove it, se
 ## What you get
 
 - **Join games from the website.** Play buttons and Studio sign-in links open through Roseblox.
-- **Automatic Roblox updates.** A desktop notification with **Update** and **Skip This Version** when a new version is out, or turn on auto updates per app to install new Player or Studio versions without asking.
+- **Automatic Roblox updates.** A desktop notification with **Update** and **Skip This Version** when a new version is out, chosen separately for Player and Studio, with an optional per-app switch to install new versions in the background without asking.
 - **Performance settings** for Player and Studio separately: GPU choice, frame pacing, Feral GameMode, the MangoHud overlay, FastFlags checked against Roblox's allowlist, and a tool to measure and compare runs.
 - **Mods:** your own fonts, mouse cursor, skyboxes, sounds and textures. Roblox's original files are kept and put back when you turn a mod off.
 - **While Playing:** Discord Rich Presence with Join Server, a notification with the location of the server you joined, and a microphone toggle (push to talk or toggle on a desktop hotkey) that silences only Roblox's microphone.

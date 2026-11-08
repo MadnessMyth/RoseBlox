@@ -896,59 +896,102 @@ class RealWindowTests(unittest.TestCase):
         self.assertEqual(newer.id, window.preferences_store.load().player_id)
         self.assertTrue(records)
 
-    def test_update_switches_in_settings_and_setup_stay_in_sync(self):
-        from roseblox.backend.updates import UpdateCheckerStatus
+    def _fake_update_checker(self, window):
+        from roseblox.backend.updates import UpdateCheckerError, UpdateCheckerStatus
 
+        store = window.setup_store
+        checker = Mock()
+
+        def status():
+            enabled = store.load().update_checks_enabled
+            return UpdateCheckerStatus(enabled, "On." if enabled else "Off.")
+
+        def enable():
+            store.save_update_checks(True)
+            return status()
+
+        def disable():
+            if checker.disk_full:
+                raise UpdateCheckerError("disk full")
+            store.save_update_checks(False)
+            return status()
+
+        checker.disk_full = False
+        checker.status.side_effect = status
+        checker.enable.side_effect = enable
+        checker.disable.side_effect = disable
+        window.update_checker = checker
+        return checker
+
+    def _toggle(self, row, active):
+        row.switch.set_active(active)
+        self.assertTrue(self._wait_until(lambda: not row.busy and row.switch.get_active() == active or (not row.busy and row._message)))
+
+    def test_update_switches_are_per_app_and_stay_in_sync(self):
         window = self._loaded_window()
-        settings_row = window.settings_page.update_row
-        setup_row = window.onboarding_page.update_row
-        self.assertFalse(settings_row.switch.get_active())
+        settings, setup = window.settings_page.update_rows, window.onboarding_page.update_rows
+        self.assertEqual("Notify me about Roblox Player updates", settings["player"].get_title())
+        self.assertEqual("Notify me about Roblox Studio updates", settings["studio"].get_title())
+        self.assertFalse(settings["player"].switch.get_active())
         self.assertEqual("Optional", window.onboarding_page.updates_badge.get_text())
         self.assertFalse(window.settings_page.check_now_row.get_visible())
+        checker = self._fake_update_checker(window)
 
-        window.update_checker = Mock()
-        window.update_checker.enable.return_value = UpdateCheckerStatus(True, "On.")
-        setup_row.switch.set_active(True)
-        self.assertTrue(self._wait_until(lambda: settings_row.switch.get_active() and not setup_row.busy))
+        self._toggle(setup["player"], True)
+        self.assertTrue(self._wait_until(lambda: settings["player"].switch.get_active()))
         # The drawn state must follow too, or the switch shows a grey track while on.
-        self.assertTrue(setup_row.switch.get_state())
-        self.assertTrue(settings_row.switch.get_state())
-        window.update_checker.enable.assert_called_once_with()
+        self.assertTrue(settings["player"].switch.get_state())
+        self.assertFalse(settings["studio"].switch.get_active())
+        self.assertFalse(setup["studio"].switch.get_active())
+        checker.enable.assert_called_once_with()
+        self.assertEqual({"player": True, "studio": False}, window.setup_store.load().update_apps)
         self.assertTrue(window.settings_page.check_now_row.get_visible())
 
-        window.update_checker.disable.side_effect = __import__(
-            "roseblox.backend.updates", fromlist=["UpdateCheckerError"]
-        ).UpdateCheckerError("disk full")
-        window.update_checker.status.return_value = UpdateCheckerStatus(True, "On.")
-        settings_row.switch.set_active(False)
-        self.assertTrue(self._wait_until(lambda: not settings_row.busy))
-        self.assertTrue(settings_row.switch.get_active())
-        self.assertEqual("disk full", settings_row.get_subtitle())
+        self._toggle(settings["studio"], True)
+        self.assertTrue(setup["studio"].switch.get_active())
+        checker.enable.assert_called_once_with()
+
+        self._toggle(settings["player"], False)
+        self.assertFalse(setup["player"].switch.get_active())
+        self.assertTrue(settings["studio"].switch.get_active())
+        checker.disable.assert_not_called()
+        self.assertTrue(window.setup_store.load().update_checks_enabled)
+
+        checker.disk_full = True
+        settings["studio"].switch.set_active(False)
+        self.assertTrue(self._wait_until(lambda: not settings["studio"].busy))
+        self.assertTrue(settings["studio"].switch.get_active())
+        self.assertEqual("disk full", settings["studio"].get_subtitle())
         window.refresh_pages(reload_library=False, reload_preferences=True)
         self.assertTrue(self._wait_until(lambda: not window._refresh_in_progress))
-        self.assertEqual("disk full", settings_row.get_subtitle())
+        self.assertEqual("disk full", settings["studio"].get_subtitle())
 
-    def test_auto_update_switches_show_with_update_checks_and_save(self):
-        from roseblox.backend.updates import UpdateCheckerStatus
+        checker.disk_full = False
+        self._toggle(settings["studio"], False)
+        checker.disable.assert_called()
+        self.assertFalse(window.setup_store.load().update_checks_enabled)
+        self.assertFalse(window.settings_page.check_now_row.get_visible())
 
+    def test_auto_update_switches_show_under_their_app_and_save(self):
         window = self._loaded_window()
-        player, studio = window.settings_page.auto_update_rows
-        setup_player, _setup_studio = window.onboarding_page.auto_update_rows
-        self.assertEqual("Auto updates for Roblox Player", player.get_title())
-        self.assertEqual("Auto updates for Roblox Studio", studio.get_title())
-        window.apply_update_checker_status(UpdateCheckerStatus(False, "Off."), reload=False)
+        player, studio = window.settings_page.auto_update_rows.values()
+        setup_player = window.onboarding_page.auto_update_rows["player"]
+        self.assertEqual("Automatically update Roblox Player in the background", player.get_title())
+        self.assertEqual("Automatically update Roblox Studio in the background", studio.get_title())
         self.assertFalse(player.get_visible())
         self.assertFalse(studio.get_visible())
 
-        window.apply_update_checker_status(UpdateCheckerStatus(True, "On."), reload=False)
+        self._fake_update_checker(window)
+        self._toggle(window.settings_page.update_rows["player"], True)
         self.assertTrue(player.get_visible())
+        self.assertFalse(studio.get_visible())
         self.assertFalse(player.get_active())
-        self.assertFalse(studio.get_active())
         player.set_active(True)
         saved = window.setup_store.load()
         self.assertEqual({"player": True}, saved.auto_updates)
+        self.assertTrue(saved.auto_update("player"))
         self.assertTrue(setup_player.get_active())
-        self.assertFalse(studio.get_active())
+        self.assertFalse(saved.auto_update("studio"))
 
     def test_skipped_versions_can_be_asked_again(self):
         from roseblox.backend.setup import SetupStore

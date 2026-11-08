@@ -114,6 +114,7 @@ class SetupState:
     update_checks_enabled: bool = False
     roseblox_update_checks: bool = True
     skipped_versions: dict[str, str] = field(default_factory=dict)
+    update_apps: dict[str, bool] = field(default_factory=dict)
     auto_updates: dict[str, bool] = field(default_factory=dict)
     appearance: Appearance = field(default_factory=Appearance)
     plain_ctrl_click: bool = True
@@ -124,9 +125,13 @@ class SetupState:
     def close_preference(self, app_type: str) -> ClosePreference:
         return self.close_after_launch.get(app_type, ClosePreference())
 
+    def checks_updates(self, app_type: str) -> bool:
+        """Whether the background checker looks for ``app_type`` updates; apps not listed are checked."""
+        return self.update_checks_enabled and self.update_apps.get(app_type, True)
+
     def auto_update(self, app_type: str) -> bool:
-        """Install new versions of ``app_type`` without asking; only while update checks are on."""
-        return self.update_checks_enabled and self.auto_updates.get(app_type, False)
+        """Install new versions of ``app_type`` without asking; only while its update checks are on."""
+        return self.checks_updates(app_type) and self.auto_updates.get(app_type, False)
 
 
 _LOCKS: dict[Path, threading.RLock] = {}
@@ -168,7 +173,8 @@ class SetupStore:
             update_checks_enabled=self._boolean(document, "update_checks_enabled"),
             roseblox_update_checks=self._boolean(document, "roseblox_update_checks", True),
             skipped_versions=self._skipped_versions(document.get("skipped_versions", {})),
-            auto_updates=self._auto_updates(document.get("auto_updates", {})),
+            update_apps=self._app_switches(document.get("update_apps", {}), "update checks"),
+            auto_updates=self._app_switches(document.get("auto_updates", {}), "automatic update settings"),
             appearance=self._appearance(document.get("appearance", {})),
             plain_ctrl_click=self._boolean(document, "plain_ctrl_click", True),
             multiple_players=self._boolean(document, "multiple_players"),
@@ -232,12 +238,19 @@ class SetupStore:
         return self._update(skipped_versions={})
 
     def save_auto_update(self, app_type: str, enabled: bool) -> SetupState:
+        return self._save_app_switch("auto_updates", app_type, enabled)
+
+    def save_update_app(self, app_type: str, enabled: bool) -> SetupState:
+        """Choose whether ``app_type`` is checked; the checker itself is turned on by UpdateCheckerService."""
+        return self._save_app_switch("update_apps", app_type, enabled)
+
+    def _save_app_switch(self, key: str, app_type: str, enabled: bool) -> SetupState:
         self._require_app_type(app_type)
         if not isinstance(enabled, bool):
-            raise ValueError("Automatic updates must be on or off.")
+            raise ValueError("This setting must be on or off.")
 
         def change(document: dict) -> None:
-            document["auto_updates"] = {**(document.get("auto_updates") or {}), app_type: enabled}
+            document[key] = {**(document.get(key) or {}), app_type: enabled}
 
         return self._modify(change)
 
@@ -365,11 +378,11 @@ class SetupStore:
         return dict(value)
 
     @staticmethod
-    def _auto_updates(value: object) -> dict[str, bool]:
+    def _app_switches(value: object, name: str) -> dict[str, bool]:
         if not isinstance(value, dict) or any(
             key not in APP_TYPES or not isinstance(enabled, bool) for key, enabled in value.items()
         ):
-            raise SetupSettingsError("Saved automatic update settings are invalid; the file was not changed.")
+            raise SetupSettingsError(f"Saved per-app {name} are invalid; the file was not changed.")
         return dict(value)
 
     def _update(self, **updates: object) -> SetupState:

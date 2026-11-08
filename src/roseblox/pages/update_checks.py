@@ -1,4 +1,4 @@
-"""The background update-check switch shown in Settings and first-time setup."""
+"""The per-app update-check and auto-update switches shown in Settings and first-time setup."""
 
 from __future__ import annotations
 
@@ -10,16 +10,25 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import Adw, GLib, Gtk
 
 from ..backend.setup import APP_TYPES, SetupSettingsError
-from ..backend.updates import UpdateCheckerError, UpdateCheckerStatus
+from ..backend.updates import APP_TITLES, UpdateCheckerError, UpdateCheckerStatus
+
+
+def _checks_updates(window, app_type: str, status: UpdateCheckerStatus | None) -> bool:
+    return bool(status is not None and status.enabled and window.setup_state.checks_updates(app_type))
 
 
 class UpdateCheckRow(Adw.ActionRow):
-    """A switch row kept in sync by the window, which owns the checker service."""
+    """One app's "Notify me" switch, kept in sync by the window, which owns the checker service.
 
-    def __init__(self, window, *, icon_name: str | None = None) -> None:
+    The background checker runs while either app's switch is on: the first switch turned on
+    starts it and the last one turned off stops it.
+    """
+
+    def __init__(self, window, app_type: str, *, icon_name: str | None = None) -> None:
         super().__init__()
         self.window = window
-        self.set_title("Notify me about Roblox updates")
+        self.app_type = app_type
+        self.set_title(f"Notify me about {APP_TITLES[app_type]} updates")
         self.set_subtitle("Checking…")
         if icon_name:
             self.add_prefix(Gtk.Image.new_from_icon_name(icon_name))
@@ -41,15 +50,21 @@ class UpdateCheckRow(Adw.ActionRow):
         self.status = status
         if message is not None:
             self._message = message
+        active = _checks_updates(self.window, self.app_type, status)
         self._block = True
-        self.switch.set_active(status.enabled)
-        self.switch.set_state(status.enabled)
+        self.switch.set_active(active)
+        self.switch.set_state(active)
         self._block = False
         self.switch.set_sensitive(not self.busy)
         if not self.busy:
-            details = self._message or status.message
-            if status.error and not self._message:
-                details = f"{details} ({status.error})"
+            if self._message:
+                details = self._message
+            elif active or not status.enabled:
+                details = status.message
+                if status.error:
+                    details = f"{details} ({status.error})"
+            else:
+                details = f"Off. {APP_TITLES[self.app_type]} is not checked for updates."
             self.set_subtitle(details)
 
     def _switch_changed(self, _switch, active: bool) -> bool:
@@ -67,35 +82,44 @@ class UpdateCheckRow(Adw.ActionRow):
 
     def _worker(self, enable: bool) -> None:
         checker = self.window.update_checker
+        store = self.window.setup_store
         message = None
         try:
-            status = checker.enable() if enable else checker.disable()
-        except UpdateCheckerError as error:
+            state = store.load()
+            others = any(state.checks_updates(app) for app in APP_TYPES if app != self.app_type)
+            if enable and not state.update_checks_enabled:
+                for app in APP_TYPES:
+                    store.save_update_app(app, app == self.app_type)
+                status = checker.enable()
+            elif enable or others:
+                store.save_update_app(self.app_type, enable)
+                status = checker.status()
+            else:
+                status = checker.disable()
+        except (UpdateCheckerError, SetupSettingsError, OSError, ValueError) as error:
             message = str(error)[:500]
             status = checker.status()
         GLib.idle_add(self._done, status, message)
 
     def _done(self, status: UpdateCheckerStatus, message: str | None) -> bool:
         self.busy = False
+        try:
+            self.window.setup_state = self.window.setup_store.load()
+        except SetupSettingsError:
+            pass
         self.window.apply_update_checker_status(status, message, source=self)
         return GLib.SOURCE_REMOVE
 
 
-AUTO_UPDATE_TITLES = {"player": "Auto updates for Roblox Player", "studio": "Auto updates for Roblox Studio"}
-
-
 class AutoUpdateRow(Adw.ActionRow):
-    """Install new versions of one app without asking; shown only while update checks are on."""
+    """Install new versions of one app without asking; shown only while that app is checked."""
 
     def __init__(self, window, app_type: str) -> None:
         super().__init__()
         self.window = window
         self.app_type = app_type
-        self.set_title(AUTO_UPDATE_TITLES[app_type])
-        self._subtitle = (
-            "Off: the notification asks first. "
-            "On: the new version installs by itself, then a notification says it is done."
-        )
+        self.set_title(f"Automatically update {APP_TITLES[app_type]} in the background")
+        self._subtitle = "Installs new versions without asking, then a notification says it is done."
         self.set_subtitle(self._subtitle)
         self.switch = Gtk.Switch()
         self.switch.set_valign(Gtk.Align.CENTER)
@@ -113,12 +137,12 @@ class AutoUpdateRow(Adw.ActionRow):
         self.switch.set_active(active)
 
     def apply_status(self, status: UpdateCheckerStatus | None, message: str | None = None) -> None:
-        self.set_visible(bool(status is not None and status.enabled))
+        self.set_visible(_checks_updates(self.window, self.app_type, status))
         self._block = True
         self.set_active(self.window.setup_state.auto_updates.get(self.app_type, False))
         self._block = False
 
-    def _changed(self, _row, _param) -> None:
+    def _changed(self, _switch, _param) -> None:
         if self._block:
             return
         try:
@@ -135,5 +159,10 @@ class AutoUpdateRow(Adw.ActionRow):
                 row.apply_status(self.window.update_checker_status)
 
 
-def auto_update_rows(window) -> list[AutoUpdateRow]:
-    return [AutoUpdateRow(window, app_type) for app_type in APP_TYPES]
+def update_rows(window, *, icon_name: str | None = None):
+    """Each app's notify switch followed by its auto-update switch, as ``(notify, auto)`` dicts."""
+    notify, auto = {}, {}
+    for app_type in APP_TYPES:
+        notify[app_type] = UpdateCheckRow(window, app_type, icon_name=icon_name)
+        auto[app_type] = AutoUpdateRow(window, app_type)
+    return notify, auto

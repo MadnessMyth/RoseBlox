@@ -68,7 +68,7 @@ Open **Roseblox** from your application menu, or run `roseblox` in a terminal. T
 1. **Rosemary** – click **Install Rosemary**. A terminal opens and runs `paru -S --needed rosemary sdl3 vulkan-icd-loader` (or `yay`). Review the package, confirm, and enter your password. Rosemary compiles from source, which took about 20 minutes on a test machine. The terminal then runs `rosemary prefix create`, which downloads Rosemary's macOS base system once (about 180 MB). Press Enter to close the terminal when it finishes. Roseblox detects Rosemary on its own and marks the step **Ready**. If you already have a Rosemary build or AppImage, use **Choose…** instead.
 2. **Roblox Links** (optional) – turn on **Open Roblox links with Roseblox** so that **Play** buttons on roblox.com and Studio sign-in links open through Roseblox.
 3. **Player and Studio** – click **Install** for Roblox Player, Roblox Studio, or both. The download runs on the page with a progress bar.
-4. **Updates** (optional) – turn on **Notify me about Roblox updates** to get a desktop notification with **Update** and **Skip This Version** buttons whenever Roblox releases a new Player or Studio version. Once it is on, **Auto updates for Roblox Player** and **Auto updates for Roblox Studio** install new versions without asking. See [Roblox Player and Studio](#roblox-player-and-studio) below.
+4. **Updates** (optional) – turn on **Notify me about Roblox Player updates** and/or **Notify me about Roblox Studio updates** to get a desktop notification with **Update** and **Skip This Version** buttons whenever Roblox releases a new version of that app. Under each one that is on, **Automatically update … in the background** installs new versions without asking. See [Roblox Player and Studio](#roblox-player-and-studio) below.
 5. **Settings from Another App** (optional) – if you used Roséline, Quadra, Sober, Vinegar, Bloxstrap or a FastFlag tool before, click **Import…** to bring its FastFlags and settings over. See [Importing from another app](#importing-from-another-app).
 
 ![Setup complete](screenshots/04-setup-links-enabled.png)
@@ -166,7 +166,7 @@ Your settings, installations and link choice are kept. To update Rosemary, downl
 
 ### Uninstalling on other distributions
 
-Turn off **Open Roblox links with Roseblox** and **Notify me about Roblox updates** first, as in [Uninstall](#uninstall) step 1. Then:
+Turn off **Open Roblox links with Roseblox** and both **Notify me about … updates** switches first, as in [Uninstall](#uninstall) step 1. Then:
 
 - **AppImage**: delete the AppImage file, `~/.local/share/applications/io.github.roseblox.Roseblox.desktop` and `~/.local/share/icons/hicolor/scalable/apps/io.github.roseblox.Roseblox.svg`.
 - **.deb**: `sudo apt remove roseblox`
@@ -349,14 +349,14 @@ Click **Check Again** under Rosemary in Settings if Roseblox is already open.
 
 ### Roblox Player and Studio
 
-With **Settings → Updates → Notify me about Roblox updates** on, Roseblox checks in the background (one minute after you log in, then every three hours) and shows a notification when a new version is out:
+**Settings → Updates** has one **Notify me about … updates** switch for Roblox Player and one for Roblox Studio, so you can leave out an app you do not use. With either on, Roseblox checks that app in the background (one minute after you log in, then every three hours) and shows a notification when a new version is out:
 
 - **Update** opens Roseblox, downloads and installs the new version with a progress bar, and makes it the version that Home and Roblox links open.
 - **Skip This Version** hides that version; you are notified again when a newer one is released. **Settings → Updates → Ask Again** undoes skips.
 - If you ignore the notification, it comes back after a day. **Check Now** in Settings checks immediately.
 - The same updates are listed in the [notification center](#notification-center) while Roseblox is open.
 
-Two more switches appear under it once update checks are on: **Auto updates for Roblox Player** and **Auto updates for Roblox Studio** (both off by default, also in setup step 4). With one on, the checker installs that app's new version by itself in the background instead of asking, makes it the version Home and Roblox links open, and sends a notification when it is done. A version you chose **Skip This Version** for is not installed. If the automatic install fails, you get the normal notification with an **Update** button and the reason, and Roseblox does not retry that version on its own. A Roblox session that is already open keeps running on the old version until you close it.
+Under each app's switch, while it is on, is **Automatically update Roblox Player in the background** (or **… Roblox Studio …**), off by default and also in setup step 4. With it on, the checker installs that app's new version by itself in the background instead of asking, makes it the version Home and Roblox links open, and sends a notification when it is done. A version you chose **Skip This Version** for is not installed. If the automatic install fails, you get the normal notification with an **Update** button and the reason, and Roseblox does not retry that version on its own. A Roblox session that is already open keeps running on the old version until you close it.
 
 To update by hand, open the **Player** or **Studio** page, click **Refresh Version** to see the latest Roblox version, then click **Download and Install Latest**. To make the new version the default on Home, click **Set as preferred** on its row. Either way, older versions stay installed until you click **Remove**.
 
@@ -393,7 +393,7 @@ To update after a new release, run `git pull` in `~/RoseBlox`, then `makepkg -si
 
 ## Uninstall
 
-1. In **Settings → Roblox Links**, turn off **Open Roblox links with Roseblox**. This restores the previous link handler. In **Settings → Updates**, turn off **Notify me about Roblox updates**; this stops the checker and removes its login entry. (If you already removed Roseblox, delete `~/.config/autostart/io.github.roseblox.Roseblox.Updater.desktop` and `~/.local/share/applications/io.github.roseblox.Roseblox.Updater.desktop`.)
+1. In **Settings → Roblox Links**, turn off **Open Roblox links with Roseblox**. This restores the previous link handler. In **Settings → Updates**, turn off both **Notify me about … updates** switches; turning off the last one stops the checker and removes its login entry. (If you already removed Roseblox, delete `~/.config/autostart/io.github.roseblox.Roseblox.Updater.desktop` and `~/.local/share/applications/io.github.roseblox.Roseblox.Updater.desktop`.)
 2. Remove the package:
 
    ```sh

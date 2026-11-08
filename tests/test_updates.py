@@ -314,6 +314,27 @@ class UpdateNotifierTests(unittest.TestCase):
         self.assertEqual(1, installer.download_latest.call_count)
         self.assertEqual(3, len(self.sent))
 
+    def test_an_app_with_checks_off_is_not_looked_up(self):
+        self.store.save_update_checks(True)
+        self.store.save_update_app("studio", False)
+        self.store.save_auto_update("studio", True)
+        fetched = []
+        fetch = self.application.version_client.fetch
+        self.application.version_client.fetch = lambda app_type, source: fetched.append(app_type) or fetch(app_type, source)
+        self._run_synchronously()
+        self.application.check()
+        self.assertEqual(["player"], fetched)
+        self.assertEqual(["update-player"], self.sent)
+        self.assertIn("update-studio", self.withdrawn)
+
+    def test_checker_stops_when_every_app_is_off(self):
+        self.store.save_update_checks(True)
+        self.store.save_update_app("player", False)
+        self.store.save_update_app("studio", False)
+        command_line, _errors = self._command_line()
+        self.application._on_command_line(self.application, command_line)
+        self.assertFalse(self.application._running)
+
     def test_auto_update_waits_for_a_running_install(self):
         self.store.save_update_checks(True)
         self.store.save_auto_update("player", True)

@@ -22,7 +22,7 @@ from .rosemary_text import (
     INSTALL_ROW_TITLES,
     rosemary_install_method,
 )
-from .update_checks import UpdateCheckRow, auto_update_rows
+from .update_checks import update_rows
 
 _ICON_PATH = Path(__file__).resolve().parent.parent / "resources" / "roseblox-icon.svg"
 _BADGE_STATES = ("badge-done", "badge-attention", "badge-optional", "badge-working")
@@ -268,11 +268,12 @@ class OnboardingPage(Gtk.Box):
             "Optional. Get a notification when a new Player or Studio version is out, "
             "with a button to install it or skip that version.",
         )
-        self.update_row = UpdateCheckRow(self.window, icon_name="software-update-available-symbolic")
-        group.add(self.update_row)
-        self.auto_update_rows = auto_update_rows(self.window)
-        for row in self.auto_update_rows:
-            group.add(row)
+        self.update_rows, self.auto_update_rows = update_rows(
+            self.window, icon_name="software-update-available-symbolic"
+        )
+        for app_type in self.update_rows:
+            group.add(self.update_rows[app_type])
+            group.add(self.auto_update_rows[app_type])
         return group
 
     def _build_import_step(self) -> Gtk.Widget:
@@ -325,7 +326,7 @@ class OnboardingPage(Gtk.Box):
             self.import_button.remove_css_class("suggested-action")
 
     def _render_updates(self) -> None:
-        status = self.update_row.status
+        status = self.update_rows["player"].status
         if status is not None and status.enabled and not status.error:
             _set_badge(self.updates_badge, "Enabled", "done")
         elif status is not None and status.enabled:

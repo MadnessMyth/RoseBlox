@@ -63,8 +63,10 @@ def find_available_updates(
     return updates
 
 
-def check_for_updates(library, version_client, version_settings, version_cache, skipped_versions):
-    """Look up the latest version of each installed app.
+def check_for_updates(
+    library, version_client, version_settings, version_cache, skipped_versions, app_types=APP_TYPES
+):
+    """Look up the latest version of each installed app in ``app_types``.
 
     Returns ``(updates, errors)`` where errors maps an app type to a message; one app's
     lookup failing does not hide the other's update.
@@ -73,7 +75,7 @@ def check_for_updates(library, version_client, version_settings, version_cache, 
     latest: dict[str, str] = {}
     errors: dict[str, str] = {}
     for app_type in APP_TYPES:
-        if not any(record.app_type == app_type for record in records):
+        if app_type not in app_types or not any(record.app_type == app_type for record in records):
             continue
         try:
             info = version_client.fetch(app_type, version_settings.load_for(app_type))

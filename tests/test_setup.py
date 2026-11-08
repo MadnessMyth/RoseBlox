@@ -118,6 +118,25 @@ class SetupStoreTests(unittest.TestCase):
             with self.assertRaises(SetupSettingsError):
                 store.load()
 
+    def test_update_checks_can_be_turned_off_for_one_app(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = SetupStore(Path(directory) / "setup.json")
+            store.save_update_checks(True)
+            store.save_auto_update("studio", True)
+            state = store.load()
+            self.assertTrue(state.checks_updates("player"))
+            self.assertTrue(state.checks_updates("studio"))
+            state = store.save_update_app("studio", False)
+            self.assertTrue(state.checks_updates("player"))
+            self.assertFalse(state.checks_updates("studio"))
+            self.assertFalse(state.auto_update("studio"))
+            self.assertEqual({"studio": False}, SetupStore(store.path).load().update_apps)
+            store.save_update_checks(False)
+            self.assertFalse(store.load().checks_updates("player"))
+            store.path.write_text('{"update_apps": {"mobile": true}}', encoding="utf-8")
+            with self.assertRaises(SetupSettingsError):
+                store.load()
+
     def test_invalid_new_preferences_are_reported_without_overwriting(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "setup.json"
