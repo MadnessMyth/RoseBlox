@@ -20,6 +20,7 @@ from .backend.global_shortcuts import (
     open_connection,
 )
 from .backend.microphone import MicrophoneGate, detect_backend
+from .backend.microphone_sounds import OFF, ON, MicrophoneSounds, SoundPlayer
 
 APP_ID = "io.github.roseblox.Roseblox"
 BUS_NAME = "io.github.roseblox.Roseblox.Microphone"
@@ -55,15 +56,19 @@ class MicrophoneService:
         mode: str,
         release_delay_ms: int,
         inverted: bool = False,
+        sounds: MicrophoneSounds | None = None,
         *,
         log: Callable[[str], None] = lambda message: print(f"roseblox microphone: {message}", file=sys.stderr, flush=True),
         backend_factory=detect_backend,
         connection_factory=lambda: open_connection(APP_ID),
         shortcuts_factory=ShortcutsSession,
+        player: SoundPlayer | None = None,
     ) -> None:
         self.mode = mode
         self.release_delay_ms = release_delay_ms
         self.inverted = inverted
+        self.sounds = sounds or MicrophoneSounds()
+        self.player = player or SoundPlayer(log=log)
         self.log = log
         self.backend_factory = backend_factory
         self.connection_factory = connection_factory
@@ -90,8 +95,10 @@ class MicrophoneService:
         self.thread.start()
         self._ready.wait(5)
 
-    def configure(self, mode: str, release_delay_ms: int, inverted: bool = False) -> None:
-        self._invoke(lambda: self._configure(mode, release_delay_ms, inverted))
+    def configure(
+        self, mode: str, release_delay_ms: int, inverted: bool = False, sounds: MicrophoneSounds | None = None
+    ) -> None:
+        self._invoke(lambda: self._configure(mode, release_delay_ms, inverted, sounds or MicrophoneSounds()))
 
     def stop(self, timeout: float = 5.0) -> None:
         self._invoke(self._shutdown)
@@ -183,8 +190,8 @@ class MicrophoneService:
         if self.loop is not None:
             self.loop.quit()
 
-    def _configure(self, mode: str, release_delay_ms: int, inverted: bool) -> None:
-        self.mode, self.release_delay_ms, self.inverted = mode, release_delay_ms, inverted
+    def _configure(self, mode: str, release_delay_ms: int, inverted: bool, sounds: MicrophoneSounds) -> None:
+        self.mode, self.release_delay_ms, self.inverted, self.sounds = mode, release_delay_ms, inverted, sounds
         if self.gate is not None:
             try:
                 self.gate.configure(mode, release_delay_ms, inverted)
@@ -212,6 +219,7 @@ class MicrophoneService:
             self.gate.release()
 
     def _open_changed(self, open_: bool) -> None:
+        self.player.play(self.sounds, ON if open_ else OFF)
         if self._connection is None or not self._registration:
             return
         self._connection.emit_signal(

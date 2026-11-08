@@ -330,12 +330,12 @@ class ServiceTests(unittest.TestCase):
             None,
         )
 
-    def _service(self, backend, mode=MODE_HOLD, delay=100):
+    def _service(self, backend, mode=MODE_HOLD, delay=100, sounds=None, player=None):
         from roseblox.microphone_service import MicrophoneService
 
         service = MicrophoneService(
-            mode, delay, log=self.messages.append, backend_factory=lambda: backend, shortcuts_factory=FailingShortcuts,
-            connection_factory=self._connect,
+            mode, delay, False, sounds, log=self.messages.append, backend_factory=lambda: backend,
+            shortcuts_factory=FailingShortcuts, connection_factory=self._connect, player=player,
         )
         service.start()
         self.addCleanup(service.stop)
@@ -349,6 +349,25 @@ class ServiceTests(unittest.TestCase):
         with redirect_stderr(error), redirect_stdout(output):
             status = command_main(["roseblox", "--mic", *arguments], self.connection)
         return status, output.getvalue().strip(), error.getvalue().strip()
+
+    def test_sounds_play_when_the_microphone_opens_and_mutes(self):
+        from roseblox.backend.microphone_sounds import MicrophoneSounds
+
+        played = []
+
+        class FakePlayer:
+            def play(self, sounds, kind):
+                played.append((sounds.enabled, kind))
+
+        backend = ServiceBackend([CaptureStream("2", False, ROBLOX)])
+        service = self._service(backend, MODE_TOGGLE, sounds=MicrophoneSounds(True, 50), player=FakePlayer())
+        self.assertTrue(_wait_for(lambda: backend.calls == [("2", True)]))
+        self.assertEqual([], played)
+        self.assertEqual(0, self._command("toggle")[0])
+        self.assertTrue(_wait_for(lambda: played == [(True, "on")]))
+        service.configure(MODE_TOGGLE, 100, False, MicrophoneSounds(False, 50))
+        self.assertEqual(0, self._command("toggle")[0])
+        self.assertTrue(_wait_for(lambda: played == [(True, "on"), (False, "off")]))
 
     def test_one_gate_is_in_charge_and_the_command_drives_it(self):
         first_backend = ServiceBackend([CaptureStream("2", False, ROBLOX)])

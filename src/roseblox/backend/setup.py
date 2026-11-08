@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .microphone import DEFAULT_RELEASE_DELAY_MS, MICROPHONE_MODES, MODE_TOGGLE, validate_release_delay
+from .microphone_sounds import DEFAULT_VOLUME, MicrophoneSounds, validate_sound_path, validate_volume
 
 APP_TYPES = ("player", "studio")
 
@@ -70,21 +71,34 @@ class WhilePlaying:
     microphone_mode: str = MODE_TOGGLE
     microphone_release_delay_ms: int = DEFAULT_RELEASE_DELAY_MS
     microphone_inverted: bool = False
+    microphone_sounds: bool = False
+    microphone_sound_volume: int = DEFAULT_VOLUME
+    microphone_sound_on: str = ""
+    microphone_sound_off: str = ""
 
     @property
     def any_enabled(self) -> bool:
         return self.discord_presence or self.server_location or self.close_on_leave or self.microphone_toggle
 
+    @property
+    def sounds(self) -> MicrophoneSounds:
+        return MicrophoneSounds(
+            self.microphone_sounds, self.microphone_sound_volume, self.microphone_sound_on, self.microphone_sound_off
+        )
+
     def validate(self) -> "WhilePlaying":
         for value in (
             self.discord_presence, self.discord_join_button, self.server_location, self.close_on_leave,
-            self.microphone_toggle, self.microphone_inverted,
+            self.microphone_toggle, self.microphone_inverted, self.microphone_sounds,
         ):
             if not isinstance(value, bool):
                 raise ValueError("While Playing switches must be on or off.")
         if self.microphone_mode not in MICROPHONE_MODES:
             raise ValueError("The microphone mode must be Toggle or Hold.")
         validate_release_delay(self.microphone_release_delay_ms)
+        validate_volume(self.microphone_sound_volume)
+        validate_sound_path(self.microphone_sound_on)
+        validate_sound_path(self.microphone_sound_off)
         application_id = self.discord_application_id
         if not isinstance(application_id, str) or (application_id and not application_id.isdigit()) or len(application_id) > 22:
             raise ValueError("The Discord application ID must be a number.")
@@ -244,6 +258,10 @@ class SetupStore:
             "microphone_mode": settings.microphone_mode,
             "microphone_release_delay_ms": settings.microphone_release_delay_ms,
             "microphone_inverted": settings.microphone_inverted,
+            "microphone_sounds": settings.microphone_sounds,
+            "microphone_sound_volume": settings.microphone_sound_volume,
+            "microphone_sound_on": settings.microphone_sound_on,
+            "microphone_sound_off": settings.microphone_sound_off,
         })
 
     def save_section_expanded(self, section: str, expanded: bool) -> SetupState:
@@ -284,7 +302,8 @@ class SetupStore:
                 for name in (
                     "discord_presence", "discord_join_button", "discord_application_id",
                     "server_location", "close_on_leave", "microphone_toggle", "microphone_mode",
-                    "microphone_release_delay_ms", "microphone_inverted",
+                    "microphone_release_delay_ms", "microphone_inverted", "microphone_sounds",
+                    "microphone_sound_volume", "microphone_sound_on", "microphone_sound_off",
                 )
             }).validate()
         except ValueError as error:

@@ -14,6 +14,7 @@ from roseblox.activity_service import ActivityWatcher, watcher_arguments
 from roseblox.backend.activity import ActivityTracker, GameJoined, GameLeft, LogFollower, find_roblox_log, public_address
 from roseblox.backend.discord_rpc import DiscordError, DiscordPresence, build_activity, socket_candidates
 from roseblox.backend.game_info import GameDetails, GameInfoError, fetch_game, locate_server
+from roseblox.backend.microphone_sounds import MicrophoneSounds
 from roseblox.backend.setup import SetupSettingsError, SetupStore, WhilePlaying
 
 JOB = "e42cc7b0-9b0a-4b7e-8f35-1c2d3e4f5a6b"
@@ -291,8 +292,10 @@ class WhilePlayingSettingsTests(unittest.TestCase):
                 defaults.microphone_toggle, defaults.microphone_mode, defaults.microphone_release_delay_ms,
             ))
             self.assertFalse(defaults.any_enabled)
+            self.assertEqual(MicrophoneSounds(), defaults.sounds)
             saved = WhilePlaying(
                 microphone_toggle=True, microphone_mode="hold", microphone_release_delay_ms=400, microphone_inverted=True,
+                microphone_sounds=True, microphone_sound_volume=25, microphone_sound_off="/tmp/off.ogg",
             )
             self.assertTrue(saved.any_enabled)
             self.assertEqual(saved, store.save_while_playing(saved).while_playing)
@@ -302,6 +305,10 @@ class WhilePlayingSettingsTests(unittest.TestCase):
                 WhilePlaying(microphone_release_delay_ms=True),
                 WhilePlaying(microphone_toggle="yes"),
                 WhilePlaying(microphone_inverted=1),
+                WhilePlaying(microphone_sounds="on"),
+                WhilePlaying(microphone_sound_volume=101),
+                WhilePlaying(microphone_sound_volume=True),
+                WhilePlaying(microphone_sound_on="relative.wav"),
             ):
                 with self.assertRaises(ValueError):
                     store.save_while_playing(bad)
@@ -416,16 +423,18 @@ class WatcherTests(unittest.TestCase):
         created = []
 
         class FakeMicrophone:
-            def __init__(self, mode, delay, inverted):
+            def __init__(self, mode, delay, inverted, sounds):
                 self.settings = [(mode, delay, inverted)]
+                self.sounds = [sounds]
                 self.started = self.stopped = False
                 created.append(self)
 
             def start(self):
                 self.started = True
 
-            def configure(self, mode, delay, inverted):
+            def configure(self, mode, delay, inverted, sounds):
                 self.settings.append((mode, delay, inverted))
+                self.sounds.append(sounds)
 
             def stop(self):
                 self.stopped = True
@@ -445,6 +454,12 @@ class WatcherTests(unittest.TestCase):
         )
         watcher.poll()
         self.assertEqual([("toggle", 250, False), ("hold", 500, True)], first.settings)
+        self.settings = WhilePlaying(
+            microphone_toggle=True, microphone_mode="hold", microphone_release_delay_ms=500, microphone_inverted=True,
+            microphone_sounds=True, microphone_sound_volume=30,
+        )
+        watcher.poll()
+        self.assertEqual(MicrophoneSounds(True, 30), first.sounds[-1])
         self.settings = WhilePlaying()
         watcher.poll()
         self.assertTrue(first.stopped)

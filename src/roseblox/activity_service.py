@@ -104,7 +104,7 @@ class ActivityWatcher:
         self._started_at = self.clock()
         self.microphone_factory = microphone_factory or _microphone_service
         self.microphone = None
-        self._microphone_settings: tuple[str, int, bool] | None = None
+        self._microphone_settings: tuple | None = None
 
     def settings(self) -> WhilePlaying:
         try:
@@ -134,7 +134,9 @@ class ActivityWatcher:
         if not settings.microphone_toggle or not self.alive():
             self._stop_microphone()
             return
-        wanted = (settings.microphone_mode, settings.microphone_release_delay_ms, settings.microphone_inverted)
+        wanted = (
+            settings.microphone_mode, settings.microphone_release_delay_ms, settings.microphone_inverted, settings.sounds,
+        )
         if self.microphone is None:
             self.microphone = self.microphone_factory(*wanted)
             self.microphone.start()
@@ -255,10 +257,10 @@ class ActivityWatcher:
             _log(f"notification: {error}")
 
 
-def _microphone_service(mode: str, release_delay_ms: int, inverted: bool):
+def _microphone_service(mode: str, release_delay_ms: int, inverted: bool, sounds):
     from .microphone_service import MicrophoneService
 
-    return MicrophoneService(mode, release_delay_ms, inverted)
+    return MicrophoneService(mode, release_delay_ms, inverted, sounds)
 
 
 def watcher_arguments(pid: int, start_time: int, log_path: Path, roblox_logs: Path | None = None) -> list[str]:
