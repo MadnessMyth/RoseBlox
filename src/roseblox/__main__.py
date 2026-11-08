@@ -4,8 +4,8 @@ import sys
 
 
 def main() -> int:
-    # The update checker and activity watcher run in the background, so they never load GTK.
-    if sys.argv[1:2] in (["--update-service"], ["--activity-watch"]):
+    # The update checker, activity watcher and microphone command run in the background, so they never load GTK.
+    if sys.argv[1:2] in (["--update-service"], ["--activity-watch"], ["--mic"]):
         from .backend.appimage import restore_host_environment
 
         restore_host_environment()
@@ -17,6 +17,10 @@ def main() -> int:
         from .activity_service import main as run_activity_watch
 
         return run_activity_watch(sys.argv)
+    if sys.argv[1:2] == ["--mic"]:
+        from .microphone_service import command_main
+
+        return command_main(sys.argv)
     from .application import RosebloxApplication
 
     application = RosebloxApplication()

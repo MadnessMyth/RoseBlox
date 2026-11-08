@@ -409,6 +409,51 @@ class WatcherTests(unittest.TestCase):
         watcher.poll()
         self.assertEqual(1, len(self.kills))
 
+    def test_the_microphone_toggle_follows_its_setting_and_stops_with_roblox(self):
+        created = []
+
+        class FakeMicrophone:
+            def __init__(self, mode, delay):
+                self.settings = [(mode, delay)]
+                self.started = self.stopped = False
+                created.append(self)
+
+            def start(self):
+                self.started = True
+
+            def configure(self, mode, delay):
+                self.settings.append((mode, delay))
+
+            def stop(self):
+                self.stopped = True
+
+        self.settings = WhilePlaying()
+        watcher = self._watcher(microphone_factory=FakeMicrophone)
+        watcher.poll()
+        self.assertEqual([], created)
+        self.settings = WhilePlaying(microphone_toggle=True)
+        watcher.poll()
+        watcher.poll()
+        [first] = created
+        self.assertTrue(first.started)
+        self.assertEqual([("toggle", 250)], first.settings)
+        self.settings = WhilePlaying(microphone_toggle=True, microphone_mode="hold", microphone_release_delay_ms=500)
+        watcher.poll()
+        self.assertEqual([("toggle", 250), ("hold", 500)], first.settings)
+        self.settings = WhilePlaying()
+        watcher.poll()
+        self.assertTrue(first.stopped)
+        self.assertIsNone(watcher.microphone)
+
+        self.settings = WhilePlaying(microphone_toggle=True)
+        watcher.poll()
+        second = created[-1]
+        self.assertTrue(second.started)
+        self.start_time = 999
+        self.assertEqual(0, watcher.run())
+        self.assertTrue(second.stopped)
+        self.assertEqual(2, len(created))
+
     def test_a_reused_pid_is_never_signaled(self):
         self.start_time = 999
         watcher = self._watcher()

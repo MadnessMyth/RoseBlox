@@ -1,5 +1,9 @@
+import io
 import json
+import shutil
+import time
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 
 from roseblox.backend.microphone import (
     MODE_HOLD,
@@ -244,6 +248,108 @@ class GateTests(unittest.TestCase):
         microphone = MicrophoneGate(backend, schedule=lambda *_: None, cancel=lambda _: None, log=messages.append)
         microphone.sync()
         self.assertEqual(["pactl: Connection refused"], messages)
+
+
+class ServiceBackend(FakeBackend):
+    name = "fake"
+    monitor_command = ["sh", "-c", "read line; echo \"Event 'new' on source-output #$line\"; sleep 60"]
+
+    @staticmethod
+    def relevant(line):
+        return "source-output" in line
+
+
+class FailingShortcuts:
+    def __init__(self, _connection, **_handlers):
+        self.closed = False
+
+    def start(self, _shortcuts, done):
+        done(None, "This desktop has no global shortcut service.")
+
+    def close(self):
+        self.closed = True
+
+
+def _wait_for(condition, timeout=5.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if condition():
+            return True
+        time.sleep(0.02)
+    return condition()
+
+
+@unittest.skipUnless(shutil.which("dbus-daemon"), "needs dbus-daemon")
+class ServiceTests(unittest.TestCase):
+    def setUp(self):
+        from gi.repository import Gio
+
+        self.bus = Gio.TestDBus.new(Gio.TestDBusFlags.NONE)
+        self.bus.up()
+        self.addCleanup(self.bus.down)
+        self.messages = []
+        self.connection = self._connect()
+        self.addCleanup(self.connection.close_sync, None)
+
+    def _connect(self):
+        from gi.repository import Gio
+
+        return Gio.DBusConnection.new_for_address_sync(
+            self.bus.get_bus_address(),
+            Gio.DBusConnectionFlags.AUTHENTICATION_CLIENT | Gio.DBusConnectionFlags.MESSAGE_BUS_CONNECTION,
+            None,
+            None,
+        )
+
+    def _service(self, backend, mode=MODE_HOLD, delay=100):
+        from roseblox.microphone_service import MicrophoneService
+
+        service = MicrophoneService(
+            mode, delay, log=self.messages.append, backend_factory=lambda: backend, shortcuts_factory=FailingShortcuts,
+            connection_factory=self._connect,
+        )
+        service.start()
+        self.addCleanup(service.stop)
+        return service
+
+    def _command(self, *arguments):
+        from roseblox.microphone_service import command_main
+
+        error = io.StringIO()
+        output = io.StringIO()
+        with redirect_stderr(error), redirect_stdout(output):
+            status = command_main(["roseblox", "--mic", *arguments], self.connection)
+        return status, output.getvalue().strip(), error.getvalue().strip()
+
+    def test_one_gate_is_in_charge_and_the_command_drives_it(self):
+        first_backend = ServiceBackend([CaptureStream("2", False, ROBLOX)])
+        first = self._service(first_backend)
+        self.assertTrue(_wait_for(lambda: first_backend.calls == [("2", True)]))
+        self.assertTrue(any("roseblox --mic toggle" in message for message in self.messages))
+
+        second_backend = ServiceBackend([CaptureStream("2", True, ROBLOX)])
+        second = self._service(second_backend, MODE_TOGGLE)
+        self.assertIsNone(second.gate)
+
+        self.assertEqual((0, "muted (hold mode, hotkey: none)", ""), self._command("status"))
+        self.assertEqual(0, self._command("press")[0])
+        self.assertTrue(_wait_for(lambda: first_backend.calls[-1] == ("2", False)))
+        self.assertEqual(0, self._command("release")[0])
+        self.assertTrue(_wait_for(lambda: first_backend.calls[-1] == ("2", True)))
+
+        first.stop()
+        self.assertFalse(first.thread.is_alive())
+        self.assertEqual(("2", False), first_backend.calls[-1])
+        self.assertTrue(_wait_for(lambda: second.gate is not None))
+        self.assertEqual((0, "muted (toggle mode, hotkey: none)", ""), self._command("status"))
+        self.assertEqual(0, self._command("on")[0])
+        self.assertTrue(_wait_for(lambda: second.gate.open))
+
+    def test_the_command_explains_when_nothing_is_running_and_rejects_unknown_actions(self):
+        status, _output, error = self._command("toggle")
+        self.assertEqual(1, status)
+        self.assertIn("Microphone toggle turned on", error)
+        self.assertEqual(2, self._command("loud")[0])
 
 
 if __name__ == "__main__":

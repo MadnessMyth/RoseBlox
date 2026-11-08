@@ -1,4 +1,5 @@
-"""Windowless companion of one Roblox Player launch: Discord presence, server location, close on leave.
+"""Windowless companion of one Roblox Player launch: Discord presence, server location, close on leave,
+and the microphone toggle.
 
 It runs as ``roseblox --activity-watch PID START_TIME LOG`` so it keeps working
 after the Roseblox window closes, and exits when that Rosemary process does.
@@ -77,6 +78,7 @@ class ActivityWatcher:
         sleep=time.sleep,
         process_snapshot=read_process_snapshot,
         kill=os.kill,
+        microphone_factory=None,
     ) -> None:
         self.pid = pid
         self.start_time = start_time
@@ -100,6 +102,9 @@ class ActivityWatcher:
         self._discord_retry_at = 0.0
         self._games: dict[int, object] = {}
         self._started_at = self.clock()
+        self.microphone_factory = microphone_factory or _microphone_service
+        self.microphone = None
+        self._microphone_settings: tuple[str, int] | None = None
 
     def settings(self) -> WhilePlaying:
         try:
@@ -114,12 +119,34 @@ class ActivityWatcher:
 
     def run(self) -> int:
         _log(f"watching Roblox Player process {self.pid}")
-        while self.alive():
+        try:
+            while self.alive():
+                self.poll()
+                self.sleep(POLL_SECONDS)
             self.poll()
-            self.sleep(POLL_SECONDS)
-        self.poll()
-        self._clear_presence()
+        finally:
+            self._clear_presence()
+            self._stop_microphone()
         return 0
+
+    def update_microphone(self) -> None:
+        settings = self.settings()
+        if not settings.microphone_toggle or not self.alive():
+            self._stop_microphone()
+            return
+        wanted = (settings.microphone_mode, settings.microphone_release_delay_ms)
+        if self.microphone is None:
+            self.microphone = self.microphone_factory(*wanted)
+            self.microphone.start()
+        elif wanted != self._microphone_settings:
+            self.microphone.configure(*wanted)
+        self._microphone_settings = wanted
+
+    def _stop_microphone(self) -> None:
+        if self.microphone is not None:
+            self.microphone.stop()
+            self.microphone = None
+            self._microphone_settings = None
 
     def _source(self) -> LogFollower:
         if self.roblox_follower is None and self.clock() >= self._log_search_at:
@@ -135,6 +162,7 @@ class ActivityWatcher:
         return self.roblox_follower or self.follower
 
     def poll(self) -> None:
+        self.update_microphone()
         source = self._source()
         if source is not self.follower:
             self.follower.read_lines()
@@ -227,6 +255,12 @@ class ActivityWatcher:
             _log(f"notification: {error}")
 
 
+def _microphone_service(mode: str, release_delay_ms: int):
+    from .microphone_service import MicrophoneService
+
+    return MicrophoneService(mode, release_delay_ms)
+
+
 def watcher_arguments(pid: int, start_time: int, log_path: Path, roblox_logs: Path | None = None) -> list[str]:
     executable = appimage_path()
     command = [executable] if executable else [sys.executable, "-m", "roseblox"]
@@ -241,4 +275,6 @@ def main(argv: list[str]) -> int:
         return 2
     pid, start_time, log_path = int(arguments[0]), int(arguments[1]), Path(arguments[2])
     roblox_logs = Path(arguments[3]) if len(arguments) == 4 else None
+    # Unwind on logout or `kill` too, so a muted Roblox microphone is opened again.
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     return ActivityWatcher(pid, start_time, log_path, roblox_logs).run()
