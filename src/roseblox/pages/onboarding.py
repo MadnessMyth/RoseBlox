@@ -180,7 +180,7 @@ class OnboardingPage(Gtk.Box):
         self.appimage_row = Adw.ActionRow.new()
         self.appimage_row.set_title("Rosemary AppImage found")
         self.appimage_row.set_subtitle_selectable(True)
-        self.appimage_row.add_prefix(Gtk.Image.new_from_icon_name("emblem-downloads-symbolic"))
+        self.appimage_row.add_prefix(Gtk.Image.new_from_icon_name("folder-download-symbolic"))
         use_appimage = Gtk.Button.new_with_label("Use This File")
         use_appimage.set_valign(Gtk.Align.CENTER)
         use_appimage.add_css_class("suggested-action")
@@ -355,6 +355,10 @@ class OnboardingPage(Gtk.Box):
         appimage = None if status.available else getattr(self.window, "rosemary_appimage", None)
         self.appimage_row.set_visible(bool(appimage))
         self.appimage_row.set_subtitle(appimage or "")
+        if appimage:
+            self.install_rosemary_button.remove_css_class("suggested-action")
+        else:
+            self.install_rosemary_button.add_css_class("suggested-action")
         if install.error:
             self.install_rosemary_row.add_css_class("error-row")
         else:

@@ -1,9 +1,71 @@
+import os
 import re
+import subprocess
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+INSTALL_SCRIPT = ROOT / "packaging" / "generic" / "install.sh"
+
+
+class GenericInstallTests(unittest.TestCase):
+    def _run(self, home, *arguments):
+        environment = {
+            "HOME": str(home),
+            "PATH": f"{Path(sys.executable).parent}:/usr/bin:/bin",
+            "PYTHONPATH": os.environ.get("PYTHONPATH", ""),
+            "ALLOW_ROOT": "1",
+        }
+        return subprocess.run(
+            ["/bin/sh", str(INSTALL_SCRIPT), *arguments], env=environment, capture_output=True, text=True, timeout=60
+        )
+
+    def test_installs_a_working_launcher_and_uninstalls_it(self):
+        try:
+            import gi
+
+            gi.require_version("Gtk", "4.0")
+            gi.require_version("Adw", "1")
+        except (ImportError, ValueError):
+            self.skipTest("needs PyGObject with GTK 4 and libadwaita")
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            result = self._run(home)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            local = home / ".local"
+            launcher = local / "bin" / "roseblox"
+            desktop = local / "share" / "applications" / "io.github.roseblox.Roseblox.desktop"
+            self.assertTrue((local / "lib" / "roseblox" / "roseblox" / "__main__.py").is_file())
+            self.assertFalse(list((local / "lib" / "roseblox").rglob("__pycache__")))
+            self.assertTrue((local / "share" / "icons" / "hicolor" / "scalable" / "apps" / "io.github.roseblox.Roseblox.svg").is_file())
+            self.assertIn(f'Exec="{launcher}" %u', desktop.read_text(encoding="utf-8"))
+            self.assertIn("is not in your PATH", result.stdout)
+
+            usage = subprocess.run(
+                [str(launcher), "--activity-watch"], env={"HOME": str(home), "PATH": "/usr/bin:/bin"},
+                capture_output=True, text=True, timeout=30,
+            )
+            self.assertEqual(2, usage.returncode)
+            self.assertIn("Usage: roseblox --activity-watch", usage.stderr)
+
+            self.assertEqual(0, self._run(home).returncode)
+            result = self._run(home, "--uninstall")
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertFalse(launcher.exists())
+            self.assertFalse(desktop.exists())
+            self.assertFalse((local / "lib" / "roseblox").exists())
+
+    def test_refuses_to_replace_files_it_did_not_install(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            (home / ".local" / "lib" / "roseblox").mkdir(parents=True)
+            result = self._run(home, "--uninstall")
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("was not installed by this script", result.stderr)
+            self.assertTrue((home / ".local" / "lib" / "roseblox").is_dir())
 
 
 class ArchPackagingTests(unittest.TestCase):

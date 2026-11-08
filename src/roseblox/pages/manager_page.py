@@ -2029,6 +2029,10 @@ class SettingsPage(Gtk.Box):
         appimage = None if status.available else getattr(self.window, "rosemary_appimage", None)
         self.appimage_row.set_visible(bool(appimage))
         self.appimage_row.set_subtitle(appimage or "")
+        if appimage:
+            self.install_rosemary_button.remove_css_class("suggested-action")
+        else:
+            self.install_rosemary_button.add_css_class("suggested-action")
         if install.error:
             self.install_rosemary_row.add_css_class("error-row")
         else:
