@@ -60,7 +60,10 @@ class Appearance:
 
 @dataclass(frozen=True)
 class WhilePlaying:
-    """Roblox Player activity features; all off until the user turns them on."""
+    """Roblox Player activity features; all off until the user turns them on.
+
+    ``server_location_in_game`` only chooses how the server location is shown once it is on.
+    """
 
     discord_presence: bool = False
     discord_join_button: bool = True
@@ -75,7 +78,7 @@ class WhilePlaying:
     microphone_sound_volume: int = DEFAULT_VOLUME
     microphone_sound_on: str = ""
     microphone_sound_off: str = ""
-    server_location_in_game: bool = False
+    server_location_in_game: bool = True
 
     @property
     def any_enabled(self) -> bool:

@@ -472,15 +472,20 @@ class RealWindowTests(unittest.TestCase):
         self.assertTrue(settings.in_game_warning.get_visible())
         self.assertIn("MangoHud, which is not installed", in_game_row.get_subtitle())
         self.assertIn("desktop notification", in_game_row.get_subtitle())
-        with patch("roseblox.pages.manager_page.mangohud.layer_installed", return_value=True):
-            in_game.set_active(True)
-        self.assertFalse(settings.in_game_warning.get_visible())
-        self.assertIn("top of the game", in_game_row.get_subtitle())
-        state = SetupStore(self.config_home / "roseblox" / "setup.json").load()
-        self.assertTrue(state.while_playing.server_location_in_game)
+        self.assertTrue(in_game.get_active())
         from roseblox.pages.manager_page import _wants_in_game_banner
 
-        self.assertTrue(_wants_in_game_banner(state))
+        self.assertTrue(_wants_in_game_banner(window.setup_state))
+        with patch("roseblox.pages.manager_page.mangohud.layer_installed", return_value=True):
+            in_game.set_active(False)
+        self.assertFalse(settings.in_game_warning.get_visible())
+        self.assertIn("top of the game", in_game_row.get_subtitle())
+        self.assertIn("desktop notification instead", in_game_row.get_subtitle())
+        state = SetupStore(self.config_home / "roseblox" / "setup.json").load()
+        self.assertFalse(state.while_playing.server_location_in_game)
+        self.assertFalse(_wants_in_game_banner(state))
+        in_game.set_active(True)
+        self.assertTrue(_wants_in_game_banner(window.setup_state))
         location.set_active(False)
         self.assertFalse(in_game_row.get_visible())
         self.assertFalse(_wants_in_game_banner(window.setup_state))

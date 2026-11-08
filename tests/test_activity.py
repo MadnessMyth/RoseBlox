@@ -430,10 +430,11 @@ class WatcherTests(unittest.TestCase):
         watcher.poll()
         self.assertEqual(HIDDEN, overlay.path.read_text())
 
-    def test_without_the_in_game_switch_the_location_is_a_desktop_notification(self):
+    def test_with_the_in_game_switch_off_the_location_is_a_desktop_notification(self):
         from roseblox.backend.game_overlay import HIDDEN
 
-        self.settings = WhilePlaying(server_location=True)
+        self.assertTrue(WhilePlaying().server_location_in_game)
+        self.settings = WhilePlaying(server_location=True, server_location_in_game=False)
         watcher, overlay = self._overlay_watcher()
         self._write(JOIN, PUBLIC, CONNECTED)
         watcher.poll()
