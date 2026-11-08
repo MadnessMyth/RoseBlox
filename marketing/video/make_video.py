@@ -849,7 +849,8 @@ def make_audio(path: Path) -> None:
         boom_t = np.arange(int(1.6 * SR)) / SR
         boom = np.sin(2 * np.pi * np.cumsum(34 + 60 * np.exp(-boom_t / 0.08)) / SR) * np.exp(-boom_t / 0.5)
         crash = onepole(np.diff(noise(2.0, 12), prepend=0), 7000) * np.exp(-np.arange(int(2.0 * SR)) / SR / 0.7)
-        add(sfx, at, (0.5 if big else 0.25) * boom + (0.1 if big else 0.05) * crash)
+        add(sfx, at, (0.5 if big else 0.25) * boom)
+        add(sfx, at, (0.1 if big else 0.05) * crash)
     end = np.arange(int((TOTAL - bars(13) + 0.2) * SR)) / SR
     env = np.minimum(1, end / 0.01) * np.exp(-end / 2.2)
     add(music, bars(13), 0.05 * env * sum(np.sin(2 * np.pi * hz(m) * end) for m in (45, 57, 60, 64, 69, 72)))
