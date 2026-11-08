@@ -8,7 +8,7 @@ from pathlib import Path
 from ..fast_flags import MAX_FLAGS
 from ..launch_config import MAX_ENTRIES, AppLaunchConfig, LaunchConfigError, LaunchConfigStore
 from ..mods import ModsError, ModSettings, ModsStore, font_kind
-from ..setup import SetupSettingsError, SetupState, SetupStore
+from ..setup import SetupSettingsError, SetupState, SetupStore, WhilePlaying
 from .model import APP_SETTINGS, PLAYER, ROSEBLOX, STUDIO, ImportItem, ImportProblem, ImportResult, SKIPPED, INVALID
 
 ADD = "add"
@@ -74,22 +74,23 @@ class Current:
         )
 
     def value(self, target: str, key: str) -> tuple[object, bool]:
-        """The current value, and whether Roseblox has one set (False: nothing to overwrite)."""
+        """The current value, and whether it differs from Roseblox's default (False: nothing to overwrite)."""
         if target == ROSEBLOX:
             if key == "plain_ctrl_click":
-                return self.setup.plain_ctrl_click, True
+                return self.setup.plain_ctrl_click, self.setup.plain_ctrl_click != SetupState().plain_ctrl_click
             value = getattr(self.setup.while_playing, key)
-            return value, value != ""
+            return value, value != getattr(WhilePlaying(), key)
         if key.startswith("mods."):
-            value = getattr(self.mods[target], key.removeprefix("mods."))
-            return value, value not in (None, False)
+            field_name = key.removeprefix("mods.")
+            value = getattr(self.mods[target], field_name)
+            return value, value != getattr(ModSettings(), field_name)
         config = self.apps[target]
         mapping, _, name = key.partition(".")
         if mapping in MAPPINGS:
             entries = getattr(config, mapping)
             return entries.get(name), name in entries
         value = getattr(config, key)
-        return value, value not in (None, False)
+        return value, value != getattr(AppLaunchConfig(), key)
 
 
 def plan(result: ImportResult, stores: Stores) -> ImportPlan:
