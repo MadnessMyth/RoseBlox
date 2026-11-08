@@ -4,8 +4,9 @@ import sys
 
 
 def main() -> int:
-    # The update checker, activity watcher and microphone command run in the background, so they never load GTK.
-    if sys.argv[1:2] in (["--update-service"], ["--activity-watch"], ["--mic"]):
+    # The update checker, activity watcher, playtime tracker and microphone command run in the background,
+    # so they never load GTK.
+    if sys.argv[1:2] in (["--update-service"], ["--activity-watch"], ["--playtime"], ["--mic"]):
         from .backend.appimage import restore_host_environment
 
         restore_host_environment()
@@ -17,6 +18,10 @@ def main() -> int:
         from .activity_service import main as run_activity_watch
 
         return run_activity_watch(sys.argv)
+    if sys.argv[1:2] == ["--playtime"]:
+        from .playtime_service import main as run_playtime
+
+        return run_playtime(sys.argv)
     if sys.argv[1:2] == ["--mic"]:
         from .microphone_service import command_main
 
