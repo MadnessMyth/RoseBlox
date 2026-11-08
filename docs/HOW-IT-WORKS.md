@@ -1,0 +1,194 @@
+# How Roseblox works
+
+This page explains what Roseblox does behind its windows: how it starts Roblox, where it gets Roblox from, what it stores and where, and how each feature works. To install and use Roseblox, see [the install guide](INSTALL.md) instead.
+
+## The big picture
+
+Roblox publishes Player and Studio for Windows and macOS, but not for Linux. Roseblox uses the macOS versions:
+
+1. **Rosemary** runs macOS apps on Linux. It provides a macOS base system (its *prefix*) and translates the Metal graphics the macOS Roblox apps draw with into Vulkan, which Linux graphics drivers understand. Rosemary is a separate project; Roseblox never bundles it or downloads it itself.
+2. **Roblox's macOS apps** (`RobloxPlayer.app` and `RobloxStudio.app`) are downloaded unchanged from Roblox's own servers.
+3. **Roseblox** is the desktop app around them, written in Python with GTK 4 and libadwaita. It installs and updates the Roblox apps, starts them through Rosemary with your settings, opens Roblox links from the browser, and adds features such as mods and Discord Rich Presence.
+
+```
+roblox.com "Play" link ──▶ Roseblox ──▶ rosemary RobloxPlayer.app/ -- <link> ──▶ Roblox (macOS app) ──▶ Vulkan ──▶ your GPU
+```
+
+Roseblox never changes Roblox's program code. The only things it writes inside a Roblox app are FastFlags you chose (Roblox's own settings file) and media files you chose as mods, and it can undo both.
+
+## Getting Rosemary
+
+On first launch, setup checks for a `rosemary` executable in `PATH`, or the path saved in Settings → Advanced. When it is missing, **Install Rosemary** opens a visible terminal that runs:
+
+```sh
+paru -S --needed rosemary sdl3 vulkan-icd-loader    # or yay when paru is absent
+```
+
+The [AUR package](https://aur.archlinux.org/packages/rosemary) lists SDL 3 and the Vulkan loader as optional, but Roblox cannot start without them, so they are installed together. You review the package and type your password in that terminal; Roseblox never runs `sudo` itself. After a successful install the terminal runs `rosemary prefix create`, which downloads Rosemary's macOS base system once. Roseblox notices the new executable when the build finishes.
+
+The terminal is `$TERMINAL` when supported, otherwise the first one found of `xdg-terminal-exec`, GNOME Console, Ptyxis, GNOME Terminal, Konsole, Xfce Terminal, Alacritty, kitty, foot, WezTerm, Ghostty and xterm. You can also choose any existing Rosemary executable or release AppImage instead.
+
+A Vulkan driver for your GPU (for example `vulkan-radeon`, `vulkan-intel` or `nvidia-utils`) is also required.
+
+## Getting Roblox
+
+### Versions
+
+Roseblox asks Roblox's client settings service for the current macOS versions:
+
+- Player: `https://clientsettingscdn.roblox.com/v2/client-version/MacPlayer`
+- Studio: `https://clientsettingscdn.roblox.com/v2/client-version/MacStudio`
+
+It reads `/clientVersionUpload` from the reply and accepts it only if it matches Roblox's version format. Checks time out after 15 seconds and read at most 1 MiB. Successful results are cached in `~/.local/share/roseblox/versions.json`.
+
+Settings → Advanced can point Player or Studio at a different HTTPS JSON endpoint and an RFC 6901 JSON Pointer (nested keys and array indexes work). **Test Configuration** shows the connection, HTTP status, parsed value and validation result without saving anything; **Save** applies it, and **Restore Defaults** resets only the selected app.
+
+### Downloads
+
+The download addresses are fixed to Roblox's CDN and cannot be changed:
+
+- Player: `https://setup.rbxcdn.com/mac/<version>-RobloxPlayer.zip`
+- Studio: `https://setup.rbxcdn.com/mac/<version>-RobloxStudioApp.zip`
+
+Downloads run in the background and show progress, speed (averaged over five seconds) and time left. Partial downloads are kept under `~/.local/share/roseblox/.staging/downloads/` with their state in `downloads.json`, and resume with HTTP Range requests when the server supports them; otherwise they restart safely. Finished archives are kept in `~/.local/share/roseblox/archives/`.
+
+### Installing
+
+Archives are unpacked with the system `bsdtar` command (from Arch's `libarchive` package), in the background. Every path and symbolic link in the archive is checked before anything is unpacked, and the app bundle is validated before it is registered. Installed apps live in `~/.local/share/roseblox/installations/`.
+
+### The Library
+
+Roseblox keeps a list of installations in `~/.local/share/roseblox/library.json`. There are two kinds:
+
+- **Managed** installations, which Roseblox downloaded or copied. Roseblox can delete these, but only after you confirm.
+- **External** installations, which are app bundles you added from elsewhere (an existing `.app` folder or ZIP archive). Roseblox launches them but never deletes or modifies them, and mods never touch them.
+
+The Library, Player, Studio and Home pages share one snapshot of this list, loaded and validated once in the background, instead of each reading it again.
+
+Each app has a *preferred* installation, saved in `~/.config/roseblox/preferences.json`, which Home and Roblox links use. Picking another installation on Home is temporary and does not change the saved choice. If the preferred one is removed or broken, Home uses the first valid installation without overwriting your preference.
+
+## Starting Roblox
+
+When you press **Launch** or open a Roblox link, Roseblox:
+
+1. Checks that Rosemary is available and that the app bundle is valid.
+2. Applies your [mods](#mods) to managed installations.
+3. Writes your FastFlags to the bundle's `Contents/MacOS/ClientSettings/ClientAppSettings.json`. A file there that Roseblox did not write is backed up first.
+4. Builds the environment: your Performance settings become Rosemary variables (for example `ROSEMARY_METAL_PRESENTATION_MODE`, `ROSEMARY_SCREEN_REFRESH_RATE`, `ROSEMARY_COMMAND_KEY`, `MANGOHUD=1`), and variables meant for Roblox itself go through `ROSEMARY_ENVIRON`.
+5. Runs Rosemary directly, without a shell:
+
+   ```
+   rosemary /path/to/RobloxPlayer.app/ -- <Roblox link> <your extra arguments>
+   ```
+
+   Everything meant for Roblox goes after `--`, because Rosemary reads its own options anywhere after the bundle path.
+6. Registers the process with Feral GameMode over D-Bus when GameMode is on. If that fails, Roblox keeps running and the notification center says why.
+
+Rosemary is started in its own session, with its output going to a log file rather than back to Roseblox. That is why Roblox keeps running when Roseblox closes. Logs are in `~/.local/state/roseblox/logs/`: `player.log` and `studio.log`, with the previous run kept as `.log.1`. A Player started while `player.log` is in use writes `player-2.log`, `player-3.log`, and so on.
+
+**Ctrl + left-click compatibility** (on by default) adds `ROSEMARY_PLAIN_CTRL_CLICK=1`, so Rosemary builds that support it deliver Ctrl + left-click as a normal left-click. The switch is greyed out when the selected Rosemary does not contain the supported option.
+
+Studio's **Open Place…** passes `-task EditFile -localPlaceFile <path>`, with the path translated into the one Rosemary's macOS sees (`/Volumes/Host/...` for files outside the prefix).
+
+### More than one Player
+
+Roblox brings its existing window forward when the same app is launched twice. So with **Allow more than one Roblox Player** on, each extra Player runs from its own installation: a copy made with **Duplicate…**, or another version. A Roblox link opened while a Player runs goes to an installation that is not running yet.
+
+### Closing Roseblox after launching
+
+With **Close after opening Roblox Player** or **Studio** on, the Roseblox window closes five seconds after the app starts, unless the app has already exited (so its error stays visible) or a download or install is still running.
+
+## Roblox links
+
+Roblox's website starts games with `roblox://` and `roblox-player://` links, and Studio signs in with `roblox-studio://` and `roblox-studio-auth://`. Roseblox handles them only after you turn on **Open Roblox links with Roseblox**.
+
+Turning it on registers those schemes for your user account with XDG desktop associations (`xdg-mime`, from `xdg-utils`), and rebuilds the desktop caches that KDE Plasma (`kbuildsycoca6`) and other launchers (`update-desktop-database`) read. Roseblox then also appears in "Open with" dialogs. The packaged menu entry accepts a link (`roseblox URI`) but does not claim the schemes itself, so installing Roseblox never takes over Roblox links on its own.
+
+Turning it off restores the previous default when Roseblox still owns it, and removes only Roseblox's own associations. Settings shows whether the registration is active and can repair it.
+
+A link is checked before use and then passed to Roblox as described in [Starting Roblox](#starting-roblox).
+
+## Update checks
+
+**Notify me about Roblox updates** installs a small background checker, `roseblox --update-service`, which starts with your desktop session through `~/.config/autostart/io.github.roseblox.Roseblox.Updater.desktop`. It has no window and does not load GTK. It checks the installed Player and Studio versions one minute after login and every three hours, and sends a desktop notification when a newer one is out.
+
+**Update** opens Roseblox, installs the new version and makes it the preferred installation; older versions stay until you remove them. **Skip This Version** stays quiet until an even newer version appears, and an ignored notification comes back after a day. Turning the switch off stops the checker and removes its login entry. Output from a window opened by a notification goes to `~/.local/state/roseblox/logs/roseblox.log`.
+
+While the switch is on, the Roseblox window also checks when it opens and every three hours while it stays open.
+
+## Performance settings
+
+Player and Studio each have their own settings in `~/.config/roseblox/launch-config.json`. Every change is listed for review before it is saved, and the previous settings are backed up to `~/.config/roseblox/backups/` (the 30 newest are kept).
+
+Safety rules:
+
+- Variables that look like passwords, tokens or cookies are refused, as are library injection variables such as `LD_PRELOAD` and `DYLD_*`.
+- Login ticket and authentication arguments are refused.
+- Presets never touch networking, physics or security flags, and Roseblox never adds a FastFlag you did not choose.
+- Nothing is set for your whole desktop; settings apply only to the Roblox process Roseblox starts.
+
+The Player only obeys FastFlags on Roblox's allowlist, which Roseblox downloads from `https://clientsettingscdn.roblox.com/v2/settings/application/MacDesktopClient` and uses to mark each flag. Studio obeys every flag.
+
+**Measure & compare** samples the running app's CPU and memory from `/proc`, and GPU load from `amdgpu` sysfs or `nvidia-smi` where available. Results are saved with the settings in use in `~/.local/state/roseblox/measurements.json` (the 50 newest). Roblox does not report its frame rate, so Roseblox does not estimate one; use the MangoHud overlay for FPS.
+
+Diagnostics and the Performance page only show facts Roseblox read or checked.
+
+## Mods
+
+Mods replace media files inside `Contents/Resources` of managed installations, right before launch:
+
+- Quick mods: a font, the arrow cursor, the classic death sound, and the classic avatar editor background.
+- Your own files from `~/.local/share/roseblox/mods/player/` or `.../studio/`, placed at the same relative path as in `Contents/Resources`.
+
+Only images, textures, sounds, fonts and meshes are used. Scripts, models, places and code are never replaced, and anything else in the folder is listed with the reason it was skipped. The first time a file is replaced, Roblox's original is saved in `.roseblox-originals` next to the bundle, and it is put back when the mod is turned off.
+
+The avatar editor background comes from [Bloxstrap](https://github.com/bloxstraplabs/bloxstrap) (MIT). Roseblox downloads it from a fixed commit and uses it only if its SHA-256 matches the reviewed copy. Mods never download anything else.
+
+## While Playing
+
+Discord Rich Presence, the server location notification and closing Roblox when you leave a game are off by default. When one is on, each Player launch also starts `roseblox --activity-watch`, a small process without a window. It:
+
+1. Follows the log file that this Player has open in the prefix's `~/Library/Logs/Roblox`, so several Players never mix up their games.
+2. Looks up the game's name, creator and icon from Roblox's public APIs (`apis.roblox.com`, `games.roblox.com`, `thumbnails.roblox.com`).
+3. Talks to the Discord desktop app over its local IPC socket.
+4. Looks up the Roblox server's address (never yours) with [ipwho.is](https://ipwho.is) for the location notification.
+5. Exits when that Rosemary process exits.
+
+Because it runs on its own, these features keep working after Roseblox closes. It logs to `~/.local/state/roseblox/logs/activity.log`.
+
+## Where Roseblox keeps things
+
+The paths below use the usual defaults; Roseblox follows `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME` and `XDG_CACHE_HOME` when they are set.
+
+| Path | What |
+| --- | --- |
+| `~/.config/roseblox/settings.json` | Rosemary executable chosen in Settings |
+| `~/.config/roseblox/setup.json` | First-time setup and Settings choices, such as Appearance and After Launching |
+| `~/.config/roseblox/preferences.json` | Preferred Player and Studio installation |
+| `~/.config/roseblox/launch-config.json` | Performance settings |
+| `~/.config/roseblox/backups/` | Performance settings backups |
+| `~/.config/roseblox/mods.json` | Mods choices |
+| `~/.config/roseblox/version_sources.json` | Custom version sources |
+| `~/.config/autostart/io.github.roseblox.Roseblox.Updater.desktop` | Update checker login entry, while it is on |
+| `~/.local/share/roseblox/library.json` | Installed Player and Studio apps |
+| `~/.local/share/roseblox/versions.json` | Cached version checks |
+| `~/.local/share/roseblox/installations/` | Managed Roblox apps |
+| `~/.local/share/roseblox/archives/` | Downloaded Roblox archives |
+| `~/.local/share/roseblox/.staging/downloads/` and `downloads.json` | Partial downloads |
+| `~/.local/share/roseblox/mods/` | Your mods folder |
+| `~/.local/state/roseblox/logs/` | Roblox, Roseblox and activity logs |
+| `~/.local/state/roseblox/measurements.json` | Measure & compare results |
+| `~/.local/state/roseblox/update-notifications.json` | Skipped and notified Roblox versions |
+| `~/.cache/roseblox/` | Roblox's FastFlag allowlist and the reviewed avatar editor background |
+
+Uninstalling the package leaves all of these, including downloaded Roblox apps, in place. [Uninstall](INSTALL.md#uninstall) shows how to remove them.
+
+## Code layout
+
+- `src/roseblox/backend/`: everything that is not the interface, such as versions, downloads, installing, the library, launching Rosemary, launch settings, mods, URL handlers and Discord. It does not depend on GTK pages.
+- `src/roseblox/pages/` and `window.py`: the GTK 4 and libadwaita interface.
+- `src/roseblox/update_service.py` and `activity_service.py`: the two background processes. The update checker stays free of GTK imports.
+- `src/roseblox/theme.py` and `resources/style.css`: colors and styling.
+- `tests/`: unit and GTK tests.
+
+[AGENTS.md](../AGENTS.md) lists the rules every change must follow.

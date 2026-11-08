@@ -1,6 +1,6 @@
 # Installing and updating Roseblox
 
-This guide is for Arch Linux and Arch-based distributions such as CachyOS and EndeavourOS. It installs the latest Roseblox from the `master` branch as the `roseblox-git` package. Updates then take a single command.
+This guide is for Arch Linux and Arch-based distributions such as CachyOS and EndeavourOS. It installs the latest Roseblox from the `master` branch as the `roseblox-git` package. Updates then take a single command. To learn what Roseblox does behind the scenes, see [How Roseblox works](HOW-IT-WORKS.md).
 
 ## Install
 
