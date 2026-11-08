@@ -124,6 +124,10 @@ with the executable name taken from `CFBundleExecutable`. Each extra Player stil
 
 With **Close after opening Roblox Player** or **Studio** on, the Roseblox window closes five seconds after the app starts, unless the app has already exited (so its error stays visible) or a download or install is still running.
 
+### Playtime
+
+Every Player and Studio launch also starts `roseblox --playtime APP_TYPE PID START_TIME`, a small process without a window, so time keeps counting after the Roseblox window closes. It follows the Rosemary process the same way the [activity watcher](#while-playing) does (process ID plus start time, so a reused process ID is not counted), checks every five seconds, and adds the time played to `playtime.json` every minute and when the app exits or the tracker is stopped. A crash or power loss loses at most a minute. Time is measured with the monotonic clock, so a suspended computer does not count as playing. Several trackers can run at once (for example, two Players and Studio); they take a file lock before each write. The Player and Studio pages watch the file and update their **Played for …** line when it changes.
+
 ## Roblox links
 
 Roblox's website starts games with `roblox://` and `roblox-player://` links, and Studio signs in with `roblox-studio://` and `roblox-studio-auth://`. Roseblox handles them only after you turn on **Open Roblox links with Roseblox**.
@@ -229,7 +233,8 @@ The paths below use the usual defaults; Roseblox follows `XDG_CONFIG_HOME`, `XDG
 | `~/.local/share/roseblox/.staging/downloads/` and `downloads.json` | Partial downloads |
 | `~/.local/share/roseblox/mods/` | Your mods folder |
 | `~/.local/share/roseblox/sounds/` | Microphone sounds, Roseblox's and the ones you chose |
-| `~/.local/state/roseblox/logs/` | Roblox, Roseblox and activity logs |
+| `~/.local/share/roseblox/playtime.json` | Playtime of Roblox Player and Studio |
+| `~/.local/state/roseblox/logs/` | Roblox, Roseblox, activity and playtime logs |
 | `~/.local/state/roseblox/measurements.json` | Measure & compare results |
 | `~/.local/state/roseblox/update-notifications.json` | Skipped and notified Roblox versions |
 | `~/.cache/roseblox/` | Roblox's FastFlag allowlist and the reviewed avatar editor background |
@@ -256,7 +261,7 @@ Only the AppImage updates itself. Roseblox downloads `Roseblox-x86_64.AppImage` 
 
 - `src/roseblox/backend/`: everything that is not the interface, such as versions, downloads, installing, the library, launching Rosemary, launch settings, mods, URL handlers and Discord. It does not depend on GTK pages.
 - `src/roseblox/pages/` and `window.py`: the GTK 4 and libadwaita interface.
-- `src/roseblox/update_service.py` and `activity_service.py`: the two background processes. The update checker stays free of GTK imports.
+- `src/roseblox/update_service.py`, `activity_service.py` and `playtime_service.py`: the background processes. They stay free of GTK imports.
 - `src/roseblox/theme.py` and `resources/style.css`: colors and styling.
 - `tests/`: unit and GTK tests.
 

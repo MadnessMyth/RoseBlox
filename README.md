@@ -67,6 +67,7 @@ To update Roseblox later, see [Update](docs/INSTALL.md#update). To remove it, se
 - **Import from another app:** bring FastFlags and settings over from Roséline, Quadra, Sober, Vinegar, Bloxstrap and FastFlag tools, with a preview before anything is saved.
 - **More than one Roblox Player** at the same time, side by side.
 - **Studio:** open `.rbxl` and `.rbxlx` place files directly.
+- **Playtime:** how long you have played Roblox Player and Roblox Studio from Roseblox, on each app's page.
 - **Your look:** dark or light, Roseblox's pink theme or your desktop's colors, and a choice of accent colors.
 
 ## Help

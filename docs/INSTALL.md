@@ -361,6 +361,10 @@ Under each app's switch, while it is on, is **Automatically update Roblox Player
 
 To update by hand, open the **Player** or **Studio** page, click **Refresh Version** to see the latest Roblox version, then click **Download and Install Latest**. To make the new version the default on Home, click **Set as preferred** on its row. Either way, older versions stay installed until you click **Remove**.
 
+### Playtime
+
+The **Player** and **Studio** pages show how long you have played that app from Roseblox, how many sessions that was and when you last played, for example *Played for 12 h 34 min in 27 sessions. Last played today.* Time counts from when the app starts until it exits, including after the Roseblox window closes, but not while the computer is suspended. **Reset** sets that app's playtime back to zero after asking. Playtime stays on your computer.
+
 ### Closing Roseblox after launching
 
 **Settings → After Launching** has a separate switch for Player and for Studio. With **Close after opening Roblox Player** on, Roseblox closes itself five seconds after Player starts; Roblox keeps running. Turn on **Only when opened from a link** to close only when you join a game from the website, and stay open when you press **Play** in Roseblox. Roseblox stays open if the app exits during those five seconds (so you can read the error) or while a download is running.
