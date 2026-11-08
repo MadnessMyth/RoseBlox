@@ -1,5 +1,43 @@
 # Roseblox release preparation
 
+## Release checklist — v0.6.0
+
+- [x] Bump the version in `pyproject.toml`, `src/roseblox/__init__.py`, and `packaging/arch-git/PKGBUILD`.
+- [x] Run the full unittest suite, Python compilation, and `git diff --check` on Ubuntu 24.04 (GTK 4.14, libadwaita 1.5).
+- [x] Build the AppImage on Ubuntu 24.04, start it under Xvfb, check that only system-matched libraries (glibc, graphics drivers, X11/Wayland clients, fontconfig) come from the host, that the menu entry and icon are written, and that programs it starts get the host environment back.
+- [x] Replace a test AppImage through the self-update download with a matching and a mismatching checksum.
+- [x] Build the `.deb`, install it on Ubuntu 24.04, start the installed app, and remove it.
+- [ ] Start the AppImage on Fedora and openSUSE.
+- [ ] Run two Players at once with **Allow more than one Roblox Player** and the current Rosemary.
+- [ ] Run the unittest suite and build `packaging/arch-git` with `makepkg` on Arch Linux.
+- [x] Create the annotated `v0.6.0` Git tag on the release commit.
+- [ ] Point `packaging/arch/PKGBUILD` at the `v0.6.0` tag, record the archive checksum, and update `.SRCINFO`.
+- [x] The release workflow builds the `.deb` and the AppImage, and creates the GitHub release for `v0.6.0` from these notes with both attached, when the tag is pushed.
+
+## Release notes — v0.6.0
+
+### New
+
+- **Download Roseblox from the release page.** Each release now includes:
+  - `Roseblox-x86_64.AppImage`, which runs on Ubuntu 24.04 or newer, Debian 13, Fedora 40 or newer, openSUSE Tumbleweed and other systems at least as new. It contains Python, GTK 4 and libadwaita, so nothing else needs installing. Make it executable and open it. On first start it adds Roseblox to your application menu with its icon.
+  - `roseblox_0.6.0_all.deb` for Ubuntu 24.04 or newer and Debian 13. Install it with `sudo apt install ./roseblox_0.6.0_all.deb`.
+  - `SHA256SUMS` with the checksums of both.
+
+  See [Other distributions](https://github.com/MadnessMyth/RoseBlox/blob/master/docs/INSTALL.md#other-distributions). Neither one includes Rosemary; setup still gets it from Rosemary's own releases.
+- **Roseblox tells you about new versions of itself.** Once a day while it is open, the bell shows **Roseblox X.Y.Z is available**:
+  - The AppImage updates itself: **Update** downloads the new AppImage, checks it against `SHA256SUMS`, replaces the file and offers **Restart**.
+  - Other installs get a link to the release page or the update command.
+  - Turn this off in **Settings → Updates → Check for new Roseblox versions**.
+- Roseblox shows its own icon in docks and taskbars, and its menu entry is found by searching for "Roblox", "Player", "Studio" or "Launcher".
+
+### Fixed
+
+- **Allow more than one Roblox Player** works again with the current Rosemary. Rosemary now refuses a second instance of any app whose `Info.plist` sets `LSMultipleInstancesProhibited`, as Roblox Player does. That applies even with `--new-instance` and even to a duplicated copy. With the setting on, Roseblox now starts Player through the executable inside the app bundle, which Rosemary always allows.
+
+### Not changed
+
+- Settings, installations and Roblox links carry over from 0.5.0. Arch packages and the install script work as before.
+
 ## Release checklist — v0.5.0
 
 - [x] Bump the version in `pyproject.toml`, `src/roseblox/__init__.py`, and `packaging/arch-git/PKGBUILD`.
