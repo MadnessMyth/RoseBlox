@@ -204,6 +204,7 @@ These work with Roblox Player and are off until you turn them on. Turn them on b
   - **Mode**: **Toggle** turns the microphone on with one press and off with the next. **Hold** keeps it on while the key is held down.
   - **Inverted** (Hold only): push to mute. The microphone is on, and muted while the key is held down.
   - **Release delay** (Hold only): how many milliseconds the microphone stays on after you let go, so the end of a sentence is not cut off. With **Inverted**, how long you stay muted after letting go.
+  - **Sound effects**: a short sound when Roblox's microphone turns on (two rising notes) or off (two falling notes). **Choose…** uses your own WAV, Ogg or FLAC file instead (up to 2 MiB; Roseblox keeps a copy), **Use Roseblox's** goes back, and the play button previews it. **Sound volume** is a percentage of your system volume. The sounds play through `pw-play` (PipeWire) or `paplay`.
 
   `roseblox --mic status` prints whether the microphone is on, and `roseblox --mic toggle`, `on` and `off` switch it, while a Player runs with the toggle on.
 

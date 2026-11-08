@@ -192,6 +192,7 @@ Roblox records through its own capture stream: a "source output" in PulseAudio t
 - **New streams.** Roblox opens a new stream every time its microphone is switched on or off, often before closing the old one. Roseblox listens to `pactl subscribe` (or `pw-dump --monitor`) and gives every new stream the current state within milliseconds. Nothing is polled.
 - **Leaving no mute behind.** PipeWire remembers a stream's mute for the app's next stream. When the Player closes, Roseblox unmutes Roblox's streams so the next session does not start silent.
 - **The hotkey.** Roseblox asks the desktop for a global shortcut through the xdg-desktop-portal GlobalShortcuts interface (KDE Plasma, GNOME 48 and later, Hyprland). The desktop stores the key and reports both press and release, which Hold mode needs. The window and the watcher each register as `io.github.roseblox.Roseblox` first, so the desktop files the shortcut under Roseblox even when Roseblox was started from a terminal.
+- **Sounds.** When the microphone opens or mutes, the gate plays a sound with `pw-play` (or `paplay`) without waiting for it (`backend/microphone_sounds.py`). Roseblox's own sounds are generated as small WAV files in `~/.local/share/roseblox/sounds/`, so none ship with it; a chosen sound is checked by its signature and copied there.
 - **Several Players.** Each watcher queues for the session-bus name `io.github.roseblox.Roseblox.Microphone`. Only the owner mutes; when its Player closes, the next watcher takes over. `roseblox --mic` calls the owner over D-Bus.
 
 ## Importing from another app
@@ -227,6 +228,7 @@ The paths below use the usual defaults; Roseblox follows `XDG_CONFIG_HOME`, `XDG
 | `~/.local/share/roseblox/archives/` | Downloaded Roblox archives |
 | `~/.local/share/roseblox/.staging/downloads/` and `downloads.json` | Partial downloads |
 | `~/.local/share/roseblox/mods/` | Your mods folder |
+| `~/.local/share/roseblox/sounds/` | Microphone sounds, Roseblox's and the ones you chose |
 | `~/.local/state/roseblox/logs/` | Roblox, Roseblox and activity logs |
 | `~/.local/state/roseblox/measurements.json` | Measure & compare results |
 | `~/.local/state/roseblox/update-notifications.json` | Skipped and notified Roblox versions |

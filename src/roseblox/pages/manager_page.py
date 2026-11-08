@@ -40,6 +40,7 @@ from ..backend.setup import (
 )
 from ..backend.game_info import LOCATION_SERVICE
 from ..backend.microphone import MAX_RELEASE_DELAY_MS, MICROPHONE_MODES, MODE_HOLD
+from ..backend.microphone_sounds import MAX_VOLUME, OFF, ON, SOUND_SUFFIXES, MicrophoneSoundError, SoundPlayer, store_sound
 from .microphone_hotkey import MicrophoneHotkey
 from ..backend.updates import APP_TITLES, NotificationLog, UpdateCheckerError, _spawn_detached
 from ..activity_service import watcher_arguments
@@ -2200,7 +2201,79 @@ class SettingsPage(Gtk.Box):
         self.release_delay_row.set_title("Release delay")
         self.release_delay_row.connect("notify::value", self._microphone_changed)
         self.microphone_row.add_row(self.release_delay_row)
+
+        self.microphone_sounds_row = Adw.SwitchRow.new()
+        self.microphone_sounds_row.set_title("Sound effects")
+        self.microphone_sounds_row.set_subtitle("Play a short sound when Roblox's microphone turns on or off.")
+        self.microphone_sounds_row.connect("notify::active", self._microphone_changed)
+        self.microphone_row.add_row(self.microphone_sounds_row)
+        self.sound_player = SoundPlayer(log=self._sound_message)
+        self._sound_rows: dict[str, tuple[Adw.ActionRow, Gtk.Button]] = {}
+        for kind, title in ((ON, "Microphone on sound"), (OFF, "Microphone off sound")):
+            row = Adw.ActionRow.new()
+            row.set_title(title)
+            play = Gtk.Button.new_from_icon_name("media-playback-start-symbolic")
+            play.set_valign(Gtk.Align.CENTER)
+            play.set_tooltip_text("Play")
+            play.add_css_class("flat")
+            play.connect("clicked", lambda *_, k=kind: self._preview_sound(k))
+            row.add_suffix(play)
+            reset = Gtk.Button.new_with_label("Use Roseblox's")
+            reset.set_valign(Gtk.Align.CENTER)
+            reset.connect("clicked", lambda *_, k=kind: self._set_sound(k, ""))
+            row.add_suffix(reset)
+            choose = Gtk.Button.new_with_label("Choose…")
+            choose.set_valign(Gtk.Align.CENTER)
+            choose.connect("clicked", lambda *_, k=kind: self._choose_sound(k))
+            row.add_suffix(choose)
+            self.microphone_row.add_row(row)
+            self._sound_rows[kind] = (row, reset)
+        self.sound_volume_row = Adw.SpinRow.new_with_range(0, MAX_VOLUME, 5)
+        self.sound_volume_row.set_title("Sound volume")
+        self.sound_volume_row.set_subtitle("Percent of your system volume.")
+        self.sound_volume_row.connect("notify::value", self._microphone_changed)
+        self.microphone_row.add_row(self.sound_volume_row)
         group.add(self.microphone_row)
+
+    def _sound_message(self, text: str) -> None:
+        self.playing_message.set_text(f"Microphone sound: {text}")
+        self.playing_message.set_visible(True)
+
+    def _preview_sound(self, kind: str) -> None:
+        self.playing_message.set_visible(False)
+        self.sound_player.play(self._current_while_playing().sounds, kind, force=True)
+
+    def _choose_sound(self, kind: str) -> None:
+        file_filter = Gtk.FileFilter()
+        file_filter.set_name("Sounds (WAV, Ogg, FLAC)")
+        for suffix in SOUND_SUFFIXES:
+            file_filter.add_pattern(f"*{suffix}")
+            file_filter.add_pattern(f"*{suffix.upper()}")
+        filters = Gio.ListStore.new(Gtk.FileFilter)
+        filters.append(file_filter)
+        dialog = Gtk.FileDialog(title="Choose a Sound", modal=True, filters=filters)
+
+        def finished(dialog, result) -> None:
+            try:
+                file = dialog.open_finish(result)
+            except GLib.Error:
+                return
+            if file.get_path():
+                self.use_sound_file(kind, Path(file.get_path()))
+
+        dialog.open(self.window, None, finished)
+
+    def use_sound_file(self, kind: str, source: Path) -> None:
+        try:
+            stored = store_sound(kind, source)
+        except MicrophoneSoundError as error:
+            self._sound_message(str(error))
+            return
+        self._set_sound(kind, str(stored))
+
+    def _set_sound(self, kind: str, path: str) -> None:
+        field_name = "microphone_sound_on" if kind == ON else "microphone_sound_off"
+        self._save_while_playing(replace(self._current_while_playing(), **{field_name: path}))
 
     def _hotkey_changed(self, text: str, can_change: bool) -> None:
         self.hotkey_row.set_subtitle(text)
@@ -2219,6 +2292,8 @@ class SettingsPage(Gtk.Box):
             microphone_mode=mode,
             microphone_release_delay_ms=int(self.release_delay_row.get_value()),
             microphone_inverted=self.microphone_inverted_row.get_active(),
+            microphone_sounds=self.microphone_sounds_row.get_active(),
+            microphone_sound_volume=int(self.sound_volume_row.get_value()),
         ))
         if enabled:
             self.microphone_hotkey.start()
@@ -2228,6 +2303,14 @@ class SettingsPage(Gtk.Box):
         self.microphone_mode_row.set_selected(MICROPHONE_MODES.index(settings.microphone_mode))
         self.release_delay_row.set_value(settings.microphone_release_delay_ms)
         self.microphone_inverted_row.set_active(settings.microphone_inverted)
+        self.microphone_sounds_row.set_active(settings.microphone_sounds)
+        self.sound_volume_row.set_value(settings.microphone_sound_volume)
+        self.sound_volume_row.set_visible(settings.microphone_sounds)
+        for kind, (row, reset) in self._sound_rows.items():
+            chosen = settings.sounds.path(kind)
+            row.set_visible(settings.microphone_sounds)
+            row.set_subtitle(Path(chosen).name if chosen else "Roseblox's sound")
+            reset.set_visible(bool(chosen))
         hold = settings.microphone_mode == MODE_HOLD
         inverted = hold and settings.microphone_inverted
         self.release_delay_row.set_visible(hold)

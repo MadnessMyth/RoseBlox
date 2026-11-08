@@ -535,6 +535,44 @@ class RealWindowTests(unittest.TestCase):
         settings.microphone_row.set_enable_expansion(True)
         self.assertEqual(1, len(sessions))
 
+    def test_microphone_sound_rows_save_choose_and_preview(self):
+        from roseblox.backend.setup import SetupStore
+
+        with patch("roseblox.pages.microphone_hotkey.open_connection", side_effect=GLib.Error("no bus")):
+            settings = self._loaded_window().settings_page
+            settings.microphone_row.set_enable_expansion(True)
+        on_row, on_reset = settings._sound_rows["on"]
+        self.assertFalse(on_row.get_visible())
+        self.assertFalse(settings.sound_volume_row.get_visible())
+        settings.microphone_sounds_row.set_active(True)
+        self.assertTrue(on_row.get_visible())
+        self.assertEqual("Roseblox's sound", on_row.get_subtitle())
+        self.assertFalse(on_reset.get_visible())
+        settings.sound_volume_row.set_value(35)
+
+        chosen = Path(self.temporary.name) / "click.wav"
+        chosen.write_bytes(b"RIFF\x00\x00\x00\x00WAVE" + b"\x00" * 16)
+        settings.use_sound_file("on", chosen)
+        self.assertEqual("microphone-on.wav", on_row.get_subtitle())
+        self.assertTrue(on_reset.get_visible())
+        bad = Path(self.temporary.name) / "song.mp3"
+        bad.write_bytes(b"ID3" + b"\x00" * 16)
+        settings.use_sound_file("off", bad)
+        self.assertIn("WAV, Ogg or FLAC", settings.playing_message.get_text())
+
+        played = []
+        settings.sound_player.spawn = played.append
+        settings.sound_player.which = lambda name: name
+        settings._preview_sound("on")
+        self.assertEqual(["pw-play", "--volume=0.35"], played[-1][:2])
+        self.assertTrue(played[-1][-1].endswith("microphone-on.wav"))
+
+        state = SetupStore(self.config_home / "roseblox" / "setup.json").load().while_playing
+        self.assertEqual((True, 35, ""), (state.microphone_sounds, state.microphone_sound_volume, state.microphone_sound_off))
+        self.assertTrue(Path(state.microphone_sound_on).is_file())
+        on_reset.emit("clicked")
+        self.assertEqual("Roseblox's sound", on_row.get_subtitle())
+
     def test_the_activity_watcher_starts_only_when_a_while_playing_feature_is_on(self):
         from unittest import mock
 
