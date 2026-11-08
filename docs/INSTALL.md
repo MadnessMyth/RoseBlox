@@ -61,7 +61,7 @@ pacman -Q roseblox-git
 
 ### 6. Run first-time setup
 
-Open **Roseblox** from your application menu, or run `roseblox` in a terminal. The setup page has four steps:
+Open **Roseblox** from your application menu, or run `roseblox` in a terminal. The setup page has five steps:
 
 ![First-time setup on a fresh system](screenshots/01-setup-fresh.png)
 
@@ -69,6 +69,7 @@ Open **Roseblox** from your application menu, or run `roseblox` in a terminal. T
 2. **Roblox Links** (optional) – turn on **Open Roblox links with Roseblox** so that **Play** buttons on roblox.com and Studio sign-in links open through Roseblox.
 3. **Player and Studio** – click **Install** for Roblox Player, Roblox Studio, or both. The download runs on the page with a progress bar.
 4. **Updates** (optional) – turn on **Notify me about Roblox updates** to get a desktop notification with **Update** and **Skip This Version** buttons whenever Roblox releases a new Player or Studio version. See [Roblox Player and Studio](#roblox-player-and-studio) below.
+5. **Settings from Another App** (optional) – if you used Roséline, Quadra, Sober, Vinegar, Bloxstrap or a FastFlag tool before, click **Import…** to bring its FastFlags and settings over. See [Importing from another app](#importing-from-another-app).
 
 ![Setup complete](screenshots/04-setup-links-enabled.png)
 
@@ -180,7 +181,7 @@ Follow [Uninstall](#uninstall) step 3 if you also want to delete your settings a
 Click a section heading in **Settings** to open or close it; Roseblox remembers your choice.
 
 - **Appearance**: **Colors** (Roseblox or System), **Style** (Dark, Light, or Follow system), and **Accent color** (Roseblox pink, your desktop's accent color, or a fixed color). Changes apply immediately.
-- **Rosemary**: Rosemary status, **Ctrl + left-click compatibility** (turn it off if you want Rosemary's default Ctrl + click behavior), and **First-time setup**.
+- **Rosemary**: Rosemary status, **Ctrl + left-click compatibility** (turn it off if you want Rosemary's default Ctrl + click behavior), **First-time setup**, and **Import from another app**.
 - **After Launching**: close Roseblox after Player or Studio starts, and **Allow more than one Roblox Player**. See [Closing Roseblox after launching](#closing-roseblox-after-launching) and [More than one Roblox Player](#more-than-one-roblox-player).
 - **While Playing**: Discord Rich Presence, a server location notification, closing Roblox when you leave a game, and the microphone toggle. See [While Playing](#while-playing).
 - **Roblox Links**: open `roblox://` links with Roseblox.
@@ -207,6 +208,39 @@ These work with Roblox Player and are off until you turn them on. Turn them on b
   `roseblox --mic status` prints whether the microphone is on, and `roseblox --mic toggle`, `on` and `off` switch it, while a Player runs with the toggle on.
 
 Roseblox reads these events from the log the Roblox Player writes inside the Rosemary prefix (`~/Library/Logs/Roblox` in the guest, normally `~/.local/share/rosemary/prefixes/default/root/Users/<you>/Library/Logs/Roblox`). Each Player's own open log is used, so several Players do not mix up their games. `~/.local/state/roseblox/logs/activity.log` records which log was followed, each game joined, and any problem.
+
+### Importing from another app
+
+**Settings → Rosemary → Import from another app** (also step 5 of first-time setup) copies FastFlags and settings from another launcher. It lists every supported app, with the files it found. Click **Preview**, or **Choose…** to pick the file or folder yourself, for example a Wine prefix that is not in the usual place.
+
+The preview shows:
+
+- What will be imported, grouped by **Roblox Player**, **Roblox Studio** and **Roseblox**. Untick anything you do not want.
+- Rows that would replace a setting you already have, with your value and the new one. These are not ticked; tick them to replace, and Roseblox asks once more before it does.
+- **Already the same**: settings Roseblox already has. Importing again only offers what changed.
+- **Not imported**: each setting that is **Invalid** (with the reason), **Unsupported** (Roseblox has no equivalent) or **Skipped** (the other app does not use it either).
+
+Nothing is saved until you click **Import**, and everything is checked first: if anything would be rejected, nothing is written. Roseblox keeps a backup of the Player and Studio configuration (see **Performance → Backups**). The other app's files are only read.
+
+| App | Where Roseblox looks | What carries over |
+| --- | --- | --- |
+| [Roséline](https://github.com/buwryme/Roseline) | `~/.config/roseline/settings.toml` (also the Flatpak) | Player FastFlags (presets and your own), GPU, GameMode, environment variables, Discord, server location, Close on leave, classic avatar background, font |
+| [Quadra](https://github.com/QuadraHQ/Quadra) | `~/.config/quadrahq/` (`settings.json`, `fastflags.json`) | Player and Studio FastFlags, GPU, Studio GameMode, MangoHud, presentation mode, refresh rate, titlebar, Command key, Ctrl + click, Discord, server location, classic death sound, font |
+| [Sober](https://sober.vinegarhq.org/) | `~/.var/app/org.vinegarhq.Sober/config/sober/config.json` | FastFlags, GameMode, Discord, server location, Close on leave, classic death sound |
+| [Vinegar](https://github.com/vinegarhq/vinegar) | `~/.config/vinegar/config.toml` | Studio FastFlags, GameMode and GPU |
+| [Bloxstrap](https://github.com/bloxstraplabs/bloxstrap) | `AppData/Local/Bloxstrap` in a Wine prefix | FastFlags (Studio copies unticked), font, Discord, server location |
+| [Roblox FastFlag Manager](https://github.com/4anti/Roblox-FastFlag-Manager) | `.FFlagManager/user_flags.json` in a Wine prefix | Turned-on flags |
+| [Roblox Manager](https://github.com/Paryx-games/roblox-manager) | `AppData/Roaming/RM/config.json` in a Wine prefix | FastFlags |
+| Any other app | the file you choose | A `ClientAppSettings.json`-style file of FastFlags |
+
+Wine prefixes are looked for in `~/.wine`, `$WINEPREFIX`, `~/.local/share/wineprefixes`, Bottles (also the Flatpak), Lutris's `~/Games`, Steam's Proton prefixes and Grapejuice.
+
+Things to know:
+
+- Sign-in data is never read or imported: no cookies, tokens or accounts. Quadra's `web` folder and Roblox Manager's `accounts.dat` are not opened, and variables or values that look like credentials are rejected.
+- FastFlags made for another client may do nothing here. Sober's flags were chosen for Roblox's Android app, Bloxstrap's and the FastFlag tools' for Windows, and Roblox only honors flags on its allowlist (see [Performance](#performance)).
+- Roblox FastFlag Manager can save a flag without its `FFlag`/`FInt`/`DFInt` prefix. Roseblox then guesses the prefix from the flag's type, says so, and leaves it unticked.
+- Settings from Windows tools that change the game's own options (Roblox Manager's FPS, graphics, fullscreen and mute) and Windows or Wine-only options are listed as **Unsupported**.
 
 ### Notification center
 

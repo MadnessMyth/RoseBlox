@@ -194,6 +194,19 @@ Roblox records through its own capture stream: a "source output" in PulseAudio t
 - **The hotkey.** Roseblox asks the desktop for a global shortcut through the xdg-desktop-portal GlobalShortcuts interface (KDE Plasma, GNOME 48 and later, Hyprland). The desktop stores the key and reports both press and release, which Hold mode needs. The window and the watcher each register as `io.github.roseblox.Roseblox` first, so the desktop files the shortcut under Roseblox even when Roseblox was started from a terminal.
 - **Several Players.** Each watcher queues for the session-bus name `io.github.roseblox.Roseblox.Microphone`. Only the owner mutes; when its Player closes, the next watcher takes over. `roseblox --mic` calls the owner over D-Bus.
 
+## Importing from another app
+
+`backend/importers/` has one module per app (`roseline.py`, `quadra.py`, `sober.py`, `vinegar.py`, `bloxstrap.py`, `fastflag_manager.py`, `roblox_manager.py`, and `client_settings.py` for a plain FastFlags file). Each one only knows its app's files, checked against that app's source code or documentation, and does two things: `detect` finds the files (the Windows apps through `wine.py`, which lists Wine, Bottles, Lutris, Steam and Grapejuice prefixes and the Windows users in each), and `read` turns them into an `ImportResult`. Files are opened read-only, at most 4 MB each, and nothing is started or installed.
+
+An `ImportResult` holds:
+
+- **Items**: settings already in Roseblox's form, for the Player, Studio or Roseblox itself. They go through the same checks as the rest of Roseblox (`normalize_flag_value`, the environment and GPU checks) before they become items.
+- **Problems**: everything else, marked skipped, unsupported or invalid with a reason. Unknown keys are listed by name only; their values are never shown.
+
+`planner.py` compares the items with the saved settings. A setting is new when Roseblox still has its default, the same when the values match, and a replacement otherwise; replacements start unticked. `apply` builds every changed configuration in memory and validates all of them (including the 500-flag limit and the font file), then writes through `LaunchConfigStore` (which keeps a backup), `ModsStore` and `SetupStore`. Running the same import again finds everything the same and writes nothing.
+
+To support another app, add a module with an `IMPORTER` and list it in `importers/__init__.py`.
+
 ## Where Roseblox keeps things
 
 The paths below use the usual defaults; Roseblox follows `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME` and `XDG_CACHE_HOME` when they are set.
