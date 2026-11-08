@@ -5,15 +5,23 @@ from pathlib import Path
 from unittest.mock import Mock
 
 from roseblox.backend.rosemary_install import (
+    INSTALL_METHOD_APPIMAGE,
+    INSTALL_METHOD_AUR,
+    INSTALL_METHOD_MANUAL,
     ROSEMARY_AUR_PACKAGE,
     ROSEMARY_INSTALL_PACKAGES,
     RosemaryInstallError,
+    appimage_search_directories,
     build_install_command,
     find_aur_helper,
+    find_rosemary_appimage,
     find_terminal,
+    install_method,
     plan_rosemary_install,
+    prepare_appimage,
     start_rosemary_install,
 )
+from roseblox.backend.system import SystemInfo
 
 
 def lookup_for(*available):
@@ -96,6 +104,53 @@ class RosemaryInstallPlanTests(unittest.TestCase):
         failing = Mock(side_effect=FileNotFoundError("xterm"))
         with self.assertRaisesRegex(RosemaryInstallError, "Could not open a terminal"):
             start_rosemary_install(plan, failing)
+
+
+class RosemaryAppImageTests(unittest.TestCase):
+    def test_install_method_by_system(self):
+        self.assertEqual(INSTALL_METHOD_AUR, install_method(SystemInfo("cachyos", ("arch",), machine="x86_64")))
+        self.assertEqual(INSTALL_METHOD_AUR, install_method(SystemInfo("arch", machine="aarch64")))
+        self.assertEqual(INSTALL_METHOD_APPIMAGE, install_method(SystemInfo("ubuntu", ("debian",), machine="x86_64")))
+        self.assertEqual(INSTALL_METHOD_APPIMAGE, install_method(SystemInfo("nixos", machine="x86_64")))
+        self.assertEqual(INSTALL_METHOD_MANUAL, install_method(SystemInfo("fedora", machine="aarch64")))
+
+    def test_search_directories_follow_the_translated_downloads_folder(self):
+        with tempfile.TemporaryDirectory() as home:
+            environ = {"HOME": home}
+            self.assertEqual(
+                [Path(home, "Downloads"), Path(home, "Applications"), Path(home, ".local/bin"), Path(home, "bin")],
+                appimage_search_directories(environ),
+            )
+            config = Path(home, ".config")
+            config.mkdir()
+            (config / "user-dirs.dirs").write_text('XDG_DOWNLOAD_DIR="$HOME/Téléchargements"\n', encoding="utf-8")
+            self.assertEqual(Path(home, "Téléchargements"), appimage_search_directories(environ)[0])
+
+    def test_finds_the_newest_rosemary_appimage_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            first, second = Path(directory, "a"), Path(directory, "b")
+            first.mkdir()
+            second.mkdir()
+            self.assertIsNone(find_rosemary_appimage([first, second, Path(directory, "missing")]))
+            (first / "Rosemary-0.4.1-x86_64.AppImage").write_text("", encoding="utf-8")
+            (first / "Other-9.9.9-x86_64.AppImage").write_text("", encoding="utf-8")
+            (first / "Rosemary-0.10.0-x86_64.AppImage").mkdir()
+            (second / "rosemary-0.5.0-x86_64.appimage").write_text("", encoding="utf-8")
+            self.assertEqual(second / "rosemary-0.5.0-x86_64.appimage", find_rosemary_appimage([first, second]))
+
+    def test_prepare_appimage_makes_only_appimages_executable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            appimage = Path(directory, "Rosemary-0.5.0-x86_64.AppImage")
+            appimage.write_text("", encoding="utf-8")
+            appimage.chmod(0o644)
+            self.assertEqual(str(appimage), prepare_appimage(appimage))
+            self.assertEqual(0o744, appimage.stat().st_mode & 0o777)
+
+            other = Path(directory, "rosemary")
+            other.write_text("", encoding="utf-8")
+            other.chmod(0o644)
+            self.assertEqual(str(other), prepare_appimage(other))
+            self.assertEqual(0o644, other.stat().st_mode & 0o777)
 
 
 if __name__ == "__main__":

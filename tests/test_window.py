@@ -16,7 +16,8 @@ gi.require_version("Adw", "1")
 gi.require_version("Gtk", "4.0")
 from gi.repository import Adw, GLib, Gtk
 
-from roseblox.backend.rosemary_install import RosemaryInstallError
+from roseblox.backend.rosemary_install import ROSEMARY_RELEASES_URL, RosemaryInstallError
+from roseblox.backend.system import SystemInfo
 from roseblox.pages.manager_page import OperationState
 
 DISPLAY_AVAILABLE = Gtk.init_check()
@@ -73,6 +74,7 @@ class RealWindowTests(unittest.TestCase):
         }
         self.environment = patch.dict(os.environ, environment)
         self.environment.start()
+        self.system = SystemInfo("arch", (), "Arch Linux", "x86_64")
         Adw.init()
 
     def tearDown(self):
@@ -82,7 +84,8 @@ class RealWindowTests(unittest.TestCase):
     def _build_window(self):
         from roseblox.window import RosebloxWindow
 
-        window = RosebloxWindow()
+        with patch("roseblox.window.detect_system", return_value=self.system):
+            window = RosebloxWindow()
         self.addCleanup(window.destroy)
         return window
 
@@ -191,6 +194,63 @@ class RealWindowTests(unittest.TestCase):
             window.install_rosemary()
         self.assertEqual("No AUR helper was found.", page.install_rosemary_row.get_subtitle())
         self.assertIn("No AUR helper", window.settings_page.install_rosemary_row.get_subtitle())
+
+    def test_other_distributions_open_the_releases_page_then_use_the_downloaded_appimage(self):
+        self.system = SystemInfo("ubuntu", ("debian",), "Ubuntu 24.04 LTS", "x86_64")
+        window = self._loaded_window()
+        page = window.onboarding_page
+        self.assertEqual("Download the AppImage", page.install_rosemary_row.get_title())
+        self.assertEqual("Open Releases Page", page.install_rosemary_button.get_label())
+        self.assertEqual("Download the AppImage", window.settings_page.install_rosemary_row.get_title())
+        self.assertFalse(page.appimage_row.get_visible())
+
+        launcher = Mock()
+        with patch("roseblox.window.Gtk.UriLauncher.new", return_value=launcher) as new_launcher, patch(
+            "roseblox.window.plan_rosemary_install"
+        ) as plan, patch("roseblox.window.GLib.timeout_add_seconds"):
+            window.install_rosemary()
+        new_launcher.assert_called_once_with(ROSEMARY_RELEASES_URL)
+        launcher.launch.assert_called_once()
+        plan.assert_not_called()
+        self.assertTrue(window.rosemary_install.waiting)
+        self.assertIn("x86_64.AppImage", page.install_rosemary_row.get_subtitle())
+
+        downloads = Path(os.environ["HOME"]) / "Downloads"
+        downloads.mkdir()
+        appimage = downloads / "Rosemary-0.5.0-x86_64.AppImage"
+        appimage.write_text("#!/bin/sh\n", encoding="utf-8")
+        appimage.chmod(0o644)
+        self.assertTrue(window._poll_rosemary_install())
+        self.assertTrue(self._wait_until(lambda: not window.rosemary_install.waiting))
+        self.assertEqual(str(appimage), window.rosemary_appimage)
+        self.assertTrue(page.appimage_row.get_visible())
+        self.assertEqual(str(appimage), page.appimage_row.get_subtitle())
+        self.assertTrue(window.settings_page.appimage_row.get_visible())
+        self.assertIn("Use This File", page.install_rosemary_row.get_subtitle())
+
+        window.use_rosemary_appimage()
+        self.assertTrue(self._wait_until(lambda: window.rosemary_status.available))
+        self.assertTrue(os.access(appimage, os.X_OK))
+        self.assertEqual(str(appimage), window.rosemary_status.executable)
+        self.assertEqual("Ready", page.rosemary_badge.get_text())
+        self.assertFalse(page.appimage_row.get_visible())
+        self.assertFalse(page.install_rosemary_row.get_visible())
+
+    def test_appimage_found_at_startup_is_offered_without_downloading(self):
+        self.system = SystemInfo("fedora", (), "Fedora Linux 41", "x86_64")
+        bin_directory = Path(os.environ["HOME"]) / ".local" / "bin"
+        bin_directory.mkdir(parents=True)
+        (bin_directory / "Rosemary-0.4.1-x86_64.AppImage").write_text("", encoding="utf-8")
+        (bin_directory / "Rosemary-0.5.0-x86_64.AppImage").write_text("", encoding="utf-8")
+        window = self._loaded_window()
+        self.assertEqual(str(bin_directory / "Rosemary-0.5.0-x86_64.AppImage"), window.rosemary_appimage)
+        self.assertTrue(window.onboarding_page.appimage_row.get_visible())
+
+    def test_systems_without_an_appimage_explain_the_other_ways(self):
+        self.system = SystemInfo("debian", (), "Debian GNU/Linux 13", "aarch64")
+        window = self._loaded_window()
+        self.assertFalse(window.onboarding_page.install_rosemary_row.get_visible())
+        self.assertFalse(window.settings_page.install_rosemary_row.get_visible())
 
     def test_app_installs_report_progress_on_the_setup_page(self):
         window = self._loaded_window()

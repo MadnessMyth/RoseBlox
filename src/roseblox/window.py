@@ -17,12 +17,18 @@ from .backend.preferences import (
 )
 from .backend.rosemary import RosemaryStatus, detect_rosemary, save_rosemary_executable
 from .backend.rosemary_install import (
+    INSTALL_METHOD_AUR,
+    ROSEMARY_RELEASES_URL,
     RosemaryInstallError,
     RosemaryInstallState,
+    find_rosemary_appimage,
+    install_method,
     plan_rosemary_install,
+    prepare_appimage,
     start_rosemary_install,
 )
 from .backend.setup import SetupSettingsError, SetupState, SetupStore
+from .backend.system import detect_system
 from .backend.updates import UpdateCheckerService
 from .backend.url_handlers import URLHandlerService, URLHandlerStatus
 from .backend.version_settings import VersionSettingsStore
@@ -30,8 +36,14 @@ from .pages import PAGE_DEFINITIONS, create_page
 
 # Building the AUR package compiles Rosemary from source, which can take a long time.
 _ROSEMARY_INSTALL_WAIT_SECONDS = 2 * 60 * 60
+_ROSEMARY_DOWNLOAD_WAIT_SECONDS = 30 * 60
 # Gives Rosemary time to fail visibly before the launcher closes behind Roblox.
 CLOSE_AFTER_LAUNCH_DELAY_SECONDS = 5
+
+
+def _found_appimage() -> str | None:
+    path = find_rosemary_appimage()
+    return str(path) if path is not None else None
 
 
 def _scrolled_content(widget: Gtk.Widget) -> Gtk.Widget:
@@ -62,7 +74,10 @@ class RosebloxWindow(Adw.ApplicationWindow):
         self.url_handler_status = URLHandlerStatus(False, False, "URL-handler status has not been checked.")
         self.setup_error = None
         self.installer = InstallerService(self.library, version_settings=self.version_settings)
+        self.system = detect_system()
+        self.rosemary_install_method = install_method(self.system)
         self.rosemary_status = detect_rosemary()
+        self.rosemary_appimage = None if self.rosemary_status.available else _found_appimage()
         self.process_sessions = {}
         self.launching_installations = set()
         self.stopping_installations = set()
@@ -443,8 +458,14 @@ class RosebloxWindow(Adw.ApplicationWindow):
     def save_rosemary_choice(self, path: str | None) -> None:
         threading.Thread(target=self._save_rosemary_worker, args=(path,), daemon=True).start()
 
+    def use_rosemary_appimage(self) -> None:
+        if self.rosemary_appimage:
+            self.save_rosemary_choice(self.rosemary_appimage)
+
     def _save_rosemary_worker(self, path):
         try:
+            if path is not None:
+                path = prepare_appimage(path)
             save_rosemary_executable(path)
             status = detect_rosemary()
             error = None
@@ -460,8 +481,9 @@ class RosebloxWindow(Adw.ApplicationWindow):
             self._apply_rosemary_status(status)
         return GLib.SOURCE_REMOVE
 
-    def _apply_rosemary_status(self, status: RosemaryStatus) -> None:
+    def _apply_rosemary_status(self, status: RosemaryStatus, appimage: str | None = None) -> None:
         self.rosemary_status = status
+        self.rosemary_appimage = None if status.available else appimage
         for page in self.pages.values():
             if hasattr(page, "rosemary_status"):
                 page.rosemary_status = status
@@ -486,16 +508,24 @@ class RosebloxWindow(Adw.ApplicationWindow):
 
     def _recheck_rosemary_worker(self) -> None:
         status = detect_rosemary()
-        GLib.idle_add(self._rosemary_rechecked, status)
+        appimage = None if status.available else _found_appimage()
+        GLib.idle_add(self._rosemary_rechecked, status, appimage)
 
-    def _rosemary_rechecked(self, status: RosemaryStatus) -> bool:
-        if status != self.rosemary_status or self.rosemary_install.waiting:
-            self._apply_rosemary_status(status)
+    def _rosemary_rechecked(self, status: RosemaryStatus, appimage: str | None = None) -> bool:
+        if status != self.rosemary_status or appimage != self.rosemary_appimage or self.rosemary_install.waiting:
+            self._apply_rosemary_status(status, appimage)
+        if appimage and self.rosemary_install.waiting and self._rosemary_install_process is None:
+            self._finish_rosemary_install(
+                RosemaryInstallState(False, f"Found {GLib.path_get_basename(appimage)}. Click Use This File.")
+            )
         return GLib.SOURCE_REMOVE
 
     def install_rosemary(self) -> None:
-        """Open a terminal running the AUR helper, then watch for Rosemary to appear."""
+        """Open a terminal running the AUR helper, or Rosemary's releases page, then watch for Rosemary."""
         if self.rosemary_install.waiting:
+            return
+        if self.rosemary_install_method != INSTALL_METHOD_AUR:
+            self._open_rosemary_releases()
             return
         try:
             plan = plan_rosemary_install()
@@ -512,6 +542,31 @@ class RosebloxWindow(Adw.ApplicationWindow):
             )
         )
         GLib.timeout_add_seconds(2, self._poll_rosemary_install)
+
+    def _open_rosemary_releases(self) -> None:
+        Gtk.UriLauncher.new(ROSEMARY_RELEASES_URL).launch(self, None, self._rosemary_releases_opened, None)
+        self._rosemary_install_process = None
+        self._rosemary_install_deadline = time.monotonic() + _ROSEMARY_DOWNLOAD_WAIT_SECONDS
+        self._set_rosemary_install_state(
+            RosemaryInstallState(
+                True,
+                "Download the file ending in “x86_64.AppImage” from Rosemary's releases page. "
+                "Roseblox will find it in your Downloads folder.",
+            )
+        )
+        GLib.timeout_add_seconds(2, self._poll_rosemary_install)
+
+    def _rosemary_releases_opened(self, launcher, result, _data=None) -> None:
+        try:
+            launcher.launch_finish(result)
+        except GLib.Error as error:
+            self._finish_rosemary_install(
+                RosemaryInstallState(
+                    False,
+                    f"Could not open a web browser ({error.message}). Open {ROSEMARY_RELEASES_URL} yourself.",
+                    error=True,
+                )
+            )
 
     def stop_waiting_for_rosemary(self) -> None:
         if self.rosemary_install.waiting:

@@ -33,6 +33,7 @@ from ..backend.flag_catalog import (
     load_cached_allowlist,
 )
 from ..backend import diagnostics, gamemode, mangohud
+from ..backend.system import install_hint
 from ..backend.gpu import list_gpus
 from ..backend.rosemary import build_launch_arguments, default_log_directory
 from ..backend.rosemary_paths import (
@@ -661,7 +662,8 @@ class PerformancePage(Gtk.Box):
             self.gamemode_row.set_subtitle(
                 "Asks Feral GameMode to tune the system while the application runs."
                 if self.gamemode_available
-                else "GameMode is not installed or its daemon cannot be reached."
+                else "GameMode is not installed or its daemon cannot be reached. "
+                + install_hint("gamemoded", "")
             )
             self.mangohud_row.switch.set_active(config.mangohud)
             self.mangohud_row.switch.set_sensitive(self.mangohud_available or config.mangohud)
@@ -670,7 +672,7 @@ class PerformancePage(Gtk.Box):
                 "~/.config/MangoHud/MangoHud.conf. With Rosemary's AppImage, add ROSEMARY_GLIBC=host to the "
                 "Rosemary environment if it does not appear."
                 if self.mangohud_available
-                else "MangoHud's Vulkan layer is not installed."
+                else "MangoHud's Vulkan layer is not installed. " + install_hint("mangohud", "")
             )
             flags = config.fast_flags
             self._select(self.msaa_row, MSAA_CHOICES, flags.get(MSAA_FLAG))

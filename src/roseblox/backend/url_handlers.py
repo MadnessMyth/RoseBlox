@@ -13,6 +13,7 @@ from urllib.parse import urlsplit
 from typing import Callable
 
 from .setup import SetupSettingsError, SetupStore
+from .system import install_hint
 
 
 SCHEME_TO_APP = {
@@ -188,7 +189,8 @@ class URLHandlerService:
         command = self.executable_lookup("xdg-mime")
         if not command:
             raise URLHandlerError(
-                "The `xdg-mime` command is unavailable. Install your desktop environment's XDG utilities and retry."
+                "The `xdg-mime` command is unavailable. "
+                f"{install_hint('xdg-mime', 'Install your desktop environment’s XDG utilities.')} Then retry."
             )
         try:
             result = self.command_runner(

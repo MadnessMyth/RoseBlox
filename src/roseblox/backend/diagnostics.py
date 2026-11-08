@@ -14,6 +14,7 @@ from pathlib import Path
 from .. import __version__
 from . import mangohud
 from .gpu import Gpu
+from .system import detect_system
 from .rosemary_paths import (
     directory_size,
     guest_home,
@@ -153,6 +154,7 @@ def collect(
         ("GameMode", "Available" if gamemode_available else "Not available"),
         ("MangoHud layer", "Installed" if mangohud.layer_installed(env) else "Not installed"),
         ("Session", session_type(env)),
+        ("System", f"{detect_system().name} ({platform.machine()})"),
         ("Kernel", platform.release()),
         ("CPU", f"{cpu_model()} ({os.cpu_count() or '?'} threads)"),
         (

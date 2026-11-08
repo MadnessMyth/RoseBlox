@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 from .library import APP_BUNDLE_NAMES, BundleValidationError, validate_bundle
+from .system import install_hint
 
 
 class ArchiveValidationError(ValueError):
@@ -181,7 +182,7 @@ def extract_archive(
     if not executable:
         raise ArchiveExtractionError(
             "bsdtar is required to extract Roblox archives while preserving symbolic links. "
-            "Install bsdtar using your system package manager, then retry."
+            f"{install_hint('bsdtar', 'Install bsdtar using your system package manager.')} Then retry."
         )
     if staging_directory.exists() and any(staging_directory.iterdir()):
         raise ArchiveExtractionError(f"Extraction destination is not empty: {staging_directory}")

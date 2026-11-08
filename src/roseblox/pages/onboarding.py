@@ -14,6 +14,14 @@ from ..backend.rosemary import RosemaryStatus
 from ..backend.rosemary_install import ROSEMARY_PROJECT_URL, RosemaryInstallState
 from ..backend.setup import SetupSettingsError, SetupStore
 from ..backend.url_handlers import URLHandlerError, URLHandlerService, URLHandlerStatus
+from .rosemary_text import (
+    ABOUT_ROW_SUBTITLES,
+    INSTALL_BUTTON_LABELS,
+    INSTALL_METHOD_MANUAL,
+    INSTALL_ROW_SUBTITLES,
+    INSTALL_ROW_TITLES,
+    rosemary_install_method,
+)
 from .update_checks import UpdateCheckRow
 
 _ICON_PATH = Path(__file__).resolve().parent.parent / "resources" / "roseblox-icon.svg"
@@ -149,8 +157,9 @@ class OnboardingPage(Gtk.Box):
         self.rosemary_row.add_suffix(self.recheck_rosemary_button)
         group.add(self.rosemary_row)
 
+        method = rosemary_install_method(self.window)
         self.install_rosemary_row = Adw.ActionRow.new()
-        self.install_rosemary_row.set_title("Install from the AUR")
+        self.install_rosemary_row.set_title(INSTALL_ROW_TITLES[method])
         self.install_rosemary_row.add_prefix(Gtk.Image.new_from_icon_name("system-software-install-symbolic"))
         self.rosemary_spinner = Gtk.Spinner()
         self.rosemary_spinner.set_visible(False)
@@ -160,12 +169,25 @@ class OnboardingPage(Gtk.Box):
         self.stop_waiting_button.set_visible(False)
         self.stop_waiting_button.connect("clicked", lambda *_: self.window.stop_waiting_for_rosemary())
         self.install_rosemary_row.add_suffix(self.stop_waiting_button)
-        self.install_rosemary_button = Gtk.Button.new_with_label("Install Rosemary")
+        self.install_rosemary_button = Gtk.Button.new_with_label(INSTALL_BUTTON_LABELS[method])
         self.install_rosemary_button.set_valign(Gtk.Align.CENTER)
         self.install_rosemary_button.add_css_class("suggested-action")
         self.install_rosemary_button.connect("clicked", lambda *_: self.window.install_rosemary())
         self.install_rosemary_row.add_suffix(self.install_rosemary_button)
+        self.install_rosemary_row.set_visible(method != INSTALL_METHOD_MANUAL)
         group.add(self.install_rosemary_row)
+
+        self.appimage_row = Adw.ActionRow.new()
+        self.appimage_row.set_title("Rosemary AppImage found")
+        self.appimage_row.set_subtitle_selectable(True)
+        self.appimage_row.add_prefix(Gtk.Image.new_from_icon_name("emblem-downloads-symbolic"))
+        use_appimage = Gtk.Button.new_with_label("Use This File")
+        use_appimage.set_valign(Gtk.Align.CENTER)
+        use_appimage.add_css_class("suggested-action")
+        use_appimage.connect("clicked", lambda *_: self.window.use_rosemary_appimage())
+        self.appimage_row.add_suffix(use_appimage)
+        self.appimage_row.set_visible(False)
+        group.add(self.appimage_row)
 
         choose_row = Adw.ActionRow.new()
         choose_row.set_title("Use an existing build")
@@ -179,7 +201,8 @@ class OnboardingPage(Gtk.Box):
 
         about_row = Adw.ActionRow.new()
         about_row.set_title("About Rosemary")
-        about_row.set_subtitle("Project page and other installation methods")
+        about_row.set_subtitle(ABOUT_ROW_SUBTITLES[method])
+        about_row.set_subtitle_selectable(True)
         about_row.add_prefix(Gtk.Image.new_from_icon_name("help-about-symbolic"))
         link = Gtk.LinkButton.new_with_label(ROSEMARY_PROJECT_URL, "Open Project Page")
         link.set_valign(Gtk.Align.CENTER)
@@ -324,11 +347,14 @@ class OnboardingPage(Gtk.Box):
             )
             self.rosemary_icon.set_from_icon_name("dialog-warning-symbolic")
             self.rosemary_row.set_subtitle("Not installed")
-        self.install_rosemary_row.set_visible(not status.available or install.waiting)
-        self.install_rosemary_row.set_subtitle(
-            install.message
-            or "Builds the “rosemary” package with paru or yay in a terminal, where you can review it and enter your password."
+        method = rosemary_install_method(self.window)
+        self.install_rosemary_row.set_visible(
+            method != INSTALL_METHOD_MANUAL and (not status.available or install.waiting)
         )
+        self.install_rosemary_row.set_subtitle(install.message or INSTALL_ROW_SUBTITLES[method])
+        appimage = None if status.available else getattr(self.window, "rosemary_appimage", None)
+        self.appimage_row.set_visible(bool(appimage))
+        self.appimage_row.set_subtitle(appimage or "")
         if install.error:
             self.install_rosemary_row.add_css_class("error-row")
         else:
@@ -337,7 +363,7 @@ class OnboardingPage(Gtk.Box):
         self.rosemary_spinner.set_spinning(install.waiting)
         self.stop_waiting_button.set_visible(install.waiting)
         self.install_rosemary_button.set_visible(not install.waiting and not status.available)
-        self.install_rosemary_button.set_label("Try Again" if install.error else "Install Rosemary")
+        self.install_rosemary_button.set_label("Try Again" if install.error else INSTALL_BUTTON_LABELS[method])
 
     def _render_links(self) -> None:
         state = self._setup_state
