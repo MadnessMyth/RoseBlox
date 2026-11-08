@@ -108,6 +108,7 @@ class ArchPackagingTests(unittest.TestCase):
         self.assertIn("Exec=roseblox %u\n", desktop)
         self.assertNotIn("MimeType=", desktop)
         self.assertIn("TryExec=roseblox", desktop)
+        self.assertIn("StartupWMClass=io.github.roseblox.Roseblox\n", desktop)
         self.assertIn("Icon=io.github.roseblox.Roseblox", desktop)
         icon = ROOT / "packaging" / "arch" / "io.github.roseblox.Roseblox.svg"
         self.assertTrue(icon.is_file())

@@ -1,11 +1,13 @@
 [Desktop Entry]
 Type=Application
 Name=Roseblox
+GenericName=Roblox Launcher
 Comment=Manage Roblox Player and Studio through Rosemary
 Exec=roseblox %u
 TryExec=roseblox
 Icon=io.github.roseblox.Roseblox
 Terminal=false
 StartupNotify=true
+StartupWMClass=io.github.roseblox.Roseblox
 Categories=Game;
-Keywords=Roblox;Player;Studio;Rosemary;
+Keywords=Roblox;Player;Studio;Rosemary;Games;Launcher;

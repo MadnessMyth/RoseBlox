@@ -4,7 +4,7 @@ import gi
 
 gi.require_version("Adw", "1")
 gi.require_version("Gdk", "4.0")
-from gi.repository import Adw, Gdk
+from gi.repository import Adw, Gdk, Gtk
 from gi.repository import Gio, GLib
 
 from .backend.setup import Appearance, SetupSettingsError, SetupStore
@@ -12,13 +12,18 @@ from .command_line import parse_window_arguments, print_error
 from .theme import ThemeManager
 from .window import RosebloxWindow
 
+APP_ID = "io.github.roseblox.Roseblox"
+
 
 class RosebloxApplication(Adw.Application):
     """The Roseblox application object."""
 
     def __init__(self) -> None:
+        # On X11 the window class comes from the program name; it must match the desktop
+        # entry's name so docks and taskbars show Roseblox's icon and group its windows.
+        GLib.set_prgname(APP_ID)
         super().__init__(
-            application_id="io.github.roseblox.Roseblox",
+            application_id=APP_ID,
             flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE,
         )
         self.connect("activate", self._on_activate)
@@ -27,6 +32,7 @@ class RosebloxApplication(Adw.Application):
     def do_startup(self) -> None:
         Adw.Application.do_startup(self)
         self.theme = None
+        Gtk.Window.set_default_icon_name(APP_ID)
         display = Gdk.Display.get_default()
         if display is None:
             return
