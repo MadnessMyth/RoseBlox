@@ -33,7 +33,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 libgtk-4-1 libadwaita-1-0 librsvg2-common \
-            adwaita-icon-theme libarchive-tools libglib2.0-bin zsync
+            adwaita-icon-theme libarchive-tools libglib2.0-bin zsync desktop-file-utils
           curl -fsSL -o appimagetool "$APPIMAGETOOL_URL"
           echo "$APPIMAGETOOL_SHA256  appimagetool" | sha256sum -c -
           chmod +x appimagetool

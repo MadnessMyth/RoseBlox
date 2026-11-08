@@ -2,8 +2,10 @@
 """Build dist/Roseblox-x86_64.AppImage from this checkout.
 
 Run on Ubuntu 24.04 (x86-64) with the packages the "Build packages" step of
-.github/workflows/release.yml installs, and appimagetool. The AppImage carries the build machine's Python, PyGObject, GTK 4 and
-libadwaita with every library they need, except the ones every desktop has and that
+.github/workflows/release.yml installs (appimagetool needs desktop-file-validate and
+zsyncmake from them) and appimagetool. The AppImage carries the build machine's
+Python, PyGObject, GTK 4 and libadwaita with every library they need, except the ones
+every desktop has and that
 must match the system (glibc, graphics drivers, X11/Wayland clients, fontconfig).
 It therefore runs on systems with glibc 2.39 or newer.
 """
