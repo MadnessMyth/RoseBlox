@@ -573,6 +573,33 @@ class RealWindowTests(unittest.TestCase):
         on_reset.emit("clicked")
         self.assertEqual("Roseblox's sound", on_row.get_subtitle())
 
+    def test_missing_audio_support_is_shown_instead_of_guessed(self):
+        from roseblox.backend.microphone import NO_SOUND_SERVER
+        from roseblox.backend.microphone_sounds import NO_PLAYER, MicrophoneSounds
+
+        with patch("roseblox.pages.manager_page.microphone_problem", return_value=NO_SOUND_SERVER), patch(
+            "roseblox.pages.manager_page.sound_problem", return_value=NO_PLAYER
+        ), patch("roseblox.pages.microphone_hotkey.open_connection", side_effect=GLib.Error("no bus")):
+            settings = self._loaded_window().settings_page
+            self.assertTrue(settings.microphone_warning_row.get_visible())
+            self.assertEqual(NO_SOUND_SERVER, settings.microphone_warning_row.get_subtitle())
+            self.assertFalse(settings.sounds_warning.get_visible())
+            settings.microphone_row.set_enable_expansion(True)
+            settings.microphone_sounds_row.set_active(True)
+            self.assertTrue(settings.sounds_warning.get_visible())
+            self.assertEqual(NO_PLAYER, settings.microphone_sounds_row.get_subtitle())
+        settings.sound_player.which = lambda _name: None
+        settings._preview_sound("on")
+        self.assertIn("pw-play", settings.playing_message.get_text())
+
+        with patch("roseblox.pages.manager_page.microphone_problem", return_value=None), patch(
+            "roseblox.pages.manager_page.sound_problem", return_value=None
+        ):
+            settings._show_while_playing(settings._current_while_playing())
+        self.assertFalse(settings.microphone_warning_row.get_visible())
+        self.assertFalse(settings.sounds_warning.get_visible())
+        self.assertEqual(MicrophoneSounds(True), settings._current_while_playing().sounds)
+
     def test_the_activity_watcher_starts_only_when_a_while_playing_feature_is_on(self):
         from unittest import mock
 

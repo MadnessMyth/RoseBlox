@@ -134,6 +134,16 @@ def default_sound(kind: str, directory: Path | None = None) -> Path:
     return path
 
 
+NO_PLAYER = (
+    "Sound effects need pw-play (the pipewire package on Arch, pipewire-bin on Debian and Ubuntu) "
+    "or paplay (libpulse on Arch, pulseaudio-utils elsewhere)."
+)
+
+
+def sound_problem(which: Callable[[str], str | None] = shutil.which) -> str | None:
+    return None if which("pw-play") or which("paplay") else NO_PLAYER
+
+
 def play_command(path: Path, volume: int, which: Callable[[str], str | None] = shutil.which) -> list[str] | None:
     if which("pw-play"):
         return ["pw-play", f"--volume={volume / 100:.2f}", str(path)]
@@ -175,7 +185,7 @@ class SoundPlayer:
             return False
         command = play_command(path, sounds.volume, self.which)
         if command is None:
-            self.log("neither pw-play nor paplay was found; microphone sounds cannot play")
+            self.log(NO_PLAYER)
             return False
         try:
             self.spawn(command)

@@ -39,8 +39,10 @@ from ..backend.setup import (
     WhilePlaying,
 )
 from ..backend.game_info import LOCATION_SERVICE
-from ..backend.microphone import MAX_RELEASE_DELAY_MS, MICROPHONE_MODES, MODE_HOLD
-from ..backend.microphone_sounds import MAX_VOLUME, OFF, ON, SOUND_SUFFIXES, MicrophoneSoundError, SoundPlayer, store_sound
+from ..backend.microphone import MAX_RELEASE_DELAY_MS, MICROPHONE_MODES, MODE_HOLD, microphone_problem
+from ..backend.microphone_sounds import (
+    MAX_VOLUME, OFF, ON, SOUND_SUFFIXES, MicrophoneSoundError, SoundPlayer, sound_problem, store_sound,
+)
 from .microphone_hotkey import MicrophoneHotkey
 from ..backend.updates import APP_TITLES, NotificationLog, UpdateCheckerError, _spawn_detached
 from ..activity_service import watcher_arguments
@@ -2233,7 +2235,18 @@ class SettingsPage(Gtk.Box):
         self.sound_volume_row.set_subtitle("Percent of your system volume.")
         self.sound_volume_row.connect("notify::value", self._microphone_changed)
         self.microphone_row.add_row(self.sound_volume_row)
+        self.sounds_warning = Gtk.Image.new_from_icon_name("dialog-warning-symbolic")
+        self.sounds_warning.set_tooltip_text("Sound effects cannot play")
+        self.microphone_sounds_row.add_suffix(self.sounds_warning)
         group.add(self.microphone_row)
+
+        self.microphone_warning_row = Adw.ActionRow.new()
+        self.microphone_warning_row.set_title("The microphone toggle cannot work here")
+        self.microphone_warning_row.set_subtitle_selectable(True)
+        self.microphone_warning_row.add_prefix(Gtk.Image.new_from_icon_name("dialog-warning-symbolic"))
+        self.microphone_warning_row.add_css_class("error-row")
+        self.microphone_warning_row.set_visible(False)
+        group.add(self.microphone_warning_row)
 
     def _sound_message(self, text: str) -> None:
         self.playing_message.set_text(f"Microphone sound: {text}")
@@ -2311,6 +2324,14 @@ class SettingsPage(Gtk.Box):
             row.set_visible(settings.microphone_sounds)
             row.set_subtitle(Path(chosen).name if chosen else "Roseblox's sound")
             reset.set_visible(bool(chosen))
+        problem = microphone_problem()
+        self.microphone_warning_row.set_visible(problem is not None)
+        self.microphone_warning_row.set_subtitle(problem or "")
+        missing_player = sound_problem() if settings.microphone_sounds else None
+        self.sounds_warning.set_visible(missing_player is not None)
+        self.microphone_sounds_row.set_subtitle(
+            missing_player or "Play a short sound when Roblox's microphone turns on or off."
+        )
         hold = settings.microphone_mode == MODE_HOLD
         inverted = hold and settings.microphone_inverted
         self.release_delay_row.set_visible(hold)

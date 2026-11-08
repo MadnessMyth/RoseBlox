@@ -172,6 +172,37 @@ def detect_backend(which: Callable[[str], str | None] = shutil.which, runner: Ru
     return None
 
 
+NO_SOUND_SERVER = (
+    "No PipeWire or PulseAudio sound server is running, so Roseblox cannot mute Roblox's microphone. "
+    "Setups with only ALSA or JACK have no separate microphone stream per app."
+)
+NO_MUTE_TOOLS = (
+    "Roseblox needs pactl to mute Roblox's microphone (the libpulse package on Arch, pulseaudio-utils "
+    "on Debian, Ubuntu, Fedora and openSUSE), or PipeWire's pw-dump and wpctl."
+)
+
+
+def sound_server_running(environ: dict[str, str] | None = None) -> bool:
+    environ = os.environ if environ is None else environ
+    if environ.get("PULSE_SERVER") or environ.get("PIPEWIRE_REMOTE"):
+        return True
+    runtime = environ.get("XDG_RUNTIME_DIR")
+    if not runtime:
+        return False
+    return any(os.path.exists(os.path.join(runtime, name)) for name in ("pulse/native", "pipewire-0"))
+
+
+def microphone_problem(
+    which: Callable[[str], str | None] = shutil.which, environ: dict[str, str] | None = None
+) -> str | None:
+    """Why the microphone toggle cannot work on this computer, or None."""
+    if not sound_server_running(environ):
+        return NO_SOUND_SERVER
+    if not which("pactl") and not (which("pw-dump") and which("wpctl")):
+        return NO_MUTE_TOOLS
+    return None
+
+
 def validate_release_delay(value: object) -> int:
     if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= MAX_RELEASE_DELAY_MS:
         raise ValueError(f"The release delay must be between 0 and {MAX_RELEASE_DELAY_MS} milliseconds.")

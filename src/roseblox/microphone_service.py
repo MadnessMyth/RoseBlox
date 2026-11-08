@@ -19,7 +19,7 @@ from .backend.global_shortcuts import (
     ShortcutsSession,
     open_connection,
 )
-from .backend.microphone import MicrophoneGate, detect_backend
+from .backend.microphone import MicrophoneGate, detect_backend, microphone_problem
 from .backend.microphone_sounds import OFF, ON, MicrophoneSounds, SoundPlayer
 
 APP_ID = "io.github.roseblox.Roseblox"
@@ -362,7 +362,8 @@ def command_main(argv: list[str], bus: Gio.DBusConnection | None = None) -> int:
         if Gio.DBusError.is_remote_error(error) and Gio.DBusError.get_remote_error(error) in (
             "org.freedesktop.DBus.Error.ServiceUnknown", "org.freedesktop.DBus.Error.NameHasNoOwner",
         ):
-            print(NOT_RUNNING, file=sys.stderr)
+            problem = microphone_problem()
+            print(NOT_RUNNING if problem is None else f"{NOT_RUNNING}\n{problem}", file=sys.stderr)
         else:
             print(f"roseblox --mic: {error.message}", file=sys.stderr)
         return 1

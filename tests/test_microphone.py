@@ -8,6 +8,8 @@ from contextlib import redirect_stderr, redirect_stdout
 from roseblox.backend.microphone import (
     MODE_HOLD,
     MODE_TOGGLE,
+    NO_MUTE_TOOLS,
+    NO_SOUND_SERVER,
     CaptureStream,
     MicrophoneError,
     MicrophoneGate,
@@ -15,9 +17,11 @@ from roseblox.backend.microphone import (
     PulseBackend,
     detect_backend,
     is_roblox_stream,
+    microphone_problem,
     parse_pw_dump,
     parse_source_outputs,
 )
+from roseblox.backend.microphone_sounds import sound_problem
 
 SOURCE_OUTPUTS = """Source Output #8733
 \tDriver: PipeWire
@@ -159,6 +163,24 @@ class ParsingTests(unittest.TestCase):
             detect_backend(lambda name: None if name == "pactl" else f"/usr/bin/{name}"), PipeWireBackend
         )
         self.assertIsNone(detect_backend(lambda name: None))
+
+    def test_problems_name_a_missing_sound_server_or_missing_tools(self):
+        import tempfile
+        from pathlib import Path
+
+        everything = lambda name: f"/usr/bin/{name}"  # noqa: E731
+        with tempfile.TemporaryDirectory() as runtime:
+            environ = {"XDG_RUNTIME_DIR": runtime}
+            self.assertEqual(NO_SOUND_SERVER, microphone_problem(everything, environ))
+            self.assertEqual(NO_SOUND_SERVER, microphone_problem(everything, {}))
+            (Path(runtime) / "pipewire-0").touch()
+            self.assertIsNone(microphone_problem(everything, environ))
+            self.assertEqual(NO_MUTE_TOOLS, microphone_problem(lambda name: None, environ))
+            self.assertIsNone(microphone_problem(lambda name: None if name == "pactl" else name, environ))
+            self.assertEqual(NO_MUTE_TOOLS, microphone_problem(lambda name: name if name == "wpctl" else None, environ))
+        self.assertIsNone(microphone_problem(everything, {"PULSE_SERVER": "tcp:host"}))
+        self.assertIsNone(sound_problem(lambda name: name if name == "paplay" else None))
+        self.assertIn("pw-play", sound_problem(lambda name: None))
 
 
 class GateTests(unittest.TestCase):
@@ -349,6 +371,17 @@ class ServiceTests(unittest.TestCase):
         with redirect_stderr(error), redirect_stdout(output):
             status = command_main(["roseblox", "--mic", *arguments], self.connection)
         return status, output.getvalue().strip(), error.getvalue().strip()
+
+    def test_the_command_explains_why_the_toggle_cannot_run(self):
+        from unittest.mock import patch
+
+        from roseblox.microphone_service import NOT_RUNNING
+
+        with patch("roseblox.microphone_service.microphone_problem", return_value="No sound server."):
+            status, output, error = self._command("status")
+        self.assertEqual((1, "", f"{NOT_RUNNING}\nNo sound server."), (status, output, error))
+        with patch("roseblox.microphone_service.microphone_problem", return_value=None):
+            self.assertEqual(NOT_RUNNING, self._command("toggle")[2])
 
     def test_sounds_play_when_the_microphone_opens_and_mutes(self):
         from roseblox.backend.microphone_sounds import MicrophoneSounds
