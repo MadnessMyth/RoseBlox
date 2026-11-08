@@ -13,6 +13,7 @@ import time
 from pathlib import Path
 from typing import Callable
 
+from .backend.appimage import appimage_path
 from .backend.activity import ActivityTracker, GameJoined, GameLeft, LogFollower, find_roblox_log
 from .backend.discord_rpc import (
     DiscordError,
@@ -227,7 +228,9 @@ class ActivityWatcher:
 
 
 def watcher_arguments(pid: int, start_time: int, log_path: Path, roblox_logs: Path | None = None) -> list[str]:
-    arguments = [sys.executable, "-m", "roseblox", "--activity-watch", str(pid), str(start_time), str(log_path)]
+    executable = appimage_path()
+    command = [executable] if executable else [sys.executable, "-m", "roseblox"]
+    arguments = [*command, "--activity-watch", str(pid), str(start_time), str(log_path)]
     return arguments if roblox_logs is None else [*arguments, str(roblox_logs)]
 
 

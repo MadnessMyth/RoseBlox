@@ -7,6 +7,8 @@ gi.require_version("Gdk", "4.0")
 from gi.repository import Adw, Gdk, Gtk
 from gi.repository import Gio, GLib
 
+from .backend import appimage
+from .backend.self_update import restart_command
 from .backend.setup import Appearance, SetupSettingsError, SetupStore
 from .command_line import parse_window_arguments, print_error
 from .theme import ThemeManager
@@ -17,6 +19,8 @@ APP_ID = "io.github.roseblox.Roseblox"
 
 class RosebloxApplication(Adw.Application):
     """The Roseblox application object."""
+
+    restart_requested = False
 
     def __init__(self) -> None:
         # On X11 the window class comes from the program name; it must match the desktop
@@ -31,6 +35,11 @@ class RosebloxApplication(Adw.Application):
 
     def do_startup(self) -> None:
         Adw.Application.do_startup(self)
+        appimage.restore_host_environment()
+        try:
+            appimage.integrate()
+        except OSError:
+            pass
         self.theme = None
         Gtk.Window.set_default_icon_name(APP_ID)
         display = Gdk.Display.get_default()
@@ -63,3 +72,18 @@ class RosebloxApplication(Adw.Application):
         elif request.show is not None:
             GLib.idle_add(window.show_page, request.show)
         return 0
+
+    def restart(self) -> None:
+        """Quit, then start the updated AppImage."""
+        self.restart_requested = True
+        self.quit()
+
+    def restart_if_requested(self) -> None:
+        if not self.restart_requested:
+            return
+        import subprocess
+
+        subprocess.Popen(
+            restart_command(), start_new_session=True,
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )

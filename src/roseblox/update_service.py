@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import os
-import shutil
 import sys
 import threading
 
 from gi.repository import Gio, GLib
 
+from .backend import appimage
 from .backend.library import LibraryStore
 from .backend.rosemary import default_log_directory
 from .command_line import print_error
@@ -45,7 +45,7 @@ class UpdateNotifierApplication(Gio.Application):
         version_settings: VersionSettingsStore | None = None,
         version_cache: VersionCache | None = None,
         notification_log: NotificationLog | None = None,
-        executable_lookup=shutil.which,
+        executable_lookup=appimage.which,
         spawn=_spawn_detached,
         first_check_delay: float = FIRST_CHECK_DELAY_SECONDS,
         check_interval: float = CHECK_INTERVAL_SECONDS,

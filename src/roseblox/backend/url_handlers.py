@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import re
-import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -12,6 +11,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 from typing import Callable
 
+from . import appimage
 from .setup import SetupSettingsError, SetupStore
 from .system import install_hint
 
@@ -102,7 +102,7 @@ class URLHandlerService:
         *,
         data_home: Path | None = None,
         config_home: Path | None = None,
-        executable_lookup: Callable[[str], str | None] = shutil.which,
+        executable_lookup: Callable[[str], str | None] = appimage.which,
         command_runner: Callable[..., subprocess.CompletedProcess] = subprocess.run,
         data_dirs: list[Path] | None = None,
     ) -> None:

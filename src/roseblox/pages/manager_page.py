@@ -1750,6 +1750,16 @@ class SettingsPage(Gtk.Box):
         self.ask_again_button.connect("clicked", self._ask_again_clicked)
         self.skipped_row.add_suffix(self.ask_again_button)
         updates_group.add(self.skipped_row)
+        self.roseblox_updates_row = Adw.SwitchRow.new()
+        self.roseblox_updates_row.set_title("Check for new Roseblox versions")
+        self.roseblox_updates_row.set_subtitle(
+            "Once a day while Roseblox is open, look at Roseblox’s GitHub releases and show "
+            "new versions in the notifications."
+        )
+        self.roseblox_updates_row.set_active(True)
+        self._roseblox_updates_block = False
+        self.roseblox_updates_row.connect("notify::active", self._roseblox_updates_changed)
+        updates_group.add(self.roseblox_updates_row)
         updates.add(updates_group)
 
         advanced = self._section(
@@ -1966,6 +1976,7 @@ class SettingsPage(Gtk.Box):
             self._show_multiple(setup_state.multiple_players)
             self._show_while_playing(setup_state.while_playing)
             self._show_skipped_versions(setup_state.skipped_versions)
+            self._set_roseblox_updates(setup_state.roseblox_update_checks)
         enabled = bool(setup_state and setup_state.url_handlers_enabled)
         self._url_switch_block = True
         self.url_switch.set_active(enabled)
@@ -2060,6 +2071,24 @@ class SettingsPage(Gtk.Box):
 
     def apply_update_status(self, status) -> None:
         self.check_now_row.set_visible(status.enabled)
+
+    def _set_roseblox_updates(self, active: bool) -> None:
+        self._roseblox_updates_block = True
+        self.roseblox_updates_row.set_active(active)
+        self._roseblox_updates_block = False
+
+    def _roseblox_updates_changed(self, row, _pspec) -> None:
+        if self._roseblox_updates_block or self.setup_store is None:
+            return
+        try:
+            self.window.setup_state = self.setup_store.save_roseblox_update_checks(row.get_active())
+        except SetupSettingsError as error:
+            self._set_roseblox_updates(not row.get_active())
+            row.set_subtitle(f"Not saved: {str(error)[:300]}")
+            return
+        center = getattr(self.window, "notification_center", None)
+        if row.get_active() and center is not None:
+            center.check_roseblox(automatic=True)
 
     def _show_skipped_versions(self, skipped: dict[str, str]) -> None:
         if skipped:

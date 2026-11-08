@@ -11,6 +11,9 @@ import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import GLib, Gtk, Pango
 
+from .. import __version__
+from ..backend import self_update
+from ..backend.self_update import Release, SelfUpdateError
 from ..backend.setup import SetupSettingsError
 from ..backend.updates import APP_TITLES, CHECK_INTERVAL_SECONDS, AvailableUpdate, check_for_updates
 
@@ -19,6 +22,15 @@ RECENT_LIMIT = 20
 # is maximized and the bell is close to the screen edge.
 POPOVER_WIDTH = 240
 _TEXT_WIDTH_CHARS = 40  # Upper bound; the popover width decides where text wraps.
+
+
+ROSEBLOX_UPDATE_HINTS = {
+    self_update.INSTALL_DEB: "Download the new .deb from the release page and open it to update.",
+    self_update.INSTALL_SCRIPT: "Update with: cd ~/RoseBlox && git pull && packaging/generic/install.sh",
+    self_update.INSTALL_PACKAGE: "Update it the same way you installed it.",
+    self_update.INSTALL_SOURCE: "Run git pull in your Roseblox folder.",
+    self_update.INSTALL_APPIMAGE: "Download the new AppImage from the release page.",
+}
 
 
 @dataclass(frozen=True)
@@ -30,10 +42,22 @@ class RecentEntry:
 
 
 class NotificationCenter(Gtk.MenuButton):
-    def __init__(self, window, *, checker=None, check_interval: float = CHECK_INTERVAL_SECONDS) -> None:
+    def __init__(
+        self, window, *, checker=None, release_checker=None, install_kind: str | None = None,
+        check_interval: float = CHECK_INTERVAL_SECONDS,
+    ) -> None:
         super().__init__()
         self.window = window
         self._checker = checker or self._check_with_window
+        self._release_checker = release_checker
+        self.install_kind = install_kind or self_update.install_kind()
+        self.roseblox_release: Release | None = None
+        self.roseblox_error: str | None = None
+        self.roseblox_progress: float | None = None
+        self.roseblox_updated = False
+        self._roseblox_checking = False
+        self._roseblox_checked_at = 0.0
+        self._roseblox_dismissed: str | None = None
         self.check_interval = check_interval
         self.operations: dict[str, object] = {}
         self.updates: list[AvailableUpdate] = []
@@ -101,6 +125,8 @@ class NotificationCenter(Gtk.MenuButton):
         self.empty_label.set_margin_bottom(12)
         content.append(self.empty_label)
 
+        self.roseblox_box, self.roseblox_list = self._group("Roseblox")
+        content.append(self.roseblox_box)
         self.downloads_box, self.downloads_list = self._group("Downloads")
         content.append(self.downloads_box)
         self.updates_box, self.updates_list = self._group("Updates")
@@ -221,6 +247,7 @@ class NotificationCenter(Gtk.MenuButton):
         Automatic checks follow the "Notify me about Roblox updates" setting; the
         Check for Updates button always works.
         """
+        self.check_roseblox(automatic=automatic)
         if automatic and not self._automatic_checks_enabled():
             return
         if self._checking:
@@ -261,6 +288,98 @@ class NotificationCenter(Gtk.MenuButton):
             self.check_updates()
         return GLib.SOURCE_REMOVE
 
+    # Roseblox itself
+
+    def _roseblox_checks_enabled(self) -> bool:
+        state = getattr(self.window, "setup_state", None)
+        return bool(getattr(state, "roseblox_update_checks", True))
+
+    def check_roseblox(self, *, automatic: bool = False) -> None:
+        """Look for a newer Roseblox release; automatic checks run at most once a day."""
+        if self._roseblox_checking or self.roseblox_progress is not None or self.roseblox_updated:
+            return
+        if automatic:
+            checked_recently = (
+                self._roseblox_checked_at
+                and time.monotonic() - self._roseblox_checked_at < self_update.CHECK_INTERVAL_SECONDS
+            )
+            if checked_recently or not self._roseblox_checks_enabled():
+                return
+        self._roseblox_checking = True
+        self._roseblox_checked_at = time.monotonic()
+        threading.Thread(target=self._roseblox_check_worker, args=(automatic,), daemon=True).start()
+
+    def _roseblox_check_worker(self, automatic: bool) -> None:
+        try:
+            release, error = (self._release_checker or self_update.fetch_latest_release)(), None
+        except SelfUpdateError as error_:
+            release, error = None, str(error_)[:300]
+        except Exception as error_:  # noqa: BLE001 - a broken check must not reach the main loop
+            release, error = None, str(error_)[:300]
+        GLib.idle_add(self._roseblox_checked, release, None if automatic else error)
+
+    def _roseblox_checked(self, release: Release | None, error: str | None) -> bool:
+        self._roseblox_checking = False
+        self.roseblox_error = error
+        if release is not None:
+            newer = self_update.is_newer(release.version)
+            self.roseblox_release = release if newer and release.version != self._roseblox_dismissed else None
+        self._render()
+        return GLib.SOURCE_REMOVE
+
+    def _roseblox_dismiss_clicked(self, _button) -> None:
+        if self.roseblox_release is not None:
+            self._roseblox_dismissed = self.roseblox_release.version
+        self.roseblox_release = None
+        self._render()
+
+    def _roseblox_open_clicked(self, _button, url: str) -> None:
+        self.popover.popdown()
+        Gtk.UriLauncher.new(url).launch(self.window, None, None, None)
+
+    def _roseblox_update_clicked(self, _button) -> None:
+        release = self.roseblox_release
+        target = self_update.appimage_path()
+        if release is None or target is None:
+            return
+        self.roseblox_progress = 0.0
+        self.roseblox_error = None
+        self._render()
+        threading.Thread(target=self._roseblox_update_worker, args=(release, target), daemon=True).start()
+
+    def _roseblox_update_worker(self, release: Release, target: str) -> None:
+        def progress(received: int, total: int | None) -> None:
+            if total:
+                GLib.idle_add(self._roseblox_progressed, min(received / total, 1.0))
+
+        try:
+            self_update.update_appimage(release, target, progress)
+            error = None
+        except SelfUpdateError as error_:
+            error = str(error_)[:300]
+        GLib.idle_add(self._roseblox_update_finished, error)
+
+    def _roseblox_progressed(self, fraction: float) -> bool:
+        if self.roseblox_progress is not None:
+            self.roseblox_progress = fraction
+            bar = getattr(self, "_roseblox_bar", None)
+            if bar is not None:
+                bar.set_fraction(fraction)
+                bar.set_text(f"{fraction:.0%}")
+        return GLib.SOURCE_REMOVE
+
+    def _roseblox_update_finished(self, error: str | None) -> bool:
+        self.roseblox_progress = None
+        self.roseblox_error = error
+        self.roseblox_updated = error is None
+        self._render()
+        return GLib.SOURCE_REMOVE
+
+    def _roseblox_restart_clicked(self, _button) -> None:
+        application = self.window.get_application()
+        if application is not None and hasattr(application, "restart"):
+            application.restart()
+
     def forget_skipped(self) -> None:
         """Skipped versions were cleared in Settings, so look again."""
         self.check_updates()
@@ -286,7 +405,8 @@ class NotificationCenter(Gtk.MenuButton):
     # Drawing
 
     def attention_count(self) -> int:
-        return len(self.operations) + len(self.updates) + self._unread
+        roseblox = int(self.roseblox_release is not None)
+        return roseblox + len(self.operations) + len(self.updates) + self._unread
 
     def _render_badge(self) -> None:
         count = self.attention_count()
@@ -295,8 +415,12 @@ class NotificationCenter(Gtk.MenuButton):
         self.set_tooltip_text(f"Notifications ({count})" if count else "Notifications")
 
     def _render(self) -> None:
-        for listbox in (self.downloads_list, self.updates_list, self.recent_list):
+        for listbox in (self.roseblox_list, self.downloads_list, self.updates_list, self.recent_list):
             listbox.remove_all()
+        self._roseblox_bar = None
+        if self.roseblox_release is not None:
+            self.roseblox_list.append(self._roseblox_row(self.roseblox_release))
+        self.roseblox_box.set_visible(self.roseblox_release is not None)
         for app_type, state in self.operations.items():
             self.downloads_list.append(self._download_row(app_type, state))
         for update in self.updates:
@@ -306,11 +430,18 @@ class NotificationCenter(Gtk.MenuButton):
         self.downloads_box.set_visible(bool(self.operations))
         self.updates_box.set_visible(bool(self.updates))
         self.recent_box.set_visible(bool(self.recent))
-        self.empty_label.set_visible(not (self.operations or self.updates or self.recent))
-        problems = [message for message in self.update_errors.values() if message]
-        self.status_label.set_text(
-            f"Could not check for updates: {problems[0]}" if problems else ""
+        self.empty_label.set_visible(
+            not (self.operations or self.updates or self.recent or self.roseblox_release)
         )
+        problems = [message for message in self.update_errors.values() if message]
+        if problems:
+            status = f"Could not check for updates: {problems[0]}"
+        elif self.roseblox_error and self.roseblox_release is None:
+            status = f"Could not check for a new Roseblox: {self.roseblox_error}"
+        else:
+            status = ""
+        self.status_label.set_text(status)
+        problems = problems or ([status] if status else [])
         self.status_label.set_visible(bool(problems))
         self._render_badge()
 
@@ -398,6 +529,50 @@ class NotificationCenter(Gtk.MenuButton):
         install.set_sensitive(update.app_type not in self.operations)
         install.connect("clicked", self._update_clicked, update.app_type)
         row.content.append(self._button_row(skip, install))
+        return row
+
+    def _roseblox_row(self, release: Release) -> Gtk.Widget:
+        appimage = self.install_kind == self_update.INSTALL_APPIMAGE and release.appimage_url
+        if self.roseblox_updated:
+            row = self._card_row(
+                f"Roseblox {release.version} is ready",
+                "Restart Roseblox to use the new version.",
+            )
+            restart = Gtk.Button.new_with_label("Restart")
+            restart.add_css_class("suggested-action")
+            restart.connect("clicked", self._roseblox_restart_clicked)
+            row.content.append(self._button_row(restart))
+            return row
+        subtitle = f"You have {__version__}."
+        hint = ROSEBLOX_UPDATE_HINTS.get(self.install_kind) if not appimage else None
+        if hint:
+            subtitle += f" {hint}"
+        if self.roseblox_error:
+            subtitle += f"\nThe update failed: {self.roseblox_error}"
+        row = self._card_row(f"Roseblox {release.version} is available", subtitle)
+        if self.roseblox_progress is not None:
+            bar = Gtk.ProgressBar()
+            bar.set_fraction(self.roseblox_progress)
+            bar.set_text(f"{self.roseblox_progress:.0%}")
+            bar.set_show_text(True)
+            row.content.append(bar)
+            self._roseblox_bar = bar
+            return row
+        later = Gtk.Button.new_with_label("Not Now")
+        later.set_tooltip_text("Hide this until Roseblox restarts")
+        later.connect("clicked", self._roseblox_dismiss_clicked)
+        if appimage:
+            action = Gtk.Button.new_with_label("Update")
+            action.set_tooltip_text("Download the new AppImage and replace this one")
+            action.connect("clicked", self._roseblox_update_clicked)
+        elif self.install_kind == self_update.INSTALL_SCRIPT:
+            action = Gtk.Button.new_with_label("How to Update")
+            action.connect("clicked", self._roseblox_open_clicked, self_update.UPDATE_GUIDE_URL)
+        else:
+            action = Gtk.Button.new_with_label("Open Release")
+            action.connect("clicked", self._roseblox_open_clicked, release.page_url)
+        action.add_css_class("suggested-action")
+        row.content.append(self._button_row(later, action))
         return row
 
     def _recent_row(self, entry: RecentEntry) -> Gtk.Widget:

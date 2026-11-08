@@ -10,6 +10,7 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
+from .appimage import bundled_tool
 from .library import APP_BUNDLE_NAMES, BundleValidationError, validate_bundle
 from .system import install_hint
 
@@ -178,7 +179,7 @@ def extract_archive(
             f"Archive contents do not include the expected {APP_BUNDLE_NAMES[app_type]} bundle."
         )
 
-    executable = bsdtar_path or shutil.which("bsdtar")
+    executable = bsdtar_path or shutil.which("bsdtar") or bundled_tool("bsdtar")
     if not executable:
         raise ArchiveExtractionError(
             "bsdtar is required to extract Roblox archives while preserving symbolic links. "

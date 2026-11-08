@@ -17,6 +17,7 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import Adw, GLib, Gtk
 
 from roseblox.backend.rosemary_install import ROSEMARY_RELEASES_URL, RosemaryInstallError
+from roseblox.backend.self_update import Release
 from roseblox.backend.system import SystemInfo
 from roseblox.pages.manager_page import OperationState
 
@@ -74,6 +75,10 @@ class RealWindowTests(unittest.TestCase):
         }
         self.environment = patch.dict(os.environ, environment)
         self.environment.start()
+        self.latest_roseblox = Release("0.0.1", "https://github.com/MadnessMyth/RoseBlox/releases/tag/v0.0.1")
+        latest = patch("roseblox.backend.self_update.fetch_latest_release", lambda: self.latest_roseblox)
+        latest.start()
+        self.addCleanup(latest.stop)
         self.system = SystemInfo("arch", (), "Arch Linux", "x86_64")
         Adw.init()
 
@@ -512,6 +517,54 @@ class RealWindowTests(unittest.TestCase):
         self.enterContext(
             patch("roseblox.pages.notification_center.GLib.idle_add", lambda function, *arguments: function(*arguments))
         )
+
+    def test_notification_center_offers_new_roseblox_versions(self):
+        from roseblox.backend import self_update
+
+        self._synchronous_center_checks()
+        self.latest_roseblox = Release(
+            "99.0.0", "https://github.com/MadnessMyth/RoseBlox/releases/tag/v99.0.0",
+            "https://github.com/a.AppImage", 10, "https://github.com/SHA256SUMS",
+        )
+        window = self._loaded_window()
+        center = window.notification_center
+        self.assertTrue(center.roseblox_box.get_visible())
+        row = center.roseblox_list.get_row_at_index(0)
+        self.assertEqual("Roseblox 99.0.0 is available", row.title_label.get_text())
+
+        center._roseblox_dismiss_clicked(None)
+        self.assertFalse(center.roseblox_box.get_visible())
+        center.check_roseblox()
+        self.assertFalse(center.roseblox_box.get_visible())
+
+        center._roseblox_dismissed = None
+        center.install_kind = self_update.INSTALL_APPIMAGE
+        center.check_roseblox()
+        with patch.object(self_update, "appimage_path", return_value="/tmp/Roseblox.AppImage"), patch.object(
+            self_update, "update_appimage", side_effect=lambda release, target, progress: progress(5, 10)
+        ) as update:
+            center._roseblox_update_clicked(None)
+        update.assert_called_once()
+        row = center.roseblox_list.get_row_at_index(0)
+        self.assertEqual("Roseblox 99.0.0 is ready", row.title_label.get_text())
+        application = Mock()
+        with patch.object(window, "get_application", return_value=application):
+            center._roseblox_restart_clicked(None)
+        application.restart.assert_called_once_with()
+
+    def test_roseblox_checks_follow_the_setting(self):
+        self._synchronous_center_checks()
+        self.latest_roseblox = Release("99.0.0", "https://github.com/MadnessMyth/RoseBlox/releases/tag/v99.0.0")
+        window = self._loaded_window()
+        center = window.notification_center
+        center.roseblox_release = None
+        window.settings_page.roseblox_updates_row.set_active(False)
+        self.assertFalse(window.setup_state.roseblox_update_checks)
+        center._roseblox_checked_at = 0
+        center.check_roseblox(automatic=True)
+        self.assertIsNone(center.roseblox_release)
+        center.check_roseblox()
+        self.assertIsNotNone(center.roseblox_release)
 
     def test_notification_center_follows_downloads(self):
         window = self._loaded_window()

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
 import tempfile
 import time
@@ -12,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable, Mapping
 
+from . import appimage
 from .library import InstallationRecord
 from .setup import APP_TYPES, SetupSettingsError, SetupStore
 from .url_handlers import _desktop_quote, URLHandlerError
@@ -188,7 +188,7 @@ class UpdateCheckerService:
         *,
         config_home: Path | None = None,
         data_home: Path | None = None,
-        executable_lookup: Callable[[str], str | None] = shutil.which,
+        executable_lookup: Callable[[str], str | None] = appimage.which,
         spawn: Callable[[list[str]], object] = _spawn_detached,
     ) -> None:
         self.setup_store = setup_store or SetupStore()

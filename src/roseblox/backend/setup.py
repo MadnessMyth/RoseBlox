@@ -86,6 +86,7 @@ class SetupState:
     previous_url_defaults: dict[str, str | None] | None = None
     close_after_launch: dict[str, ClosePreference] = field(default_factory=dict)
     update_checks_enabled: bool = False
+    roseblox_update_checks: bool = True
     skipped_versions: dict[str, str] = field(default_factory=dict)
     appearance: Appearance = field(default_factory=Appearance)
     plain_ctrl_click: bool = True
@@ -134,6 +135,7 @@ class SetupStore:
             dict(previous),
             close_after_launch=self._close_preferences(document.get("close_after_launch", {})),
             update_checks_enabled=self._boolean(document, "update_checks_enabled"),
+            roseblox_update_checks=self._boolean(document, "roseblox_update_checks", True),
             skipped_versions=self._skipped_versions(document.get("skipped_versions", {})),
             appearance=self._appearance(document.get("appearance", {})),
             plain_ctrl_click=self._boolean(document, "plain_ctrl_click", True),
@@ -176,6 +178,11 @@ class SetupStore:
         if not isinstance(enabled, bool):
             raise ValueError("The update-check preference must be enabled or disabled.")
         return self._update(update_checks_enabled=enabled)
+
+    def save_roseblox_update_checks(self, enabled: bool) -> SetupState:
+        if not isinstance(enabled, bool):
+            raise ValueError("The Roseblox update-check preference must be enabled or disabled.")
+        return self._update(roseblox_update_checks=enabled)
 
     def skip_version(self, app_type: str, version: str) -> SetupState:
         self._require_app_type(app_type)
