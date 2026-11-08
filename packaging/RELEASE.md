@@ -1,5 +1,33 @@
 # Roseblox release preparation
 
+## Release checklist — v0.5.0
+
+- [x] Bump the version in `pyproject.toml`, `src/roseblox/__init__.py`, and `packaging/arch-git/PKGBUILD`.
+- [x] Run the full unittest suite, Python compilation, and `git diff --check` on Ubuntu 24.04 (GTK 4.14, libadwaita 1.5).
+- [x] Install with `packaging/generic/install.sh` on Ubuntu 24.04, start the installed app, and check the AppImage setup flow with a placeholder AppImage.
+- [ ] Run the unittest suite and build `packaging/arch-git` with `makepkg` on Arch Linux.
+- [x] Create the annotated `v0.5.0` Git tag on the release commit.
+- [x] Point `packaging/arch/PKGBUILD` at the `v0.5.0` tag, record the archive checksum, and update `.SRCINFO`.
+- [ ] Build `packaging/arch/PKGBUILD` with `makepkg` on Arch Linux and install it.
+- [x] The release workflow creates the GitHub release for `v0.5.0` from these notes when the tag is pushed.
+
+## Release notes — v0.5.0
+
+### New
+
+- **Roseblox now runs on more Linux distributions**: Ubuntu 24.04 or newer, Debian 13, Fedora 40 or newer, and openSUSE Tumbleweed, alongside Arch Linux and Arch-based systems. These are new and less tested than Arch; please open an issue if something does not work.
+  - `packaging/generic/install.sh` installs Roseblox for your user in `~/.local`, using your system's Python, GTK 4 and libadwaita, with the menu entry and icon. It checks what is missing and prints the exact install command for your distribution, never uses `sudo`, and removes itself with `--uninstall`. See [Other distributions](https://github.com/MadnessMyth/RoseBlox/blob/master/docs/INSTALL.md#other-distributions).
+  - **Setup gets Rosemary from its official AppImage** on systems other than Arch. **Open Releases Page** opens Rosemary's releases page in your browser, and Roseblox finds the `Rosemary-…-x86_64.AppImage` you download in your Downloads folder, `~/Applications`, `~/.local/bin` or `~/bin`. **Use This File** makes it executable and selects it. Roseblox still never downloads Rosemary itself. On Arch, setup installs Rosemary from the AUR as before.
+  - Messages about a missing tool (`bsdtar`, `xdg-mime`, GameMode, MangoHud) name the install command for your package manager: pacman, apt, dnf or zypper.
+  - **Diagnostics** shows your distribution and CPU architecture.
+- **Choose…** for Rosemary accepts a downloaded AppImage that is not executable yet, and makes it executable.
+- New documentation: [How Roseblox works](https://github.com/MadnessMyth/RoseBlox/blob/master/docs/HOW-IT-WORKS.md) explains the launch flow, where Roblox and Rosemary come from, every file Roseblox stores, and how each feature works. The README is rewritten for people new to Roseblox, with a sneak peek video.
+
+### Not changed
+
+- Arch Linux packages, settings, installations and the AUR-based Rosemary setup work as in 0.4.2.
+- Flatpak is still not provided; [DISTRIBUTION.md](https://github.com/MadnessMyth/RoseBlox/blob/master/packaging/DISTRIBUTION.md) explains why.
+
 ## Release checklist — v0.4.2
 
 - [x] Bump the version in `pyproject.toml`, `src/roseblox/__init__.py`, and `packaging/arch-git/PKGBUILD`.

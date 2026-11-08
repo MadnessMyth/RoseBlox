@@ -1,6 +1,6 @@
 pkgbase = roseblox-git
 	pkgdesc = Native GTK launcher and installation manager for Roblox through Rosemary (latest master)
-	pkgver = 0.4.1
+	pkgver = 0.5.0
 	pkgrel = 1
 	url = https://github.com/MadnessMyth/RoseBlox
 	arch = any
