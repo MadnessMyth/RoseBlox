@@ -23,10 +23,9 @@ from . import mangohud
 
 CONFIG_VARIABLE = "MANGOHUD_CONFIGFILE"
 BANNER_SECONDS = 10
-BANNER_FONT_SIZE = 18
-MIN_BANNER_WIDTH = 140
-BANNER_POSITION = "bottom-left"
-BANNER_ALPHA = 0.35
+BANNER_FONT_SIZE = 36
+MIN_BANNER_WIDTH = 360
+PING_COLOR = "FDF909"
 HIDDEN = "legacy_layout=0\nno_display\n"
 MAX_TEXT = 100
 MAX_USER_CONFIG = 64 * 1024
@@ -54,11 +53,28 @@ def banner_config(text: str) -> str:
     line = clean_text(text)
     # MangoHud does not widen the HUD for custom text, so a long line would be cut off. Its custom text
     # font is about 0.28 × font_size wide per character.
-    width = max(MIN_BANNER_WIDTH, round(len(line) * BANNER_FONT_SIZE * 0.3) + 28)
+    width = max(MIN_BANNER_WIDTH, round(len(line) * BANNER_FONT_SIZE * 0.3) + 40)
     return (
-        f"legacy_layout=0\nposition={BANNER_POSITION}\nfont_size={BANNER_FONT_SIZE}\nbackground_alpha={BANNER_ALPHA}\n"
-        f"round_corners=8\nwidth={width}\ncustom_text_center={line}\n"
+        f"legacy_layout=0\nposition=top-center\nfont_size={BANNER_FONT_SIZE}\nbackground_alpha=0.7\n"
+        f"round_corners=10\nwidth={width}\ncustom_text_center={line}\n"
     )
+
+
+def ping_config(resting: str, ping_ms: int) -> str:
+    """MangoHud config with a yellow ``PING`` stat row added to ``resting``."""
+    ms = max(1, int(ping_ms))
+    stat_lines = f"custom_text=PING\nexec=echo {ms} ms\n"
+    if resting == HIDDEN:
+        return f"legacy_layout=0\ntext_color={PING_COLOR}\n{stat_lines}"
+    if not resting.strip():
+        return (
+            f"legacy_layout=0\ngpu_stats\ncpu_stats\nfps\nframetime\n"
+            f"text_color={PING_COLOR}\n{stat_lines}frame_timing\n"
+        )
+    prefix = "" if "legacy_layout" in resting else "legacy_layout=0\n"
+    color = "" if "text_color" in resting else f"text_color={PING_COLOR}\n"
+    body = resting if resting.endswith("\n") else resting + "\n"
+    return f"{prefix}{body}{color}{stat_lines}"
 
 
 def user_config(env: Mapping[str, str] | None = None, program: str | None = None) -> str:
@@ -95,6 +111,9 @@ class GameOverlay:
 
     def show(self, text: str) -> None:
         self._write(self.path, banner_config(text))
+
+    def show_ping(self, ping_ms: int) -> None:
+        self._write(self.path, ping_config(self.resting(), ping_ms))
 
     def hide(self) -> None:
         self._write(self.path, self.resting())

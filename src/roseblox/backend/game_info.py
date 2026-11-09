@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import time
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
@@ -22,6 +23,7 @@ _TIMEOUT = 8.0
 _PING_TIMEOUT = 2.0
 _MAX_RESPONSE = 512 * 1024
 _PING_TIME = re.compile(r"time[=<]\s*(?P<ms>\d+(?:\.\d+)?)\s*ms", re.IGNORECASE)
+_TTL_EXCEEDED = "Time to live exceeded"
 
 
 class GameInfoError(RuntimeError):
@@ -104,23 +106,52 @@ def locate_server(address: str, opener=None) -> str:
 
 
 def ping_server(address: str, runner=None) -> int | None:
-    """Round-trip latency in milliseconds to ``address``, or ``None`` if unreachable."""
+    """Round-trip latency in milliseconds to ``address``, or ``None`` if unreachable.
+
+    Roblox UDMUX game servers often drop direct ICMP echo requests; when that happens,
+    the datacenter subnet border router (``.3``) or the last reachable router hop is probed.
+    """
     checked = public_address(address)
     if checked is None:
         return None
     run = runner or subprocess.run
-    try:
-        completed = run(
-            ["ping", "-n", "-c", "1", "-W", "1", checked],
-            capture_output=True,
-            text=True,
-            timeout=_PING_TIMEOUT,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    match = _PING_TIME.search(completed.stdout or "")
-    if not match:
-        return None
-    return max(1, round(float(match["ms"])))
+    targets = [checked]
+    if "." in checked:
+        prefix, _, host = checked.rpartition(".")
+        if host != "3":
+            targets.append(f"{prefix}.3")
+    for target in targets:
+        try:
+            completed = run(
+                ["ping", "-n", "-c", "1", "-W", "1", target],
+                capture_output=True,
+                text=True,
+                timeout=_PING_TIMEOUT,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        match = _PING_TIME.search(completed.stdout or "")
+        if match:
+            return max(1, round(float(match["ms"])))
+    if len(targets) > 1:
+        for ttl in (12, 10, 8):
+            started = time.monotonic()
+            try:
+                completed = run(
+                    ["ping", "-n", "-c", "1", "-W", "1", "-t", str(ttl), checked],
+                    capture_output=True,
+                    text=True,
+                    timeout=_PING_TIMEOUT,
+                    check=False,
+                )
+            except (OSError, subprocess.SubprocessError):
+                return None
+            stdout = completed.stdout or ""
+            match = _PING_TIME.search(stdout)
+            if match:
+                return max(1, round(float(match["ms"])))
+            if _TTL_EXCEEDED in stdout:
+                return max(1, round((time.monotonic() - started) * 1000))
+    return None
 

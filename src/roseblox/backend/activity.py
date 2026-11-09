@@ -92,6 +92,7 @@ class ActivityTracker:
     def __init__(self) -> None:
         self._pending: dict | None = None
         self._join_uptime: float | None = None
+        self.last_join_latency_ms: int | None = None
         self.in_game = False
 
     def feed(self, line: str) -> list[GameJoined | GameLeft]:
@@ -105,6 +106,7 @@ class ActivityTracker:
                     "private": False,
                 }
                 self._join_uptime = _log_uptime(line)
+                self.last_join_latency_ms = None
             return []
         if "referral_page:" in line and any(marker in line for marker in _PRIVATE_REFERRALS):
             if self._pending is not None:
@@ -113,6 +115,12 @@ class ActivityTracker:
         if "Replicator created:" in line:
             if self._pending is None:
                 return []
+            uptime = _log_uptime(line)
+            if self._join_uptime is not None and uptime is not None and uptime > self._join_uptime:
+                # RakNet's connection handshake between UDMUX Address and Replicator created is ~2 RTTs.
+                estimate = round((uptime - self._join_uptime) * 1000 / 2)
+                if 1 <= estimate <= 2000:
+                    self.last_join_latency_ms = estimate
             joined = GameJoined(**self._pending)
             self._pending = None
             self.in_game = True
@@ -122,6 +130,10 @@ class ActivityTracker:
             address = public_address(match["address"])
             if address and self._pending is not None:
                 self._pending["server_address"] = address
+                if "UDMUX Address = " in line:
+                    uptime = _log_uptime(line)
+                    if uptime is not None:
+                        self._join_uptime = uptime
             return []
         if "returnToLuaApp: (stage:UGCGame)" in line:
             return self._left(to_home=True)

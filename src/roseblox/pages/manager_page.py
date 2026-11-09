@@ -1326,14 +1326,15 @@ class InstallationPage(Gtk.Box):
         try:
             setup_state = getattr(self.window, "setup_state", None)
             mods_message = prepare_mods(record)
+            launch_config = LaunchConfigStore().load(record.app_type)
             session = launch_application(
                 record,
                 self.rosemary_status,
                 guest_arguments=guest_arguments,
                 plain_ctrl_click=getattr(setup_state, "plain_ctrl_click", True),
-                launch_config=LaunchConfigStore().load(record.app_type),
+                launch_config=launch_config,
                 direct=self._multiple_allowed(record),
-                in_game_banner=_wants_in_game_banner(setup_state),
+                in_game_banner=_wants_in_game_banner(setup_state) or bool(getattr(launch_config, "mangohud", False)),
             )
             session.mods_message = mods_message
             wait_for_running(session)
@@ -2484,8 +2485,7 @@ class SettingsPage(Gtk.Box):
         constant_row, _constant_switch = self._playing_rows["server_ping_constant"]
         constant_row.set_visible(settings.server_ping)
         constant_row.set_subtitle(
-            "Pings the server on join and every 30 seconds, showing a small transparent latency pill at the "
-            "bottom-left in MangoHud."
+            "Pings the server on join and every 30 seconds, adding a yellow PING stat to MangoHud."
         )
         self._show_in_game_banner(settings)
         self._playing_rows["close_on_leave"][0].set_subtitle(
@@ -2499,9 +2499,9 @@ class SettingsPage(Gtk.Box):
         self.in_game_warning.set_visible(not installed)
         if installed:
             row.set_subtitle(
-                "Shows the location or ping at the bottom-left of the game for 10 seconds, even in fullscreen, where "
-                "desktop notifications are hidden. Drawn by MangoHud. Turn this off to get a desktop notification "
-                "instead if the banner does not work for you. Applies from the next launch."
+                "Shows the location at the top of the game for 10 seconds, even in fullscreen, where desktop "
+                "notifications are hidden. Drawn by MangoHud. Turn this off to get a desktop notification instead "
+                "if the banner does not work for you. Applies from the next launch."
             )
         else:
             row.set_subtitle(

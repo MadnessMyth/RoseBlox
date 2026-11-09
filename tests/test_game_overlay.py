@@ -13,6 +13,7 @@ from roseblox.backend.game_overlay import (
     GameOverlay,
     banner_config,
     clean_text,
+    ping_config,
     prepare_launch,
 )
 
@@ -26,12 +27,12 @@ class OverlayTextTests(unittest.TestCase):
         self.assertEqual(game_overlay.MAX_TEXT, len(long))
         self.assertTrue(long.endswith("…"))
 
-    def test_banner_shows_only_the_text_at_the_bottom_left(self):
+    def test_banner_shows_only_the_text_at_the_top_center(self):
         config = banner_config("Server: Frankfurt, Germany")
         self.assertIn("legacy_layout=0\n", config)
-        self.assertIn("position=bottom-left\n", config)
-        self.assertIn("font_size=18\n", config)
-        self.assertIn("background_alpha=0.35\n", config)
+        self.assertIn("position=top-center\n", config)
+        self.assertIn("font_size=36\n", config)
+        self.assertIn("background_alpha=0.7\n", config)
         self.assertTrue(config.endswith("custom_text_center=Server: Frankfurt, Germany\n"))
         self.assertNotIn("no_display", config)
 
@@ -39,8 +40,19 @@ class OverlayTextTests(unittest.TestCase):
         line = "Server: Santa Clara, California, United States of America"
         config = banner_config(line)
         width = int(config.split("width=")[1].split("\n")[0])
-        self.assertGreaterEqual(width, round(len(line) * game_overlay.BANNER_FONT_SIZE * 0.3) + 28)
-        self.assertLess(width, 450)
+        self.assertGreater(width, 600)
+        self.assertLess(width, 900)
+
+    def test_ping_stat_adds_a_yellow_ping_row_to_mangohud(self):
+        standalone = ping_config(HIDDEN, 24)
+        self.assertIn("legacy_layout=0\n", standalone)
+        self.assertIn("text_color=FDF909\n", standalone)
+        self.assertIn("custom_text=PING\nexec=echo 24 ms\n", standalone)
+        default_hud = ping_config("", 31)
+        self.assertIn("gpu_stats\ncpu_stats\nfps\nframetime\n", default_hud)
+        self.assertIn("text_color=FDF909\ncustom_text=PING\nexec=echo 31 ms\n", default_hud)
+        custom_hud = ping_config("fps\ngpu_stats\n", 18)
+        self.assertIn("legacy_layout=0\nfps\ngpu_stats\ntext_color=FDF909\ncustom_text=PING\nexec=echo 18 ms\n", custom_hud)
 
 
 class PrepareLaunchTests(unittest.TestCase):

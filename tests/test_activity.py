@@ -281,6 +281,14 @@ class LookupTests(unittest.TestCase):
         self.assertEqual(1, len(calls))
         self.assertIsNone(ping_server("128.116.44.3", lambda *a, **k: SimpleNamespace(stdout="100% packet loss")))
 
+        # When a UDMUX host drops ICMP, the subnet .3 border router or TTL hop is used.
+        def router_run(cmd, **_kwargs):
+            if cmd[-1] == "128.116.44.3":
+                return SimpleNamespace(stdout="64 bytes from 128.116.44.3: icmp_seq=1 ttl=54 time=19.2 ms\n")
+            return SimpleNamespace(stdout="100% packet loss")
+
+        self.assertEqual(19, ping_server("128.116.44.10", router_run))
+
 
 class WhilePlayingSettingsTests(unittest.TestCase):
     def test_settings_round_trip_and_reject_bad_values(self):
@@ -455,16 +463,17 @@ class WatcherTests(unittest.TestCase):
         watcher, overlay = self._overlay_watcher(ping=lambda _addr: next(pings))
         self._write(JOIN, PUBLIC, CONNECTED)
         watcher.poll()
+        self.assertIn("position=top-center\n", overlay.path.read_text())
         self.assertIn("custom_text_center=Server: Frankfurt am Main, Hessen, Germany · 24 ms\n", overlay.path.read_text())
         self.now += BANNER_SECONDS
         watcher.poll()
-        self.assertIn("custom_text_center=Ping: 24 ms\n", overlay.path.read_text())
+        self.assertIn("text_color=FDF909\ncustom_text=PING\nexec=echo 24 ms\n", overlay.path.read_text())
         self.now += 20
         watcher.poll()
-        self.assertIn("custom_text_center=Ping: 31 ms\n", overlay.path.read_text())
+        self.assertIn("text_color=FDF909\ncustom_text=PING\nexec=echo 31 ms\n", overlay.path.read_text())
         self.now += 30
         watcher.poll()
-        self.assertIn("custom_text_center=Ping: 19 ms\n", overlay.path.read_text())
+        self.assertIn("text_color=FDF909\ncustom_text=PING\nexec=echo 19 ms\n", overlay.path.read_text())
         self._write(DISCONNECT)
         watcher.poll()
         self.assertEqual(HIDDEN, overlay.path.read_text())

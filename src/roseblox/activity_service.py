@@ -181,7 +181,7 @@ class ActivityWatcher:
             self._banner_until = None
             settings = self.settings()
             if settings.server_ping and settings.server_ping_constant and self._last_ping_ms is not None:
-                self._overlay_call(self.overlay.show, f"Ping: {self._last_ping_ms} ms")
+                self._overlay_call(self.overlay.show_ping, self._last_ping_ms)
             else:
                 self._overlay_call(self.overlay.hide)
         source = self._source()
@@ -206,17 +206,43 @@ class ActivityWatcher:
         return fallback_ms
 
     def _poll_constant_ping(self) -> None:
-        if self._server_address is None or self._next_ping_at is None or self.clock() < self._next_ping_at:
+        if not self.tracker.in_game:
             return
         settings = self.settings()
-        if not (settings.server_ping and settings.server_ping_constant):
+        if not settings.server_ping:
+            if self._next_ping_at is not None:
+                self._next_ping_at = None
+                if self.overlay is not None and self._banner_until is None:
+                    self._overlay_call(self.overlay.hide)
+            return
+        fallback = self.tracker.last_join_latency_ms
+        if self._last_ping_ms is None and (self._server_address or fallback is not None):
+            ping_ms = self._measure_ping(self._server_address, fallback)
+            if ping_ms is not None:
+                self._last_ping_ms = ping_ms
+                if settings.server_ping_constant and self._server_address:
+                    self._next_ping_at = self.clock() + PING_INTERVAL_SECONDS
+                self.show_location(None, settings, ping_ms=ping_ms)
+                return
+        if not settings.server_ping_constant:
+            if self._next_ping_at is not None:
+                self._next_ping_at = None
+                if self.overlay is not None and self._banner_until is None:
+                    self._overlay_call(self.overlay.hide)
+            return
+        if self._next_ping_at is None and self._server_address:
+            self._next_ping_at = self.clock() + PING_INTERVAL_SECONDS
+            if self.overlay is not None and self._last_ping_ms is not None and self._banner_until is None:
+                self._overlay_call(self.overlay.show_ping, self._last_ping_ms)
+            return
+        if self._server_address is None or self._next_ping_at is None or self.clock() < self._next_ping_at:
             return
         self._next_ping_at = self.clock() + PING_INTERVAL_SECONDS
         measured = self.ping(self._server_address)
         if measured is not None:
             self._last_ping_ms = measured
         if self.overlay is not None and self._last_ping_ms is not None and self._banner_until is None:
-            self._overlay_call(self.overlay.show, f"Ping: {self._last_ping_ms} ms")
+            self._overlay_call(self.overlay.show_ping, self._last_ping_ms)
 
     def joined(self, event: GameJoined) -> None:
         settings = self.settings()
@@ -233,8 +259,9 @@ class ActivityWatcher:
             else:
                 self._server_location = location
         ping_ms = None
-        if settings.server_ping and (event.server_address or event.latency_ms is not None):
-            ping_ms = self._measure_ping(event.server_address, event.latency_ms)
+        fallback_ms = event.latency_ms if event.latency_ms is not None else self.tracker.last_join_latency_ms
+        if settings.server_ping and (event.server_address or fallback_ms is not None):
+            ping_ms = self._measure_ping(event.server_address, fallback_ms)
             self._last_ping_ms = ping_ms
             if settings.server_ping_constant and event.server_address:
                 self._next_ping_at = self.clock() + PING_INTERVAL_SECONDS
@@ -328,12 +355,14 @@ class ActivityWatcher:
             (settings.server_location and settings.server_location_in_game)
             or (settings.server_ping and (settings.server_ping_constant or settings.server_location_in_game))
         )
-        if self.overlay is not None and wants_in_game and self._overlay_call(self.overlay.show, banner_text):
-            if settings.server_ping and settings.server_ping_constant and not location:
-                self._banner_until = None
-            else:
+        if self.overlay is not None and wants_in_game:
+            if not location and ping_ms is not None and settings.server_ping and settings.server_ping_constant:
+                if self._overlay_call(self.overlay.show_ping, ping_ms):
+                    self._banner_until = None
+                    return
+            elif self._overlay_call(self.overlay.show, banner_text):
                 self._banner_until = self.clock() + BANNER_SECONDS
-            return
+                return
         self._notify("Connected to a Roblox server", notify_body)
 
     def _overlay_call(self, method, *arguments) -> bool:
