@@ -79,10 +79,18 @@ class WhilePlaying:
     microphone_sound_on: str = ""
     microphone_sound_off: str = ""
     server_location_in_game: bool = True
+    server_ping: bool = False
+    server_ping_constant: bool = False
 
     @property
     def any_enabled(self) -> bool:
-        return self.discord_presence or self.server_location or self.close_on_leave or self.microphone_toggle
+        return (
+            self.discord_presence
+            or self.server_location
+            or self.server_ping
+            or self.close_on_leave
+            or self.microphone_toggle
+        )
 
     @property
     def sounds(self) -> MicrophoneSounds:
@@ -93,6 +101,7 @@ class WhilePlaying:
     def validate(self) -> "WhilePlaying":
         for value in (
             self.discord_presence, self.discord_join_button, self.server_location, self.server_location_in_game,
+            self.server_ping, self.server_ping_constant,
             self.close_on_leave, self.microphone_toggle, self.microphone_inverted, self.microphone_sounds,
         ):
             if not isinstance(value, bool):
@@ -287,6 +296,8 @@ class SetupStore:
             "discord_application_id": settings.discord_application_id,
             "server_location": settings.server_location,
             "server_location_in_game": settings.server_location_in_game,
+            "server_ping": settings.server_ping,
+            "server_ping_constant": settings.server_ping_constant,
             "close_on_leave": settings.close_on_leave,
             "microphone_toggle": settings.microphone_toggle,
             "microphone_mode": settings.microphone_mode,
@@ -335,7 +346,8 @@ class SetupStore:
                 name: value.get(name, getattr(defaults, name))
                 for name in (
                     "discord_presence", "discord_join_button", "discord_application_id",
-                    "server_location", "server_location_in_game", "close_on_leave", "microphone_toggle",
+                    "server_location", "server_location_in_game", "server_ping", "server_ping_constant",
+                    "close_on_leave", "microphone_toggle",
                     "microphone_mode",
                     "microphone_release_delay_ms", "microphone_inverted", "microphone_sounds",
                     "microphone_sound_volume", "microphone_sound_on", "microphone_sound_off",

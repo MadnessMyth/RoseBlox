@@ -26,21 +26,21 @@ class OverlayTextTests(unittest.TestCase):
         self.assertEqual(game_overlay.MAX_TEXT, len(long))
         self.assertTrue(long.endswith("…"))
 
-    def test_banner_shows_only_the_text_at_the_top(self):
+    def test_banner_shows_only_the_text_at_the_bottom_left(self):
         config = banner_config("Server: Frankfurt, Germany")
         self.assertIn("legacy_layout=0\n", config)
-        self.assertIn("position=top-center\n", config)
+        self.assertIn("position=bottom-left\n", config)
+        self.assertIn("font_size=18\n", config)
+        self.assertIn("background_alpha=0.35\n", config)
         self.assertTrue(config.endswith("custom_text_center=Server: Frankfurt, Germany\n"))
-        self.assertIn(f"width={game_overlay.MIN_BANNER_WIDTH}\n", config)
         self.assertNotIn("no_display", config)
 
     def test_a_long_banner_is_wide_enough_for_its_text(self):
         line = "Server: Santa Clara, California, United States of America"
         config = banner_config(line)
         width = int(config.split("width=")[1].split("\n")[0])
-        # MangoHud drew this line 572 pixels wide.
-        self.assertGreaterEqual(width, 572 + 40)
-        self.assertLess(width, 760)
+        self.assertGreaterEqual(width, round(len(line) * game_overlay.BANNER_FONT_SIZE * 0.3) + 28)
+        self.assertLess(width, 450)
 
 
 class PrepareLaunchTests(unittest.TestCase):

@@ -1,4 +1,4 @@
-"""Public game details and server locations for activity features.
+"""Public game details, server locations and latency for activity features.
 
 Only public, unauthenticated endpoints are used, and nothing about the player
 is sent: Roblox gets a place ID, the location service gets a Roblox server
@@ -8,6 +8,8 @@ address.
 from __future__ import annotations
 
 import json
+import re
+import subprocess
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
@@ -17,7 +19,9 @@ from .activity import public_address
 
 LOCATION_SERVICE = "ipwho.is"
 _TIMEOUT = 8.0
+_PING_TIMEOUT = 2.0
 _MAX_RESPONSE = 512 * 1024
+_PING_TIME = re.compile(r"time[=<]\s*(?P<ms>\d+(?:\.\d+)?)\s*ms", re.IGNORECASE)
 
 
 class GameInfoError(RuntimeError):
@@ -97,3 +101,26 @@ def locate_server(address: str, opener=None) -> str:
     if not parts:
         raise GameInfoError(f"{LOCATION_SERVICE} returned no location.")
     return ", ".join(parts)
+
+
+def ping_server(address: str, runner=None) -> int | None:
+    """Round-trip latency in milliseconds to ``address``, or ``None`` if unreachable."""
+    checked = public_address(address)
+    if checked is None:
+        return None
+    run = runner or subprocess.run
+    try:
+        completed = run(
+            ["ping", "-n", "-c", "1", "-W", "1", checked],
+            capture_output=True,
+            text=True,
+            timeout=_PING_TIMEOUT,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    match = _PING_TIME.search(completed.stdout or "")
+    if not match:
+        return None
+    return max(1, round(float(match["ms"])))
+

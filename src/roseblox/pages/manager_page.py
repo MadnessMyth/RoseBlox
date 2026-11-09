@@ -86,7 +86,12 @@ MICROPHONE_MODE_TITLES = {"toggle": "Toggle", "hold": "Hold"}
 
 def _wants_in_game_banner(setup_state) -> bool:
     settings = getattr(setup_state, "while_playing", None)
-    return bool(settings is not None and settings.server_location and settings.server_location_in_game)
+    if settings is None:
+        return False
+    return bool(
+        (settings.server_location and settings.server_location_in_game)
+        or (settings.server_ping and (settings.server_ping_constant or settings.server_location_in_game))
+    )
 
 
 @dataclass(frozen=True)
@@ -1788,6 +1793,8 @@ class SettingsPage(Gtk.Box):
             ("discord_join_button", "Join Server button"),
             ("server_location", "Server location notification"),
             ("server_location_in_game", "Show inside the game"),
+            ("server_ping", "Server ping"),
+            ("server_ping_constant", "Constant ping overlay (every 30s)"),
             ("close_on_leave", "Close Roblox when leaving a game"),
         ):
             row = Adw.ActionRow.new()
@@ -2471,6 +2478,15 @@ class SettingsPage(Gtk.Box):
             f"Says where the server is when you join one. The server's address, not yours, is looked up with "
             f"{LOCATION_SERVICE}."
         )
+        self._playing_rows["server_ping"][0].set_subtitle(
+            "Measures round-trip latency to the Roblox server when you join."
+        )
+        constant_row, _constant_switch = self._playing_rows["server_ping_constant"]
+        constant_row.set_visible(settings.server_ping)
+        constant_row.set_subtitle(
+            "Pings the server on join and every 30 seconds, showing a small transparent latency pill at the "
+            "bottom-left in MangoHud."
+        )
         self._show_in_game_banner(settings)
         self._playing_rows["close_on_leave"][0].set_subtitle(
             "Closes Roblox when you leave a game, instead of going back to the Roblox home screen."
@@ -2478,14 +2494,14 @@ class SettingsPage(Gtk.Box):
 
     def _show_in_game_banner(self, settings: WhilePlaying) -> None:
         row, _switch = self._playing_rows["server_location_in_game"]
-        row.set_visible(settings.server_location)
+        row.set_visible(settings.server_location or settings.server_ping)
         installed = mangohud.layer_installed()
         self.in_game_warning.set_visible(not installed)
         if installed:
             row.set_subtitle(
-                "Shows the location at the top of the game for 10 seconds, even in fullscreen, where desktop "
-                "notifications are hidden. Drawn by MangoHud. Turn this off to get a desktop notification instead "
-                "if the banner does not work for you. Applies from the next launch."
+                "Shows the location or ping at the bottom-left of the game for 10 seconds, even in fullscreen, where "
+                "desktop notifications are hidden. Drawn by MangoHud. Turn this off to get a desktop notification "
+                "instead if the banner does not work for you. Applies from the next launch."
             )
         else:
             row.set_subtitle(

@@ -14,7 +14,7 @@ from unittest.mock import patch
 from roseblox.activity_service import ActivityWatcher, watcher_arguments
 from roseblox.backend.activity import ActivityTracker, GameJoined, GameLeft, LogFollower, find_roblox_log, public_address
 from roseblox.backend.discord_rpc import DiscordError, DiscordPresence, build_activity, socket_candidates
-from roseblox.backend.game_info import GameDetails, GameInfoError, fetch_game, locate_server
+from roseblox.backend.game_info import GameDetails, GameInfoError, fetch_game, locate_server, ping_server
 from roseblox.backend.microphone_sounds import MicrophoneSounds
 from roseblox.backend.setup import SetupSettingsError, SetupStore, WhilePlaying
 
@@ -269,6 +269,18 @@ class LookupTests(unittest.TestCase):
         with self.assertRaisesRegex(GameInfoError, "could not locate"):
             locate_server("128.116.0.1", opener_for({"https://ipwho.is/": {"success": False, "message": "Reserved"}}))
 
+    def test_server_ping_is_measured_only_for_public_addresses(self):
+        calls = []
+
+        def fake_run(cmd, **_kwargs):
+            calls.append(cmd)
+            return SimpleNamespace(stdout="64 bytes from 128.116.44.3: icmp_seq=1 ttl=54 time=23.6 ms\n")
+
+        self.assertEqual(24, ping_server("128.116.44.3", fake_run))
+        self.assertIsNone(ping_server("10.0.0.1", fake_run))
+        self.assertEqual(1, len(calls))
+        self.assertIsNone(ping_server("128.116.44.3", lambda *a, **k: SimpleNamespace(stdout="100% packet loss")))
+
 
 class WhilePlayingSettingsTests(unittest.TestCase):
     def test_settings_round_trip_and_reject_bad_values(self):
@@ -427,6 +439,33 @@ class WatcherTests(unittest.TestCase):
         watcher.poll()
         self.assertIn("custom_text_center=", overlay.path.read_text())
         self.now += 1
+        watcher.poll()
+        self.assertEqual(HIDDEN, overlay.path.read_text())
+
+    def test_constant_ping_overlay_updates_every_30_seconds_and_hides_on_leave(self):
+        from roseblox.backend.game_overlay import BANNER_SECONDS, HIDDEN
+
+        pings = iter([24, 31, 19])
+        self.settings = WhilePlaying(
+            server_location=True,
+            server_location_in_game=True,
+            server_ping=True,
+            server_ping_constant=True,
+        )
+        watcher, overlay = self._overlay_watcher(ping=lambda _addr: next(pings))
+        self._write(JOIN, PUBLIC, CONNECTED)
+        watcher.poll()
+        self.assertIn("custom_text_center=Server: Frankfurt am Main, Hessen, Germany · 24 ms\n", overlay.path.read_text())
+        self.now += BANNER_SECONDS
+        watcher.poll()
+        self.assertIn("custom_text_center=Ping: 24 ms\n", overlay.path.read_text())
+        self.now += 20
+        watcher.poll()
+        self.assertIn("custom_text_center=Ping: 31 ms\n", overlay.path.read_text())
+        self.now += 30
+        watcher.poll()
+        self.assertIn("custom_text_center=Ping: 19 ms\n", overlay.path.read_text())
+        self._write(DISCONNECT)
         watcher.poll()
         self.assertEqual(HIDDEN, overlay.path.read_text())
 

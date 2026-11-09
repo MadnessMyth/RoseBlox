@@ -479,7 +479,7 @@ class RealWindowTests(unittest.TestCase):
         with patch("roseblox.pages.manager_page.mangohud.layer_installed", return_value=True):
             in_game.set_active(False)
         self.assertFalse(settings.in_game_warning.get_visible())
-        self.assertIn("top of the game", in_game_row.get_subtitle())
+        self.assertIn("bottom-left of the game", in_game_row.get_subtitle())
         self.assertIn("desktop notification instead", in_game_row.get_subtitle())
         state = SetupStore(self.config_home / "roseblox" / "setup.json").load()
         self.assertFalse(state.while_playing.server_location_in_game)

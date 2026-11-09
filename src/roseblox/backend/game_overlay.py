@@ -23,8 +23,10 @@ from . import mangohud
 
 CONFIG_VARIABLE = "MANGOHUD_CONFIGFILE"
 BANNER_SECONDS = 10
-BANNER_FONT_SIZE = 36
-MIN_BANNER_WIDTH = 360
+BANNER_FONT_SIZE = 18
+MIN_BANNER_WIDTH = 140
+BANNER_POSITION = "bottom-left"
+BANNER_ALPHA = 0.35
 HIDDEN = "legacy_layout=0\nno_display\n"
 MAX_TEXT = 100
 MAX_USER_CONFIG = 64 * 1024
@@ -52,10 +54,10 @@ def banner_config(text: str) -> str:
     line = clean_text(text)
     # MangoHud does not widen the HUD for custom text, so a long line would be cut off. Its custom text
     # font is about 0.28 × font_size wide per character.
-    width = max(MIN_BANNER_WIDTH, round(len(line) * BANNER_FONT_SIZE * 0.3) + 40)
+    width = max(MIN_BANNER_WIDTH, round(len(line) * BANNER_FONT_SIZE * 0.3) + 28)
     return (
-        f"legacy_layout=0\nposition=top-center\nfont_size={BANNER_FONT_SIZE}\nbackground_alpha=0.7\n"
-        f"round_corners=10\nwidth={width}\ncustom_text_center={line}\n"
+        f"legacy_layout=0\nposition={BANNER_POSITION}\nfont_size={BANNER_FONT_SIZE}\nbackground_alpha={BANNER_ALPHA}\n"
+        f"round_corners=8\nwidth={width}\ncustom_text_center={line}\n"
     )
 
 

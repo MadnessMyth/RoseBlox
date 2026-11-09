@@ -28,6 +28,7 @@ _SERVER_ADDRESS = re.compile(
 )
 _PRIVATE_REFERRALS = ("RequestPrivateGame", "GameDetailPageJSHybridEvent")
 _ROBLOX_LOG = re.compile(r"/Logs/Roblox/[^/]+\.log$")
+_LOG_UPTIME = re.compile(r"^\d{4}-\d{2}-\d{2}T[^,]+,(?P<uptime>\d+(?:\.\d+)?),")
 _MAX_LINE = 16 * 1024
 _MAX_READ = 4 * 1024 * 1024
 
@@ -38,6 +39,7 @@ class GameJoined:
     job_id: str
     server_address: str | None
     private: bool
+    latency_ms: int | None = None
 
     @property
     def game_url(self) -> str:
@@ -70,6 +72,16 @@ def public_address(text: str) -> str | None:
     return str(address)
 
 
+def _log_uptime(line: str) -> float | None:
+    match = _LOG_UPTIME.match(line)
+    if not match:
+        return None
+    try:
+        return float(match["uptime"])
+    except ValueError:
+        return None
+
+
 class ActivityTracker:
     """Turns log lines into ``GameJoined`` and ``GameLeft`` events.
 
@@ -79,6 +91,7 @@ class ActivityTracker:
 
     def __init__(self) -> None:
         self._pending: dict | None = None
+        self._join_uptime: float | None = None
         self.in_game = False
 
     def feed(self, line: str) -> list[GameJoined | GameLeft]:
@@ -91,6 +104,7 @@ class ActivityTracker:
                     "server_address": public_address(match["address"]),
                     "private": False,
                 }
+                self._join_uptime = _log_uptime(line)
             return []
         if "referral_page:" in line and any(marker in line for marker in _PRIVATE_REFERRALS):
             if self._pending is not None:
@@ -117,6 +131,7 @@ class ActivityTracker:
 
     def _left(self, *, to_home: bool) -> list[GameLeft]:
         self._pending = None
+        self._join_uptime = None
         if not self.in_game and not to_home:
             return []
         self.in_game = False

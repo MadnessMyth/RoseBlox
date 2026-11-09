@@ -23,7 +23,7 @@ from .backend.discord_rpc import (
     effective_application_id,
     valid_application_id,
 )
-from .backend.game_info import GameInfoError, fetch_game, locate_server
+from .backend.game_info import GameInfoError, fetch_game, locate_server, ping_server
 from .backend.game_overlay import BANNER_SECONDS, GameOverlay
 from .backend.rosemary import read_process_snapshot
 from .backend.setup import SetupSettingsError, SetupStore, WhilePlaying
@@ -32,6 +32,7 @@ USAGE = "Usage: roseblox --activity-watch PID START_TIME LOG [ROBLOX_LOG_DIRECTO
 POLL_SECONDS = 1.0
 DISCORD_RETRY_SECONDS = 30.0
 LOG_SEARCH_SECONDS = 5.0
+PING_INTERVAL_SECONDS = 30.0
 
 
 def _log(message: str) -> None:
@@ -74,6 +75,7 @@ class ActivityWatcher:
         presence_factory=DiscordPresence,
         game_lookup=fetch_game,
         locate=locate_server,
+        ping=ping_server,
         notify=send_notification,
         clock=time.time,
         sleep=time.sleep,
@@ -94,6 +96,7 @@ class ActivityWatcher:
         self.presence_factory = presence_factory
         self.game_lookup = game_lookup
         self.locate = locate
+        self.ping = ping
         self.notify = notify
         self.clock = clock
         self.sleep = sleep
@@ -109,6 +112,10 @@ class ActivityWatcher:
         self._microphone_settings: tuple | None = None
         self.overlay = overlay
         self._banner_until: float | None = None
+        self._server_address: str | None = None
+        self._server_location: str | None = None
+        self._last_ping_ms: int | None = None
+        self._next_ping_at: float | None = None
 
     def settings(self) -> WhilePlaying:
         try:
@@ -172,7 +179,11 @@ class ActivityWatcher:
         self.update_microphone()
         if self._banner_until is not None and self.clock() >= self._banner_until:
             self._banner_until = None
-            self._overlay_call(self.overlay.hide)
+            settings = self.settings()
+            if settings.server_ping and settings.server_ping_constant and self._last_ping_ms is not None:
+                self._overlay_call(self.overlay.show, f"Ping: {self._last_ping_ms} ms")
+            else:
+                self._overlay_call(self.overlay.hide)
         source = self._source()
         if source is not self.follower:
             self.follower.read_lines()
@@ -183,18 +194,52 @@ class ActivityWatcher:
                     self.joined(event)
                 elif isinstance(event, GameLeft):
                     self.left(event)
+        self._poll_constant_ping()
         if self.activity is not None and self.presence is None and self.clock() >= self._discord_retry_at:
             self._publish(self.activity)
 
+    def _measure_ping(self, address: str | None, fallback_ms: int | None = None) -> int | None:
+        if address:
+            measured = self.ping(address)
+            if measured is not None:
+                return measured
+        return fallback_ms
+
+    def _poll_constant_ping(self) -> None:
+        if self._server_address is None or self._next_ping_at is None or self.clock() < self._next_ping_at:
+            return
+        settings = self.settings()
+        if not (settings.server_ping and settings.server_ping_constant):
+            return
+        self._next_ping_at = self.clock() + PING_INTERVAL_SECONDS
+        measured = self.ping(self._server_address)
+        if measured is not None:
+            self._last_ping_ms = measured
+        if self.overlay is not None and self._last_ping_ms is not None and self._banner_until is None:
+            self._overlay_call(self.overlay.show, f"Ping: {self._last_ping_ms} ms")
+
     def joined(self, event: GameJoined) -> None:
         settings = self.settings()
+        self._server_address = event.server_address
+        self._server_location = None
+        self._last_ping_ms = None
+        self._next_ping_at = None
+        location = None
         if settings.server_location and event.server_address:
             try:
                 location = self.locate(event.server_address)
             except GameInfoError as error:
                 _log(f"server location: {error}")
             else:
-                self.show_location(location, settings)
+                self._server_location = location
+        ping_ms = None
+        if settings.server_ping and (event.server_address or event.latency_ms is not None):
+            ping_ms = self._measure_ping(event.server_address, event.latency_ms)
+            self._last_ping_ms = ping_ms
+            if settings.server_ping_constant and event.server_address:
+                self._next_ping_at = self.clock() + PING_INTERVAL_SECONDS
+        if location is not None or ping_ms is not None:
+            self.show_location(location, settings, ping_ms=ping_ms)
         application_id = effective_application_id(settings.discord_application_id)
         if not settings.discord_presence or not valid_application_id(application_id):
             return
@@ -221,6 +266,13 @@ class ActivityWatcher:
 
     def left(self, event: GameLeft) -> None:
         self.activity = None
+        self._server_address = None
+        self._server_location = None
+        self._last_ping_ms = None
+        self._next_ping_at = None
+        if self.overlay is not None:
+            self._banner_until = None
+            self._overlay_call(self.overlay.hide)
         self._clear_presence()
         if event.to_home and self.settings().close_on_leave:
             self.close_roblox()
@@ -258,15 +310,31 @@ class ActivityWatcher:
         self.presence.close()
         self.presence = None
 
-    def show_location(self, location: str, settings: WhilePlaying) -> None:
+    def show_location(self, location: str | None, settings: WhilePlaying, *, ping_ms: int | None = None) -> None:
         """Inside the game when its banner is ready, else as a desktop notification."""
-        if (
-            self.overlay is not None and settings.server_location_in_game
-            and self._overlay_call(self.overlay.show, f"Server: {location}")
-        ):
-            self._banner_until = self.clock() + BANNER_SECONDS
+        ping_suffix = f" ({ping_ms} ms)" if ping_ms is not None else ""
+        if location and ping_ms is not None:
+            banner_text = f"Server: {location} · {ping_ms} ms"
+            notify_body = f"The server is in {location}{ping_suffix}."
+        elif location:
+            banner_text = f"Server: {location}"
+            notify_body = f"The server is in {location}."
+        elif ping_ms is not None:
+            banner_text = f"Ping: {ping_ms} ms"
+            notify_body = f"Server ping is {ping_ms} ms."
+        else:
             return
-        self._notify("Connected to a Roblox server", f"The server is in {location}.")
+        wants_in_game = (
+            (settings.server_location and settings.server_location_in_game)
+            or (settings.server_ping and (settings.server_ping_constant or settings.server_location_in_game))
+        )
+        if self.overlay is not None and wants_in_game and self._overlay_call(self.overlay.show, banner_text):
+            if settings.server_ping and settings.server_ping_constant and not location:
+                self._banner_until = None
+            else:
+                self._banner_until = self.clock() + BANNER_SECONDS
+            return
+        self._notify("Connected to a Roblox server", notify_body)
 
     def _overlay_call(self, method, *arguments) -> bool:
         try:
