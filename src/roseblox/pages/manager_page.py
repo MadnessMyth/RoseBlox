@@ -2485,7 +2485,8 @@ class SettingsPage(Gtk.Box):
         constant_row, _constant_switch = self._playing_rows["server_ping_constant"]
         constant_row.set_visible(settings.server_ping)
         constant_row.set_subtitle(
-            "Pings the server on join and every 30 seconds, adding a yellow PING stat to MangoHud."
+            "Pings the server on join and every 30 seconds and keeps a PING row on screen through MangoHud: "
+            "the first row of the MangoHud overlay, or on its own in yellow when that overlay is off."
         )
         self._show_in_game_banner(settings)
         self._playing_rows["close_on_leave"][0].set_subtitle(

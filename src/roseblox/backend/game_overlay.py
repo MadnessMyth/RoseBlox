@@ -5,7 +5,8 @@ game's own frames, so the banner shows there too. Roseblox gives the launch a co
 of its own (``MANGOHUD_CONFIGFILE``), which MangoHud watches and re-reads when it changes:
 
 - resting: the user's own MangoHud config when the MangoHud overlay is on, otherwise a hidden HUD;
-- banner: only one line of text at the top, for ``BANNER_SECONDS``, then back to resting.
+- banner: only one line of text at the top, for ``BANNER_SECONDS``, then back to resting;
+- ping: resting with a ``PING`` row added, while the constant ping overlay is on.
 
 MangoHud's default ("legacy") layout ignores custom text, so the banner briefly replaces a
 user's HUD instead of being added to it.
@@ -26,6 +27,10 @@ BANNER_SECONDS = 10
 BANNER_FONT_SIZE = 36
 MIN_BANNER_WIDTH = 360
 PING_COLOR = "FDF909"
+# MangoHud draws custom text at 0.55 × font_size, so this gives its default stat size of 24.
+PING_FONT_SIZE = 44
+CLOCK_OPTIONS = ("time", "time_format", "time_no_label")
+DEFAULT_TIME_FORMAT = "%T"
 HIDDEN = "legacy_layout=0\nno_display\n"
 MAX_TEXT = 100
 MAX_USER_CONFIG = 64 * 1024
@@ -61,20 +66,38 @@ def banner_config(text: str) -> str:
 
 
 def ping_config(resting: str, ping_ms: int) -> str:
-    """MangoHud config with a yellow ``PING`` stat row added to ``resting``."""
-    ms = max(1, int(ping_ms))
-    stat_lines = f"custom_text=PING\nexec=echo {ms} ms\n"
+    """MangoHud config with a ``PING`` row added to ``resting``.
+
+    MangoHud has one text color for the whole HUD, draws custom text small, and its default layout
+    ignores custom text. So in a user's HUD the row is MangoHud's clock line with the ping as its
+    text: the first row, at stat size, in the HUD's own text color, with every other row as it was.
+    A HUD the user already shows the clock in keeps it, in front of the ping. Only a HUD that holds
+    nothing but the ping is yellow.
+    """
+    text = f"PING {max(1, int(ping_ms))} ms"
     if resting == HIDDEN:
-        return f"legacy_layout=0\ntext_color={PING_COLOR}\n{stat_lines}"
-    if not resting.strip():
+        # MangoHud does not widen the HUD for custom text; it is about 13 pixels a character at this size.
         return (
-            f"legacy_layout=0\ngpu_stats\ncpu_stats\nfps\nframetime\n"
-            f"text_color={PING_COLOR}\n{stat_lines}frame_timing\n"
+            f"legacy_layout=0\ntext_color={PING_COLOR}\nfont_size={PING_FONT_SIZE}\n"
+            f"width={len(text) * 13 + 30}\ncustom_text={text}\n"
         )
-    prefix = "" if "legacy_layout" in resting else "legacy_layout=0\n"
-    color = "" if "text_color" in resting else f"text_color={PING_COLOR}\n"
-    body = resting if resting.endswith("\n") else resting + "\n"
-    return f"{prefix}{body}{color}{stat_lines}"
+    lines = [(line, *_option(line)) for line in resting.splitlines()]
+    options = {name: value for _line, name, value in lines}
+    if _switched_on(options.get("time", options.get("full", "0"))):
+        text = f"{options.get('time_format') or DEFAULT_TIME_FORMAT}  {text}"
+    kept = [line for line, name, _value in lines if name not in CLOCK_OPTIONS]
+    return "\n".join(("time", "time_no_label", f"time_format={text}", *kept)) + "\n"
+
+
+def _option(line: str) -> tuple[str, str]:
+    """``(name, value)`` of a config line as MangoHud reads it: ``#`` starts a comment, no value means on."""
+    name, separator, value = line.split("#", 1)[0].partition("=")
+    return name.strip(), value.strip() if separator else "1"
+
+
+def _switched_on(value: str) -> bool:
+    # MangoHud reads a switch as a number, so "true" is off and only a number other than zero is on.
+    return value.lstrip("+-0")[:1].isdigit()
 
 
 def user_config(env: Mapping[str, str] | None = None, program: str | None = None) -> str:

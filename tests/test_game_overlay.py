@@ -43,16 +43,35 @@ class OverlayTextTests(unittest.TestCase):
         self.assertGreater(width, 600)
         self.assertLess(width, 900)
 
-    def test_ping_stat_adds_a_yellow_ping_row_to_mangohud(self):
-        standalone = ping_config(HIDDEN, 24)
-        self.assertIn("legacy_layout=0\n", standalone)
-        self.assertIn("text_color=FDF909\n", standalone)
-        self.assertIn("custom_text=PING\nexec=echo 24 ms\n", standalone)
-        default_hud = ping_config("", 31)
-        self.assertIn("gpu_stats\ncpu_stats\nfps\nframetime\n", default_hud)
-        self.assertIn("text_color=FDF909\ncustom_text=PING\nexec=echo 31 ms\n", default_hud)
-        custom_hud = ping_config("fps\ngpu_stats\n", 18)
-        self.assertIn("legacy_layout=0\nfps\ngpu_stats\ntext_color=FDF909\ncustom_text=PING\nexec=echo 18 ms\n", custom_hud)
+    def test_ping_on_its_own_is_yellow_at_stat_size(self):
+        self.assertEqual(
+            "legacy_layout=0\ntext_color=FDF909\nfont_size=44\nwidth=160\ncustom_text=PING 24 ms\n",
+            ping_config(HIDDEN, 24),
+        )
+        self.assertIn("width=186\ncustom_text=PING 1234 ms\n", ping_config(HIDDEN, 1234))
+        self.assertIn("custom_text=PING 1 ms\n", ping_config(HIDDEN, 0))
+
+    def test_ping_in_the_users_hud_is_a_first_row_that_changes_nothing_else(self):
+        self.assertEqual("time\ntime_no_label\ntime_format=PING 31 ms\n", ping_config("", 31))
+        own = "fps\n# my colors\ntext_color=FFFFFF\ngpu_stats"
+        self.assertEqual(f"time\ntime_no_label\ntime_format=PING 18 ms\n{own}\n", ping_config(own, 18))
+        # Neither the whole HUD's text color, its layout nor its fonts, and no shell inside the game.
+        for changed in ("FDF909", "legacy_layout", "font_size", "custom_text", "exec"):
+            self.assertNotIn(changed, ping_config("fps\ngpu_stats\n", 18))
+
+    def test_ping_joins_a_clock_the_user_already_shows(self):
+        self.assertEqual(
+            "time\ntime_no_label\ntime_format=%H:%M  PING 40 ms\nfps\nram\n",
+            ping_config("fps\ntime\ntime_format = %H:%M  # short\nram\n", 40),
+        )
+        for clock in ("time=1\n", "full\n", "time=0\ntime\n"):
+            self.assertIn("time_format=%T  PING 40 ms\n", ping_config(clock, 40), clock)
+        # MangoHud reads switches as numbers; a format alone does not show the clock.
+        for no_clock in ("time=0\n", "#time\n", "time=true\n", "full\ntime=0\n", "time_format=%H:%M\ntime_no_label\n"):
+            config = ping_config(no_clock, 40)
+            self.assertIn("time_format=PING 40 ms\n", config, no_clock)
+            self.assertEqual(1, config.splitlines().count("time"), no_clock)
+            self.assertEqual(1, config.count("time_format="), no_clock)
 
 
 class PrepareLaunchTests(unittest.TestCase):

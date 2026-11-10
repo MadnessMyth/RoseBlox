@@ -467,13 +467,14 @@ class WatcherTests(unittest.TestCase):
         self.assertIn("custom_text_center=Server: Frankfurt am Main, Hessen, Germany · 24 ms\n", overlay.path.read_text())
         self.now += BANNER_SECONDS
         watcher.poll()
-        self.assertIn("text_color=FDF909\ncustom_text=PING\nexec=echo 24 ms\n", overlay.path.read_text())
+        self.assertIn("text_color=FDF909\n", overlay.path.read_text())
+        self.assertIn("custom_text=PING 24 ms\n", overlay.path.read_text())
         self.now += 20
         watcher.poll()
-        self.assertIn("text_color=FDF909\ncustom_text=PING\nexec=echo 31 ms\n", overlay.path.read_text())
+        self.assertIn("custom_text=PING 31 ms\n", overlay.path.read_text())
         self.now += 30
         watcher.poll()
-        self.assertIn("text_color=FDF909\ncustom_text=PING\nexec=echo 19 ms\n", overlay.path.read_text())
+        self.assertIn("custom_text=PING 19 ms\n", overlay.path.read_text())
         self._write(DISCONNECT)
         watcher.poll()
         self.assertEqual(HIDDEN, overlay.path.read_text())
