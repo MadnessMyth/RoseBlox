@@ -566,7 +566,9 @@ class PerformancePage(Gtk.Box):
         self.copy_report_button.connect("clicked", self._copy_report)
         actions.append(self.copy_report_button)
         self.logs_button = Gtk.Button(label="Open Logs")
-        self.logs_button.set_tooltip_text("Rosemary's output from the last two runs of Player and Studio")
+        self.logs_button.set_tooltip_text(
+            "Rosemary's output from the last two runs of Player and Studio, and Roseblox's own logs"
+        )
         self.logs_button.connect("clicked", lambda _button: self.open_logs())
         actions.append(self.logs_button)
         self.diagnostics_refresh = Gtk.Button(label="Refresh")

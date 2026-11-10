@@ -178,7 +178,7 @@ The avatar editor background comes from [Bloxstrap](https://github.com/bloxstrap
 
 Discord Rich Presence, the server location notification, the server ping, closing Roblox when you leave a game and the microphone toggle are off by default. When one is on, each Player launch also starts `roseblox --activity-watch`, a small process without a window. It:
 
-1. Follows the log file that this Player has open in the prefix's `~/Library/Logs/Roblox`, so several Players never mix up their games.
+1. Follows the log file that this Player has open in the prefix's `~/Library/Logs/Roblox`, so several Players never mix up their games. A join counts once the log says the connection is up (`Replicator created`). On a teleport, or a join from inside a game, the previous server's `Time to disconnect replication data` line is written by another thread and can come after the next `Joining game`, so it only ends the previous game.
 2. Looks up the game's name, creator and icon from Roblox's public APIs (`apis.roblox.com`, `games.roblox.com`, `thumbnails.roblox.com`).
 3. Talks to the Discord desktop app over its local IPC socket.
 4. Looks up the Roblox server's address (never yours) with [ipwho.is](https://ipwho.is) for the location notification. With **Show inside the game**, the launch sets `MANGOHUD=1` and `MANGOHUD_CONFIGFILE` to a Roseblox file in `$XDG_RUNTIME_DIR/roseblox/overlay/` (`backend/game_overlay.py`). MangoHud re-reads that file when it changes, so the watcher writes a one-line, centered `custom_text_center` banner into it, with a `width` that fits the text and, 10 seconds later, the resting config again: your own MangoHud config (the per-program file or `MangoHud.conf`, or your `MANGOHUD_CONFIGFILE`) when MangoHud was on for the launch, otherwise a hidden HUD. MangoHud's default layout ignores custom text, which is why the banner briefly replaces your HUD instead of joining it. The file is deleted once the Player has exited, never earlier: without it MangoHud would fall back to its full default HUD.
@@ -186,7 +186,7 @@ Discord Rich Presence, the server location notification, the server ping, closin
 6. Runs the microphone toggle, described below.
 7. Exits when that Rosemary process exits.
 
-Because it runs on its own, these features keep working after Roseblox closes. It logs to `~/.local/state/roseblox/logs/activity.log`.
+Because it runs on its own, these features keep working after Roseblox closes. It logs to `~/.local/state/roseblox/logs/activity.log`, each line starting with the local time: the Roblox log it follows, each join when it starts and once it is connected, each leave, and any problem. An unexpected error is logged once with its traceback and the watcher carries on, so one bad event does not cost the rest of the launch.
 
 ### Microphone toggle
 
