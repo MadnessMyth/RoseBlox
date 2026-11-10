@@ -74,6 +74,35 @@ class PingPlayerTests(unittest.TestCase):
         self.assertEqual("Playing", self._properties(player, "Get", "org.mpris.MediaPlayer2.Player", "PlaybackStatus"))
         self.assertEqual(1, player.reads)
 
+    def test_only_the_game_asking_for_the_title_counts(self):
+        import os
+
+        asked = []
+
+        def is_game(pid):
+            asked.append(pid)
+            return False
+
+        player = self._player(is_game=is_game)
+        self.assertTrue(player.show("PING 24 ms"))
+        # A desktop's media controls ask every new player for all it has.
+        everything = self._properties(player, "GetAll", "org.mpris.MediaPlayer2.Player")
+        self.assertEqual("PING 24 ms", everything["Metadata"]["xesam:title"])
+        metadata = self._properties(player, "Get", "org.mpris.MediaPlayer2.Player", "Metadata")
+        self.assertEqual("PING 24 ms", metadata["xesam:title"])
+        self.assertEqual(0, player.reads)
+        self.assertEqual([os.getpid()], asked, "each program that asks is looked at once")
+
+    def test_a_program_that_cannot_be_told_from_the_game_counts(self):
+        def is_game(pid):
+            raise OSError("no such process")
+
+        player = self._player(is_game=is_game)
+        self.assertTrue(player.show("PING 24 ms"))
+        metadata = self._properties(player, "Get", "org.mpris.MediaPlayer2.Player", "Metadata")
+        self.assertEqual("PING 24 ms", metadata["xesam:title"])
+        self.assertEqual(1, player.reads)
+
     def test_there_is_nothing_for_a_desktop_to_list_or_control(self):
         from gi.repository import GLib
 

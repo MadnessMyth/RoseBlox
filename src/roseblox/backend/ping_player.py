@@ -46,6 +46,8 @@ DBUS = ("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus")
 DO_NOT_QUEUE = 4
 OWNER_REPLIES = (1, 4)
 CALL_TIMEOUT_MS = 3000
+# MangoHud waits two seconds for the title, and who is asking is looked up before the answer.
+ASKER_TIMEOUT_MS = 1000
 # MangoHud re-reads its config 100 ms after a change, and shows "(paused)" for a player that left before that.
 RELEASE_DELAY_MS = 2000
 
@@ -59,6 +61,7 @@ class PingPlayer:
         log: Callable[[str], None] = lambda message: print(f"roseblox ping row: {message}", file=sys.stderr, flush=True),
         connection_factory=lambda: Gio.bus_get_sync(Gio.BusType.SESSION, None),
         release_delay_ms: int = RELEASE_DELAY_MS,
+        is_game: Callable[[int], bool] = lambda pid: True,
     ) -> None:
         # One watcher runs per Player, and each row shows its own server's ping.
         self.name = f"roseblox.instance{os.getpid()}"
@@ -66,8 +69,12 @@ class PingPlayer:
         self.log = log
         self.connection_factory = connection_factory
         self.release_delay_ms = release_delay_ms
-        # How often the title was asked for. MangoHud asks whenever it loads the row.
+        self.is_game = is_game
+        # How often a process that ``is_game`` asked for the title. MangoHud asks whenever it loads
+        # the row. A desktop's media controls ask every new player too, and that says nothing
+        # about the row.
         self.reads = 0
+        self._askers: dict[str, bool] = {}
         self.context: GLib.MainContext | None = None
         self.loop: GLib.MainLoop | None = None
         self.thread: threading.Thread | None = None
@@ -208,10 +215,24 @@ class PingPlayer:
             "xesam:title": GLib.Variant("s", self._title),
         })
 
-    def _get_property(self, _connection, _sender, _path, _interface, name):
+    def _get_property(self, _connection, sender, _path, _interface, name):
         if name == "Metadata":
-            self.reads += 1
+            if self._from_game(sender):
+                self.reads += 1
             return self._metadata()
         if name == "PlaybackStatus":
             return GLib.Variant("s", "Playing")
         return GLib.Variant("b", False)
+
+    def _from_game(self, sender: str | None) -> bool:
+        """Whether the process behind a bus connection is the game. One that cannot be told is."""
+        if sender not in self._askers:
+            try:
+                reply = self._connection.call_sync(
+                    *DBUS, "GetConnectionUnixProcessID", GLib.Variant("(s)", (sender,)),
+                    GLib.VariantType.new("(u)"), Gio.DBusCallFlags.NONE, ASKER_TIMEOUT_MS, None,
+                )
+                self._askers[sender] = bool(self.is_game(reply.unpack()[0]))
+            except (GLib.Error, OSError, TypeError):
+                return True
+        return self._askers[sender]
