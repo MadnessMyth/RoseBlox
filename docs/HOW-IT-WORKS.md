@@ -176,14 +176,15 @@ The avatar editor background comes from [Bloxstrap](https://github.com/bloxstrap
 
 ## While Playing
 
-Discord Rich Presence, the server location notification, closing Roblox when you leave a game and the microphone toggle are off by default. When one is on, each Player launch also starts `roseblox --activity-watch`, a small process without a window. It:
+Discord Rich Presence, the server location notification, the server ping, closing Roblox when you leave a game and the microphone toggle are off by default. When one is on, each Player launch also starts `roseblox --activity-watch`, a small process without a window. It:
 
 1. Follows the log file that this Player has open in the prefix's `~/Library/Logs/Roblox`, so several Players never mix up their games.
 2. Looks up the game's name, creator and icon from Roblox's public APIs (`apis.roblox.com`, `games.roblox.com`, `thumbnails.roblox.com`).
 3. Talks to the Discord desktop app over its local IPC socket.
 4. Looks up the Roblox server's address (never yours) with [ipwho.is](https://ipwho.is) for the location notification. With **Show inside the game**, the launch sets `MANGOHUD=1` and `MANGOHUD_CONFIGFILE` to a Roseblox file in `$XDG_RUNTIME_DIR/roseblox/overlay/` (`backend/game_overlay.py`). MangoHud re-reads that file when it changes, so the watcher writes a one-line, centered `custom_text_center` banner into it, with a `width` that fits the text and, 10 seconds later, the resting config again: your own MangoHud config (the per-program file or `MangoHud.conf`, or your `MANGOHUD_CONFIGFILE`) when MangoHud was on for the launch, otherwise a hidden HUD. MangoHud's default layout ignores custom text, which is why the banner briefly replaces your HUD instead of joining it. The file is deleted once the Player has exited, never earlier: without it MangoHud would fall back to its full default HUD.
-5. Runs the microphone toggle, described below.
-6. Exits when that Rosemary process exits.
+5. Measures the **Server ping** with the system's `ping` (`backend/game_info.py`): one echo request to the server's address; if that is not answered, one to the address ending in `.3` in the same /24 network; then one to the server with a hop limit of 12, 10 and 8, timing the router that answers "Time to live exceeded". If nothing answers, it uses half the time between the `UDMUX Address` and `Replicator created` lines of Roblox's log. The result joins the location message. With **Constant ping overlay**, it is measured again every 30 seconds and written to the same MangoHud file as a `PING 24 ms` row (`ping_config`). MangoHud has one `text_color` for every value and for custom text, draws custom text at 0.55 × `font_size`, and its default layout ignores custom text. So inside your own HUD the row is MangoHud's clock line with the ping as its text: `time`, `time_no_label` and `time_format=PING 24 ms` go in front of your config, which makes it the first row, at stat size, in the HUD's own text color, and leaves every other row as it was. If your config shows the clock, your `time_format` stays in front of the ping. When MangoHud was off for the launch, the row is the only thing in the HUD: a yellow `custom_text` line with `font_size=44`, which is stat size for custom text. MangoHud 0.7.1 always labels its clock line and has no `time_no_label`, so on that version the row overlaps the "Time" label.
+6. Runs the microphone toggle, described below.
+7. Exits when that Rosemary process exits.
 
 Because it runs on its own, these features keep working after Roseblox closes. It logs to `~/.local/state/roseblox/logs/activity.log`.
 
