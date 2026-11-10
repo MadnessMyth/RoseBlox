@@ -24,7 +24,7 @@ from .backend.discord_rpc import (
     valid_application_id,
 )
 from .backend.game_info import GameInfoError, fetch_game, locate_server, ping_server
-from .backend.game_overlay import BANNER_SECONDS, GameOverlay
+from .backend.game_overlay import BANNER_SECONDS, GameOverlay, ping_text
 from .backend.rosemary import read_process_snapshot
 from .backend.setup import SetupSettingsError, SetupStore, WhilePlaying
 
@@ -33,6 +33,8 @@ POLL_SECONDS = 1.0
 DISCORD_RETRY_SECONDS = 30.0
 LOG_SEARCH_SECONDS = 5.0
 PING_INTERVAL_SECONDS = 30.0
+# Polls MangoHud has to ask the yellow ping row's media player for its title, which it does when it loads the row.
+PLAYER_ROW_POLLS = 5
 
 
 def _log(message: str) -> None:
@@ -83,6 +85,7 @@ class ActivityWatcher:
         kill=os.kill,
         microphone_factory=None,
         overlay: GameOverlay | None = None,
+        ping_player_factory=None,
     ) -> None:
         self.pid = pid
         self.start_time = start_time
@@ -116,6 +119,11 @@ class ActivityWatcher:
         self._server_location: str | None = None
         self._last_ping_ms: int | None = None
         self._next_ping_at: float | None = None
+        self.ping_player_factory = ping_player_factory or _ping_player
+        self.ping_player = None
+        self._player_row_on = False
+        self._player_row_check: tuple[int, int] | None = None
+        self._plain_ping_row = False
 
     def settings(self) -> WhilePlaying:
         try:
@@ -139,6 +147,7 @@ class ActivityWatcher:
             self._clear_presence()
             self._stop_microphone()
             self._finish_overlay()
+            self._stop_ping_player()
         return 0
 
     def update_microphone(self) -> None:
@@ -181,9 +190,9 @@ class ActivityWatcher:
             self._banner_until = None
             settings = self.settings()
             if settings.server_ping and settings.server_ping_constant and self._last_ping_ms is not None:
-                self._overlay_call(self.overlay.show_ping, self._last_ping_ms)
+                self._show_ping_row(self._last_ping_ms, settings)
             else:
-                self._overlay_call(self.overlay.hide)
+                self._hide_overlay()
         source = self._source()
         if source is not self.follower:
             self.follower.read_lines()
@@ -195,6 +204,7 @@ class ActivityWatcher:
                 elif isinstance(event, GameLeft):
                     self.left(event)
         self._poll_constant_ping()
+        self._check_player_row()
         if self.activity is not None and self.presence is None and self.clock() >= self._discord_retry_at:
             self._publish(self.activity)
 
@@ -213,7 +223,7 @@ class ActivityWatcher:
             if self._next_ping_at is not None:
                 self._next_ping_at = None
                 if self.overlay is not None and self._banner_until is None:
-                    self._overlay_call(self.overlay.hide)
+                    self._hide_overlay()
             return
         fallback = self.tracker.last_join_latency_ms
         if self._last_ping_ms is None and (self._server_address or fallback is not None):
@@ -228,12 +238,12 @@ class ActivityWatcher:
             if self._next_ping_at is not None:
                 self._next_ping_at = None
                 if self.overlay is not None and self._banner_until is None:
-                    self._overlay_call(self.overlay.hide)
+                    self._hide_overlay()
             return
         if self._next_ping_at is None and self._server_address:
             self._next_ping_at = self.clock() + PING_INTERVAL_SECONDS
             if self.overlay is not None and self._last_ping_ms is not None and self._banner_until is None:
-                self._overlay_call(self.overlay.show_ping, self._last_ping_ms)
+                self._show_ping_row(self._last_ping_ms, settings)
             return
         if self._server_address is None or self._next_ping_at is None or self.clock() < self._next_ping_at:
             return
@@ -242,7 +252,65 @@ class ActivityWatcher:
         if measured is not None:
             self._last_ping_ms = measured
         if self.overlay is not None and self._last_ping_ms is not None and self._banner_until is None:
-            self._overlay_call(self.overlay.show_ping, self._last_ping_ms)
+            self._show_ping_row(self._last_ping_ms, settings)
+
+    def _show_ping_row(self, ping_ms: int, settings: WhilePlaying) -> bool:
+        """The PING row; with the yellow row on, as the title of a media player MangoHud colors by itself."""
+        player = self._ping_row_player(ping_ms, settings)
+        if not self._overlay_call(self.overlay.show_ping, ping_ms, player):
+            self._leave_player_row()
+            return False
+        if player is None:
+            self._leave_player_row()
+        elif not self._player_row_on:
+            self._player_row_on = True
+            self._player_row_check = (PLAYER_ROW_POLLS, self.ping_player.reads)
+        return True
+
+    def _ping_row_player(self, ping_ms: int, settings: WhilePlaying) -> str | None:
+        """Puts the ping on the session bus first, so MangoHud finds the player when it loads the row."""
+        if not settings.server_ping_yellow or self._plain_ping_row or not self.overlay.media_row_fits():
+            return None
+        if self.ping_player is None:
+            self.ping_player = self.ping_player_factory(self.overlay.configures)
+        if self.ping_player.show(ping_text(ping_ms)):
+            return self.ping_player.name
+        self._plain_ping_row = True
+        return None
+
+    def _leave_player_row(self) -> None:
+        self._player_row_on = False
+        self._player_row_check = None
+        if self.ping_player is not None:
+            self.ping_player.hide()
+
+    def _check_player_row(self) -> None:
+        """A MangoHud that never asks for the title cannot draw the row: it was built without D-Bus, or
+        has no way to the session bus. The row is then its clock line for the rest of this launch."""
+        if self._player_row_check is None:
+            return
+        polls, reads = self._player_row_check
+        if self.ping_player.reads != reads:
+            self._player_row_check = None
+        elif polls > 1:
+            self._player_row_check = (polls - 1, reads)
+        else:
+            _log("MangoHud did not ask for the yellow ping row; showing the row in the overlay's text color")
+            self._plain_ping_row = True
+            if self._last_ping_ms is None:
+                self._hide_overlay()
+            else:
+                self._show_ping_row(self._last_ping_ms, self.settings())
+
+    def _hide_overlay(self) -> bool:
+        hidden = self._overlay_call(self.overlay.hide)
+        self._leave_player_row()
+        return hidden
+
+    def _stop_ping_player(self) -> None:
+        if self.ping_player is not None:
+            self.ping_player.stop()
+            self.ping_player = None
 
     def joined(self, event: GameJoined) -> None:
         settings = self.settings()
@@ -299,7 +367,7 @@ class ActivityWatcher:
         self._next_ping_at = None
         if self.overlay is not None:
             self._banner_until = None
-            self._overlay_call(self.overlay.hide)
+            self._hide_overlay()
         self._clear_presence()
         if event.to_home and self.settings().close_on_leave:
             self.close_roblox()
@@ -357,10 +425,11 @@ class ActivityWatcher:
         )
         if self.overlay is not None and wants_in_game:
             if not location and ping_ms is not None and settings.server_ping and settings.server_ping_constant:
-                if self._overlay_call(self.overlay.show_ping, ping_ms):
+                if self._show_ping_row(ping_ms, settings):
                     self._banner_until = None
                     return
             elif self._overlay_call(self.overlay.show, banner_text):
+                self._leave_player_row()
                 self._banner_until = self.clock() + BANNER_SECONDS
                 return
         self._notify("Connected to a Roblox server", notify_body)
@@ -391,6 +460,12 @@ def _microphone_service(mode: str, release_delay_ms: int, inverted: bool, sounds
     from .microphone_service import MicrophoneService
 
     return MicrophoneService(mode, release_delay_ms, inverted, sounds)
+
+
+def _ping_player(is_game):
+    from .backend.ping_player import PingPlayer
+
+    return PingPlayer(log=lambda message: _log(f"yellow ping row: {message}"), is_game=is_game)
 
 
 def watcher_arguments(

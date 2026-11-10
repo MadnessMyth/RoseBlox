@@ -1796,6 +1796,7 @@ class SettingsPage(Gtk.Box):
             ("server_location_in_game", "Show inside the game"),
             ("server_ping", "Server ping"),
             ("server_ping_constant", "Constant ping overlay (every 30s)"),
+            ("server_ping_yellow", "Yellow ping row"),
             ("close_on_leave", "Close Roblox when leaving a game"),
         ):
             row = Adw.ActionRow.new()
@@ -2487,6 +2488,13 @@ class SettingsPage(Gtk.Box):
         constant_row.set_subtitle(
             "Pings the server on join and every 30 seconds and keeps a PING row on screen through MangoHud: "
             "the first row of the MangoHud overlay, or on its own in yellow when that overlay is off."
+        )
+        yellow_row, _yellow_switch = self._playing_rows["server_ping_yellow"]
+        yellow_row.set_visible(settings.server_ping and settings.server_ping_constant)
+        yellow_row.set_subtitle(
+            "Makes the PING row yellow inside the MangoHud overlay too, as its last row. MangoHud colors only its "
+            "media-player line by itself, so while you are in a game Roseblox is on the session bus as a media "
+            "player that cannot be played or controlled. Programs that list every player may show the ping as a track."
         )
         self._show_in_game_banner(settings)
         self._playing_rows["close_on_leave"][0].set_subtitle(

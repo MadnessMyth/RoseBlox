@@ -490,6 +490,31 @@ class RealWindowTests(unittest.TestCase):
         self.assertFalse(in_game_row.get_visible())
         self.assertFalse(_wants_in_game_banner(window.setup_state))
 
+    def test_yellow_ping_row_switch_shows_under_the_constant_ping_overlay_and_is_off_until_turned_on(self):
+        from roseblox.backend.setup import SetupStore
+
+        window = self._loaded_window()
+        settings = window.settings_page
+        _ping_row, ping = settings._playing_rows["server_ping"]
+        constant_row, constant = settings._playing_rows["server_ping_constant"]
+        yellow_row, yellow = settings._playing_rows["server_ping_yellow"]
+        self.assertEqual("Yellow ping row", yellow_row.get_title())
+        self.assertFalse(yellow_row.get_visible())
+        ping.set_active(True)
+        self.assertTrue(constant_row.get_visible())
+        self.assertFalse(yellow_row.get_visible())
+        constant.set_active(True)
+        self.assertTrue(yellow_row.get_visible())
+        self.assertFalse(yellow.get_active())
+        self.assertIn("media player that cannot be played or controlled", yellow_row.get_subtitle())
+        state = SetupStore(self.config_home / "roseblox" / "setup.json").load()
+        self.assertFalse(state.while_playing.server_ping_yellow)
+        yellow.set_active(True)
+        state = SetupStore(self.config_home / "roseblox" / "setup.json").load()
+        self.assertTrue(state.while_playing.server_ping_yellow)
+        constant.set_active(False)
+        self.assertFalse(yellow_row.get_visible())
+
     def test_microphone_toggle_rows_save_and_ask_the_desktop_for_the_hotkey(self):
         from roseblox.backend.global_shortcuts import Shortcut
         from roseblox.backend.setup import SetupStore

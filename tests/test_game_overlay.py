@@ -13,8 +13,14 @@ from roseblox.backend.game_overlay import (
     GameOverlay,
     banner_config,
     clean_text,
+    media_row_fits,
     ping_config,
     prepare_launch,
+)
+
+YELLOW_ROW = (
+    "media_player\nmedia_player_name=roseblox.instance7\nmedia_player_color=FDF909\n"
+    "media_player_format={title}\nfont_scale_media_player=1\n"
 )
 
 
@@ -73,6 +79,34 @@ class OverlayTextTests(unittest.TestCase):
             self.assertEqual(1, config.splitlines().count("time"), no_clock)
             self.assertEqual(1, config.count("time_format="), no_clock)
 
+    def test_ping_as_the_media_player_line_is_the_only_yellow_row(self):
+        self.assertEqual(YELLOW_ROW, ping_config("", 31, "roseblox.instance7"))
+        own = "fps\n# my colors\ntext_color=FFFFFF\ngpu_stats"
+        config = ping_config(own, 18, "roseblox.instance7")
+        self.assertEqual(f"{own}\n{YELLOW_ROW}", config)
+        # The ping is the player's title, so the config does not change with it.
+        self.assertEqual(config, ping_config(own, 250, "roseblox.instance7"))
+        for changed in ("text_color=FDF909", "legacy_layout", "font_size", "custom_text", "exec", "time"):
+            self.assertNotIn(changed, ping_config("fps\ngpu_stats\n", 18, "roseblox.instance7"))
+
+    def test_media_player_settings_of_a_hud_that_shows_none_give_way_to_the_row(self):
+        own = (
+            "fps\nmedia_player=0\nmedia_player_name = spotify\nmedia_player_color=00FF00\n"
+            "font_scale_media_player=0.4  # small\nmedia_player_format={artist};{title}\nram\n"
+        )
+        self.assertEqual(f"fps\nram\n{YELLOW_ROW}", ping_config(own, 18, "roseblox.instance7"))
+
+    def test_a_hud_that_shows_the_users_music_keeps_the_ping_on_the_clock_line(self):
+        for own in ("fps\nmedia_player\n", "media_player=1\n", "full\n", "media_player=0\nmedia_player\n"):
+            self.assertFalse(media_row_fits(own), own)
+            self.assertEqual(ping_config(own, 40), ping_config(own, 40, "roseblox.instance7"), own)
+        for own in ("", "fps\n", "media_player=0\n", "#media_player\n", "full\nmedia_player=0\n", "media_player=true\n"):
+            self.assertTrue(media_row_fits(own), own)
+
+    def test_ping_on_its_own_is_yellow_without_a_media_player(self):
+        self.assertFalse(media_row_fits(HIDDEN))
+        self.assertEqual(ping_config(HIDDEN, 24), ping_config(HIDDEN, 24, "roseblox.instance7"))
+
 
 class PrepareLaunchTests(unittest.TestCase):
     def setUp(self):
@@ -124,6 +158,48 @@ class PrepareLaunchTests(unittest.TestCase):
     def test_an_empty_user_setup_means_mangohud_defaults(self):
         overlay, _changes, _problem = prepare_launch({**self.env, "MANGOHUD": "1"}, "rosemary")
         self.assertEqual("", overlay.path.read_text())
+
+    def test_the_file_is_rewritten_only_when_the_hud_changes(self):
+        config = self.root / ".config" / "MangoHud"
+        config.mkdir(parents=True)
+        (config / "MangoHud.conf").write_text("fps\n")
+        overlay, _changes, _problem = prepare_launch({**self.env, "MANGOHUD": "1"}, "rosemary")
+        self.assertTrue(overlay.media_row_fits())
+
+        def rewritten(change, *arguments):
+            os.utime(overlay.path, ns=(1, 1))
+            change(*arguments)
+            return overlay.path.stat().st_mtime_ns != 1
+
+        self.assertTrue(rewritten(overlay.show_ping, 24, "roseblox.instance7"))
+        self.assertEqual(f"fps\n{YELLOW_ROW}", overlay.path.read_text())
+        # MangoHud re-reads the file whenever it is written; a new ping reaches it as the player's title.
+        self.assertFalse(rewritten(overlay.show_ping, 31, "roseblox.instance7"))
+        self.assertTrue(rewritten(overlay.show_ping, 31))
+        self.assertFalse(rewritten(overlay.show_ping, 31))
+        self.assertTrue(rewritten(overlay.show_ping, 32))
+        self.assertTrue(rewritten(overlay.hide))
+        self.assertFalse(rewritten(overlay.hide))
+        self.assertEqual("fps\n", overlay.path.read_text())
+
+    def test_the_game_is_a_process_started_with_the_overlay_file_as_its_mangohud_config(self):
+        import subprocess
+        import sys
+
+        overlay, changes, _problem = prepare_launch(self.env, "rosemary")
+        other, _changes, _problem = prepare_launch(self.env, "rosemary")
+        game = subprocess.Popen(
+            [sys.executable, "-c", "import sys; sys.stdin.read()"], stdin=subprocess.PIPE, env={**os.environ, **changes},
+        )
+        try:
+            self.assertTrue(overlay.configures(game.pid))
+            self.assertFalse(other.configures(game.pid))
+            self.assertFalse(overlay.configures(os.getpid()))
+        finally:
+            game.stdin.close()
+            game.wait(10)
+        # A process that cannot be looked into is not known to be another program.
+        self.assertTrue(overlay.configures(game.pid))
 
     def test_old_files_from_crashed_launches_are_cleaned_up(self):
         directory = self.root / "roseblox" / "overlay"

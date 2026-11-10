@@ -305,6 +305,25 @@ class WhilePlayingSettingsTests(unittest.TestCase):
             with self.assertRaises(SetupSettingsError):
                 store.load()
 
+    def test_ping_switches_round_trip_and_are_off_until_turned_on(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = SetupStore(Path(directory) / "setup.json")
+            defaults = store.load().while_playing
+            self.assertEqual(
+                (False, False, False),
+                (defaults.server_ping, defaults.server_ping_constant, defaults.server_ping_yellow),
+            )
+            saved = WhilePlaying(server_ping=True, server_ping_constant=True, server_ping_yellow=True)
+            self.assertEqual(saved, store.save_while_playing(saved).while_playing)
+            self.assertEqual(saved, store.load().while_playing)
+            with self.assertRaises(ValueError):
+                store.save_while_playing(WhilePlaying(server_ping_yellow="yes"))
+            # Settings saved before the yellow row existed.
+            document = json.loads(store.path.read_text())
+            del document["while_playing"]["server_ping_yellow"]
+            store.path.write_text(json.dumps(document))
+            self.assertFalse(store.load().while_playing.server_ping_yellow)
+
     def test_microphone_settings_round_trip_and_reject_bad_values(self):
         with tempfile.TemporaryDirectory() as directory:
             store = SetupStore(Path(directory) / "setup.json")
@@ -354,6 +373,34 @@ class FakePresence:
 
     def close(self):
         self.closed = True
+
+
+class FakePingPlayer:
+    name = "roseblox.instance7"
+
+    def __init__(self, on_bus=True):
+        self.on_bus = on_bus
+        self.reads = 0
+        self.titles = []
+        self.hidden = 0
+        self.stopped = False
+
+    def show(self, title):
+        if self.on_bus:
+            self.titles.append(title)
+        return self.on_bus
+
+    def hide(self):
+        self.hidden += 1
+
+    def stop(self):
+        self.stopped = True
+
+
+YELLOW_ROW = (
+    "media_player\nmedia_player_name=roseblox.instance7\nmedia_player_color=FDF909\n"
+    "media_player_format={title}\nfont_scale_media_player=1\n"
+)
 
 
 class WatcherTests(unittest.TestCase):
@@ -511,6 +558,141 @@ class WatcherTests(unittest.TestCase):
         watcher.poll()
         self.assertEqual("time\ntime_no_label\ntime_format=PING 24 ms\n", overlay.path.read_text())
         self.assertEqual([], self.notifications)
+
+    def _yellow_watcher(self, resting, pings=(24, 31, 19), player=None, **settings):
+        values = iter(pings)
+        self.settings = WhilePlaying(server_ping=True, server_ping_constant=True, server_ping_yellow=True, **settings)
+        players = []
+
+        def factory(is_game):
+            players.append(player or FakePingPlayer())
+            players[-1].is_game = is_game
+            return players[-1]
+
+        watcher, overlay = self._overlay_watcher(
+            resting=resting, ping=lambda _addr: next(values), ping_player_factory=factory,
+        )
+        return watcher, overlay, players
+
+    def test_the_yellow_ping_row_is_a_media_player_whose_title_is_the_ping(self):
+        from roseblox.backend.game_overlay import BANNER_SECONDS
+
+        own = "fps\ntext_color=FFFFFF\ngpu_stats\n"
+        watcher, overlay, players = self._yellow_watcher(own, server_location=True)
+        self._write(JOIN, PUBLIC, CONNECTED)
+        watcher.poll()
+        self.assertIn("custom_text_center=Server: Frankfurt am Main, Hessen, Germany · 24 ms\n", overlay.path.read_text())
+        self.assertEqual([], players)
+        self.now += BANNER_SECONDS
+        watcher.poll()
+        [player] = players
+        self.assertEqual(["PING 24 ms"], player.titles)
+        self.assertEqual(own + YELLOW_ROW, overlay.path.read_text())
+        self.assertEqual(overlay.configures, player.is_game, "the game is what was started with this overlay file")
+        # MangoHud loads the row and asks the player for its title.
+        player.reads += 1
+        os.utime(overlay.path, ns=(1, 1))
+        self.now += 30
+        watcher.poll()
+        self.assertEqual(["PING 24 ms", "PING 31 ms"], player.titles)
+        self.assertEqual(1, overlay.path.stat().st_mtime_ns, "MangoHud reloads its HUD when the file is rewritten")
+        for _poll in range(20):
+            watcher.poll()
+        self.assertEqual(own + YELLOW_ROW, overlay.path.read_text())
+        self.assertEqual(0, player.hidden)
+        self._write(DISCONNECT)
+        watcher.poll()
+        self.assertEqual(own, overlay.path.read_text())
+        self.assertEqual(1, player.hidden)
+        self.assertFalse(player.stopped)
+        self.start_time = 999
+        self.assertEqual(0, watcher.run())
+        self.assertTrue(player.stopped)
+
+    def test_the_banner_of_the_next_server_takes_the_player_off_the_bus_until_the_row_is_back(self):
+        from roseblox.backend.game_overlay import BANNER_SECONDS
+
+        watcher, overlay, players = self._yellow_watcher("fps\n", server_location=True)
+        self._write(JOIN, PUBLIC, CONNECTED)
+        watcher.poll()
+        self.now += BANNER_SECONDS
+        watcher.poll()
+        [player] = players
+        player.reads += 1
+        self._write(JOIN, PUBLIC, CONNECTED)
+        watcher.poll()
+        self.assertIn("custom_text_center=Server: Frankfurt am Main, Hessen, Germany · 31 ms\n", overlay.path.read_text())
+        self.assertEqual(1, player.hidden)
+        self.now += BANNER_SECONDS
+        watcher.poll()
+        self.assertEqual("fps\n" + YELLOW_ROW, overlay.path.read_text())
+        self.assertEqual(["PING 24 ms", "PING 31 ms"], player.titles)
+        self.assertEqual(1, len(players))
+
+    def test_a_mangohud_that_never_asks_for_the_title_gets_the_row_in_its_own_color(self):
+        from roseblox.activity_service import PLAYER_ROW_POLLS
+
+        watcher, overlay, players = self._yellow_watcher("fps\n")
+        self._write(JOIN, PUBLIC, CONNECTED)
+        with patch("sys.stderr"):
+            for _poll in range(PLAYER_ROW_POLLS - 1):
+                watcher.poll()
+                self.assertEqual("fps\n" + YELLOW_ROW, overlay.path.read_text())
+            [player] = players
+            self.assertEqual(0, player.hidden)
+            watcher.poll()
+        self.assertEqual("time\ntime_no_label\ntime_format=PING 24 ms\nfps\n", overlay.path.read_text())
+        self.assertEqual(1, player.hidden)
+        self.now += 30
+        watcher.poll()
+        self.assertEqual("time\ntime_no_label\ntime_format=PING 31 ms\nfps\n", overlay.path.read_text())
+        self.assertEqual(["PING 24 ms"], player.titles)
+        self.assertEqual(1, len(players))
+
+    def test_without_a_session_bus_the_row_is_in_the_huds_own_color(self):
+        watcher, overlay, players = self._yellow_watcher("fps\n", player=FakePingPlayer(on_bus=False))
+        self._write(JOIN, PUBLIC, CONNECTED)
+        watcher.poll()
+        self.assertEqual("time\ntime_no_label\ntime_format=PING 24 ms\nfps\n", overlay.path.read_text())
+        self.now += 30
+        watcher.poll()
+        self.assertEqual("time\ntime_no_label\ntime_format=PING 31 ms\nfps\n", overlay.path.read_text())
+        self.assertEqual(1, len(players))
+
+    def test_the_yellow_row_needs_its_switch_and_a_hud_of_the_users_that_shows_no_media_player(self):
+        from dataclasses import replace
+
+        from roseblox.backend.game_overlay import HIDDEN
+
+        for resting, expected in (
+            (HIDDEN, "legacy_layout=0\ntext_color=FDF909\nfont_size=44\nwidth=160\ncustom_text=PING 24 ms\n"),
+            ("fps\nmedia_player\n", "time\ntime_no_label\ntime_format=PING 24 ms\nfps\nmedia_player\n"),
+        ):
+            watcher, overlay, players = self._yellow_watcher(resting)
+            self._write(JOIN, PUBLIC, CONNECTED)
+            watcher.poll()
+            self.assertEqual(expected, overlay.path.read_text())
+            self.assertEqual([], players)
+            self.log.write_text("")
+
+        watcher, overlay, players = self._yellow_watcher("fps\n")
+        self.settings = replace(self.settings, server_ping_yellow=False)
+        self._write(JOIN, PUBLIC, CONNECTED)
+        watcher.poll()
+        self.assertEqual("time\ntime_no_label\ntime_format=PING 24 ms\nfps\n", overlay.path.read_text())
+        self.assertEqual([], players)
+        # The switch works in the middle of a game, at the next ping.
+        self.settings = replace(self.settings, server_ping_yellow=True)
+        self.now += 30
+        watcher.poll()
+        self.assertEqual("fps\n" + YELLOW_ROW, overlay.path.read_text())
+        [player] = players
+        player.reads += 1
+        self.settings = replace(self.settings, server_ping_yellow=False)
+        self.now += 30
+        watcher.poll()
+        self.assertEqual("time\ntime_no_label\ntime_format=PING 19 ms\nfps\n", overlay.path.read_text())
+        self.assertEqual(1, player.hidden)
 
     def test_with_the_in_game_switch_off_the_location_is_a_desktop_notification(self):
         from roseblox.backend.game_overlay import HIDDEN

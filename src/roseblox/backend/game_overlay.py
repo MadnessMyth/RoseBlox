@@ -10,6 +10,8 @@ of its own (``MANGOHUD_CONFIGFILE``), which MangoHud watches and re-reads when i
 
 MangoHud's default ("legacy") layout ignores custom text, so the banner briefly replaces a
 user's HUD instead of being added to it.
+
+An unchanged file is left alone, so MangoHud only re-reads its config when the HUD changes.
 """
 
 from __future__ import annotations
@@ -31,6 +33,9 @@ PING_COLOR = "FDF909"
 PING_FONT_SIZE = 44
 CLOCK_OPTIONS = ("time", "time_format", "time_no_label")
 DEFAULT_TIME_FORMAT = "%T"
+MEDIA_OPTIONS = (
+    "media_player", "media_player_name", "media_player_color", "media_player_format", "font_scale_media_player",
+)
 HIDDEN = "legacy_layout=0\nno_display\n"
 MAX_TEXT = 100
 MAX_USER_CONFIG = 64 * 1024
@@ -65,7 +70,19 @@ def banner_config(text: str) -> str:
     )
 
 
-def ping_config(resting: str, ping_ms: int) -> str:
+def ping_text(ping_ms: int) -> str:
+    return f"PING {max(1, int(ping_ms))} ms"
+
+
+def media_row_fits(resting: str) -> bool:
+    """Whether the ``PING`` row can be MangoHud's media-player line: in a HUD of the user's that shows no player."""
+    if resting == HIDDEN:
+        return False
+    options = dict(_option(line) for line in resting.splitlines())
+    return not _switched_on(options.get("media_player", options.get("full", "0")))
+
+
+def ping_config(resting: str, ping_ms: int, player: str | None = None) -> str:
     """MangoHud config with a ``PING`` row added to ``resting``.
 
     MangoHud has one text color for the whole HUD, draws custom text small, and its default layout
@@ -73,8 +90,13 @@ def ping_config(resting: str, ping_ms: int) -> str:
     text: the first row, at stat size, in the HUD's own text color, with every other row as it was.
     A HUD the user already shows the clock in keeps it, in front of the ping. Only a HUD that holds
     nothing but the ping is yellow.
+
+    The one line MangoHud colors by itself is its media player's. ``player`` names an MPRIS player
+    whose track title is the ping (``ping_player``); the row in a user's HUD is then that line, in
+    yellow at stat size. It is the last row, which is where MangoHud's default layout draws it, and
+    the config itself no longer changes with the ping.
     """
-    text = f"PING {max(1, int(ping_ms))} ms"
+    text = ping_text(ping_ms)
     if resting == HIDDEN:
         # MangoHud does not widen the HUD for custom text; it is about 13 pixels a character at this size.
         return (
@@ -83,6 +105,12 @@ def ping_config(resting: str, ping_ms: int) -> str:
         )
     lines = [(line, *_option(line)) for line in resting.splitlines()]
     options = {name: value for _line, name, value in lines}
+    if player and media_row_fits(resting):
+        kept = [line for line, name, _value in lines if name not in MEDIA_OPTIONS]
+        return "\n".join((
+            *kept, "media_player", f"media_player_name={player}", f"media_player_color={PING_COLOR}",
+            "media_player_format={title}", "font_scale_media_player=1",
+        )) + "\n"
     if _switched_on(options.get("time", options.get("full", "0"))):
         text = f"{options.get('time_format') or DEFAULT_TIME_FORMAT}  {text}"
     kept = [line for line, name, _value in lines if name not in CLOCK_OPTIONS]
@@ -132,11 +160,26 @@ class GameOverlay:
         except OSError:
             return HIDDEN
 
+    def configures(self, pid: int) -> bool:
+        """Whether process ``pid`` was started with this file as its MangoHud config, as the game was.
+
+        Also true for a process whose environment cannot be read, so that only what is known to
+        be another program is left out.
+        """
+        try:
+            environment = (Path("/proc") / str(pid) / "environ").read_bytes()
+        except OSError:
+            return True
+        return os.fsencode(f"{CONFIG_VARIABLE}={self.path}") in environment.split(b"\0")
+
     def show(self, text: str) -> None:
         self._write(self.path, banner_config(text))
 
-    def show_ping(self, ping_ms: int) -> None:
-        self._write(self.path, ping_config(self.resting(), ping_ms))
+    def media_row_fits(self) -> bool:
+        return media_row_fits(self.resting())
+
+    def show_ping(self, ping_ms: int, player: str | None = None) -> None:
+        self._write(self.path, ping_config(self.resting(), ping_ms, player))
 
     def hide(self) -> None:
         self._write(self.path, self.resting())
@@ -150,6 +193,11 @@ class GameOverlay:
 
     @staticmethod
     def _write(path: Path, contents: str) -> None:
+        try:
+            if path.read_text(encoding="utf-8") == contents:
+                return
+        except (OSError, ValueError):
+            pass
         # Rewritten in place: MangoHud watches this inode and re-reads 100 ms after a change.
         descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
