@@ -189,14 +189,18 @@ class PrepareLaunchTests(unittest.TestCase):
         overlay, changes, _problem = prepare_launch(self.env, "rosemary")
         other, _changes, _problem = prepare_launch(self.env, "rosemary")
         game = subprocess.Popen(
-            [sys.executable, "-c", "import sys; sys.stdin.read()"], stdin=subprocess.PIPE, env={**os.environ, **changes},
+            [sys.executable, "-c", "import sys; print('started', flush=True); sys.stdin.read()"],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, env={**os.environ, **changes},
         )
         try:
+            # A process has no environment to read until it has been loaded.
+            self.assertEqual(b"started\n", game.stdout.readline())
             self.assertTrue(overlay.configures(game.pid))
             self.assertFalse(other.configures(game.pid))
             self.assertFalse(overlay.configures(os.getpid()))
         finally:
             game.stdin.close()
+            game.stdout.close()
             game.wait(10)
         # A process that cannot be looked into is not known to be another program.
         self.assertTrue(overlay.configures(game.pid))
