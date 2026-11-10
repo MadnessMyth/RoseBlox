@@ -426,10 +426,10 @@ class WatcherTests(unittest.TestCase):
         watcher.poll()
         self.assertEqual(["View Game"], [b["label"] for b in FakePresence.instances[-1].activities[-1][1]["buttons"]])
 
-    def _overlay_watcher(self, **overrides):
+    def _overlay_watcher(self, resting=None, **overrides):
         from roseblox.backend.game_overlay import HIDDEN, GameOverlay
 
-        overlay = GameOverlay.create(Path(self.directory.name) / "overlay", HIDDEN)
+        overlay = GameOverlay.create(Path(self.directory.name) / "overlay", HIDDEN if resting is None else resting)
         self.now = 1000.0
         watcher = self._watcher(overlay=overlay, clock=lambda: self.now, **overrides)
         return watcher, overlay
@@ -478,6 +478,39 @@ class WatcherTests(unittest.TestCase):
         self._write(DISCONNECT)
         watcher.poll()
         self.assertEqual(HIDDEN, overlay.path.read_text())
+
+    def test_constant_ping_is_one_row_of_the_users_hud_and_leaves_its_colors_alone(self):
+        from roseblox.backend.game_overlay import BANNER_SECONDS
+
+        own = "fps\ntext_color=FFFFFF\ngpu_stats\n"
+        pings = iter([24, 31])
+        self.settings = WhilePlaying(
+            server_location=True,
+            server_location_in_game=True,
+            server_ping=True,
+            server_ping_constant=True,
+        )
+        watcher, overlay = self._overlay_watcher(resting=own, ping=lambda _addr: next(pings))
+        self._write(JOIN, PUBLIC, CONNECTED)
+        watcher.poll()
+        self.assertIn("custom_text_center=Server: Frankfurt am Main, Hessen, Germany · 24 ms\n", overlay.path.read_text())
+        self.now += BANNER_SECONDS
+        watcher.poll()
+        self.assertEqual(f"time\ntime_no_label\ntime_format=PING 24 ms\n{own}", overlay.path.read_text())
+        self.now += 30
+        watcher.poll()
+        self.assertEqual(f"time\ntime_no_label\ntime_format=PING 31 ms\n{own}", overlay.path.read_text())
+        self._write(DISCONNECT)
+        watcher.poll()
+        self.assertEqual(own, overlay.path.read_text())
+
+    def test_without_the_location_the_ping_row_is_added_without_a_banner(self):
+        self.settings = WhilePlaying(server_ping=True, server_ping_constant=True)
+        watcher, overlay = self._overlay_watcher(resting="", ping=lambda _addr: 24)
+        self._write(JOIN, PUBLIC, CONNECTED)
+        watcher.poll()
+        self.assertEqual("time\ntime_no_label\ntime_format=PING 24 ms\n", overlay.path.read_text())
+        self.assertEqual([], self.notifications)
 
     def test_with_the_in_game_switch_off_the_location_is_a_desktop_notification(self):
         from roseblox.backend.game_overlay import HIDDEN
