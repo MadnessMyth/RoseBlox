@@ -72,7 +72,7 @@ To update Roseblox later, see [Update](docs/INSTALL.md#update). To remove it, se
 
 ## Help
 
-Something not working? Start with [Troubleshooting](docs/INSTALL.md#troubleshooting). Logs are in `~/.local/state/roseblox/logs/` (`player.log`, `studio.log`, `roseblox.log`); include them when you report a problem.
+Something not working? Start with [Troubleshooting](docs/INSTALL.md#troubleshooting). Logs are in `~/.local/state/roseblox/logs/` (`player.log`, `studio.log`, `activity.log` for Discord presence, server location and ping, `roseblox.log`); include them when you report a problem.
 
 ## For developers
 
