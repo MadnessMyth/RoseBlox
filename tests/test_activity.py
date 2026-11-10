@@ -7,11 +7,12 @@ import struct
 import tempfile
 import threading
 import unittest
+from contextlib import redirect_stderr
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from roseblox.activity_service import ActivityWatcher, watcher_arguments
+from roseblox.activity_service import ActivityWatcher, _log, watcher_arguments
 from roseblox.backend.activity import (
     ActivityTracker,
     GameJoined,
@@ -958,6 +959,53 @@ class WatcherTests(unittest.TestCase):
         self.assertEqual(1, len(FakePresence.instances[0].activities))
         watcher.poll()
         self.assertEqual(2, len(searches))
+
+    def test_an_unexpected_error_in_one_join_does_not_lose_the_next(self):
+        located = []
+
+        def locate(address):
+            located.append(address)
+            if len(located) == 1:
+                raise ValueError("unexpected reply")
+            return "Frankfurt am Main, Hessen, Germany"
+
+        watcher = self._watcher(locate=locate)
+        self._write(JOIN, PUBLIC, CONNECTED, DISCONNECT, JOIN, PUBLIC, CONNECTED)
+        with redirect_stderr(io.StringIO()) as errors:
+            watcher.poll()
+        self.assertEqual(2, len(located))
+        self.assertIn("unexpected error, still watching", errors.getvalue())
+        self.assertIn("ValueError: unexpected reply", errors.getvalue())
+        self.assertEqual(
+            [("Connected to a Roblox server", "The server is in Frankfurt am Main, Hessen, Germany.")],
+            self.notifications,
+        )
+        self.assertEqual("Blox Fruits", FakePresence.instances[-1].activities[-1][1]["details"])
+
+    def test_a_failing_poll_is_logged_once_and_the_watcher_keeps_running(self):
+        alive = iter([True, True, True])
+        watcher = self._watcher(
+            process_snapshot=lambda pid: SimpleNamespace(start_time=777) if next(alive, False) else None
+        )
+        polls = []
+
+        def poll():
+            polls.append(len(polls))
+            if len(polls) < 3:
+                raise RuntimeError("no such file")
+
+        watcher.poll = poll
+        with redirect_stderr(io.StringIO()) as errors:
+            self.assertEqual(0, watcher.run())
+        self.assertEqual(4, len(polls))
+        self.assertEqual(1, errors.getvalue().count("unexpected error, still watching"))
+
+    def test_log_lines_carry_the_local_time(self):
+        with redirect_stderr(io.StringIO()) as errors:
+            _log("joined place 1")
+        self.assertRegex(
+            errors.getvalue(), r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d\d:\d\d roseblox activity: joined place 1\n$"
+        )
 
 
 class FindRobloxLogTests(unittest.TestCase):

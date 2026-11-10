@@ -11,11 +11,13 @@ import os
 import signal
 import sys
 import time
+import traceback
+from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
 from .backend.appimage import appimage_path
-from .backend.activity import ActivityTracker, GameJoined, GameLeft, LogFollower, find_roblox_log
+from .backend.activity import ActivityTracker, GameJoined, GameJoining, GameLeft, LogFollower, find_roblox_log
 from .backend.discord_rpc import (
     DiscordError,
     DiscordPresence,
@@ -38,7 +40,8 @@ PLAYER_ROW_POLLS = 5
 
 
 def _log(message: str) -> None:
-    print(f"roseblox activity: {message}", file=sys.stderr, flush=True)
+    stamp = datetime.now().astimezone().isoformat(timespec="seconds")
+    print(f"{stamp} roseblox activity: {message}", file=sys.stderr, flush=True)
 
 
 def send_notification(summary: str, body: str) -> None:
@@ -124,6 +127,7 @@ class ActivityWatcher:
         self._player_row_on = False
         self._player_row_check: tuple[int, int] | None = None
         self._plain_ping_row = False
+        self._last_error: str | None = None
 
     def settings(self) -> WhilePlaying:
         try:
@@ -140,15 +144,26 @@ class ActivityWatcher:
         _log(f"watching Roblox Player process {self.pid}")
         try:
             while self.alive():
-                self.poll()
+                self._guarded(self.poll)
                 self.sleep(POLL_SECONDS)
-            self.poll()
+            self._guarded(self.poll)
         finally:
             self._clear_presence()
             self._stop_microphone()
             self._finish_overlay()
             self._stop_ping_player()
         return 0
+
+    def _guarded(self, step: Callable, *arguments) -> None:
+        """Runs one step of the watcher, logging an unexpected error once instead of stopping: a watcher that
+        stopped would miss every later join of this launch."""
+        try:
+            step(*arguments)
+        except Exception:  # noqa: BLE001 - see the docstring
+            report = traceback.format_exc().rstrip()
+            if report != self._last_error:
+                self._last_error = report
+                _log(f"unexpected error, still watching:\n{report}")
 
     def update_microphone(self) -> None:
         settings = self.settings()
@@ -176,16 +191,18 @@ class ActivityWatcher:
             self._log_search_at = self.clock() + LOG_SEARCH_SECONDS
             found = self.find_log(self.pid, self.roblox_logs, self._started_at - 5)
             if found is not None:
+                held = found.is_symlink()
                 try:
-                    name = os.readlink(found) if found.is_symlink() else str(found)
+                    name = os.readlink(found) if held else str(found)
                 except OSError:
                     name = str(found)
-                _log(f"following Roblox's log {name}")
+                how = "the Player has it open" if held else "the newest Player log since the launch"
+                _log(f"following Roblox's log {name} ({how})")
                 self.roblox_follower = LogFollower(found)
         return self.roblox_follower or self.follower
 
     def poll(self) -> None:
-        self.update_microphone()
+        self._guarded(self.update_microphone)
         if self._banner_until is not None and self.clock() >= self._banner_until:
             self._banner_until = None
             settings = self.settings()
@@ -198,15 +215,22 @@ class ActivityWatcher:
             self.follower.read_lines()
         for line in source.read_lines():
             for event in self.tracker.feed(line):
-                if isinstance(event, GameJoined):
-                    _log(f"joined place {event.place_id}")
-                    self.joined(event)
-                elif isinstance(event, GameLeft):
-                    self.left(event)
+                # The rest of the lines read in this poll would be lost if one event stopped the loop.
+                self._guarded(self._handle, event)
         self._poll_constant_ping()
         self._check_player_row()
         if self.activity is not None and self.presence is None and self.clock() >= self._discord_retry_at:
             self._publish(self.activity)
+
+    def _handle(self, event: GameJoining | GameJoined | GameLeft) -> None:
+        if isinstance(event, GameJoining):
+            _log(f"joining place {event.place_id}")
+        elif isinstance(event, GameJoined):
+            _log(f"joined place {event.place_id}")
+            self.joined(event)
+        elif isinstance(event, GameLeft):
+            _log("back on the home screen" if event.to_home else "left the game")
+            self.left(event)
 
     def _measure_ping(self, address: str | None, fallback_ms: int | None = None) -> int | None:
         if address:
