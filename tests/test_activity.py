@@ -588,7 +588,7 @@ class WatcherTests(unittest.TestCase):
         [player] = players
         self.assertEqual(["PING 24 ms"], player.titles)
         self.assertEqual(own + YELLOW_ROW, overlay.path.read_text())
-        self.assertEqual(overlay.configures, player.is_game, "the game is what was started with this overlay file")
+        self.assertEqual(watcher._is_game, player.is_game)
         # MangoHud loads the row and asks the player for its title.
         player.reads += 1
         os.utime(overlay.path, ns=(1, 1))
@@ -608,6 +608,39 @@ class WatcherTests(unittest.TestCase):
         self.start_time = 999
         self.assertEqual(0, watcher.run())
         self.assertTrue(player.stopped)
+
+    def test_the_game_is_what_this_launch_started(self):
+        import subprocess
+        import sys
+
+        from roseblox.activity_service import _descends_from
+        from roseblox.backend.game_overlay import CONFIG_VARIABLE
+
+        watcher, overlay = self._overlay_watcher(resting="fps\n")
+
+        def process(**environment):
+            started = subprocess.Popen(
+                [sys.executable, "-c", "import sys; print('started', flush=True); sys.stdin.read()"],
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE, env={**os.environ, **environment},
+            )
+            self.addCleanup(started.wait, 10)
+            self.addCleanup(started.stdout.close)
+            self.addCleanup(started.stdin.close)
+            self.assertEqual(b"started\n", started.stdout.readline())
+            return started.pid
+
+        watcher.pid = process()
+        other = process()
+        self.assertFalse(watcher._is_game(other))
+        # MangoHud is told its config by the environment the Player was started with.
+        self.assertTrue(watcher._is_game(process(**{CONFIG_VARIABLE: str(overlay.path)})))
+        self.assertFalse(watcher._is_game(process(**{CONFIG_VARIABLE: str(overlay.resting_path)})))
+        # A Player that changed its environment is still the process this watcher follows, or a child of it.
+        self.assertTrue(watcher._is_game(watcher.pid))
+        watcher.pid = os.getpid()
+        self.assertTrue(watcher._is_game(other))
+        self.assertTrue(_descends_from(os.getpid(), os.getppid()))
+        self.assertFalse(_descends_from(os.getppid(), os.getpid()))
 
     def test_the_banner_of_the_next_server_takes_the_player_off_the_bus_until_the_row_is_back(self):
         from roseblox.backend.game_overlay import BANNER_SECONDS

@@ -272,11 +272,16 @@ class ActivityWatcher:
         if not settings.server_ping_yellow or self._plain_ping_row or not self.overlay.media_row_fits():
             return None
         if self.ping_player is None:
-            self.ping_player = self.ping_player_factory(self.overlay.configures)
+            self.ping_player = self.ping_player_factory(self._is_game)
         if self.ping_player.show(ping_text(ping_ms)):
             return self.ping_player.name
         self._plain_ping_row = True
         return None
+
+    def _is_game(self, pid: int) -> bool:
+        """Whether a process belongs to this launch: MangoHud runs inside the game, and only its
+        request for the title says that the row was loaded."""
+        return self.overlay.configures(pid) or _descends_from(pid, self.pid)
 
     def _leave_player_row(self) -> None:
         self._player_row_on = False
@@ -460,6 +465,22 @@ def _microphone_service(mode: str, release_delay_ms: int, inverted: bool, sounds
     from .microphone_service import MicrophoneService
 
     return MicrophoneService(mode, release_delay_ms, inverted, sounds)
+
+
+def _descends_from(pid: int, ancestor: int) -> bool:
+    """Whether process ``pid`` is ``ancestor`` or was started by it, however many processes in between."""
+    for _generation in range(64):
+        if pid == ancestor:
+            return True
+        if pid <= 1:
+            return False
+        try:
+            stat = (Path("/proc") / str(pid) / "stat").read_text(encoding="ascii", errors="replace")
+            # The comm field is parenthesized and may itself contain spaces or ')'.
+            pid = int(stat[stat.rfind(")") + 2 :].split()[1])  # field 4 in proc_pid_stat(5)
+        except (OSError, ValueError, IndexError):
+            return False
+    return False
 
 
 def _ping_player(is_game):
