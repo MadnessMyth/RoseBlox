@@ -180,6 +180,10 @@ Follow [Uninstall](#uninstall) step 3 if you also want to delete your settings a
 
 Click a section heading in **Settings** to open or close it; Roseblox remembers your choice.
 
+To find a setting, type in **Search settings** at the top of the page (Ctrl+F takes you there). A setting stays listed when each word you type starts a word of its name or description, or of the section or group it is in, and the sections with results open; clear the search (Esc) to get the page back as you left it. Some settings only appear once another one is on or set, such as **Constant ping overlay** under **Server ping**: the search then lists the setting that shows it, and a line under the search box names the hidden one.
+
+![Searching Settings for "discord"](screenshots/24-settings-search.png)
+
 - **Appearance**: **Colors** (Roseblox or System), **Style** (Dark, Light, or Follow system), and **Accent color** (Roseblox pink, your desktop's accent color, or a fixed color). Changes apply immediately.
 - **Rosemary**: Rosemary status, **Ctrl + left-click compatibility** (turn it off if you want Rosemary's default Ctrl + click behavior), **First-time setup**, and **Import from another app**.
 - **After Launching**: close Roseblox after Player or Studio starts, and **Allow more than one Roblox Player**. See [Closing Roseblox after launching](#closing-roseblox-after-launching) and [More than one Roblox Player](#more-than-one-roblox-player).

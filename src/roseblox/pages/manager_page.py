@@ -59,6 +59,7 @@ from .rosemary_text import (
     rosemary_install_method,
 )
 from .sections import CollapsibleSection
+from .settings_search import SettingsSearch
 from .update_checks import update_rows
 from ..theme import ACCENT_NAMES, system_accent_available
 from ..backend.rosemary import (
@@ -1620,9 +1621,28 @@ class SettingsPage(Gtk.Box):
         heading = Gtk.Label(label="Settings")
         heading.add_css_class("title-1")
         heading.set_halign(Gtk.Align.START)
-        self.append(heading)
+        self.search_entry = Gtk.SearchEntry(placeholder_text="Search settings", hexpand=True, valign=Gtk.Align.CENTER)
+        self.search_entry.update_property([Gtk.AccessibleProperty.LABEL], ["Search settings"])
+        self.search_entry.set_key_capture_widget(self)
+        self.search_entry.connect("search-changed", lambda entry: self.search.set_query(entry.get_text()))
+        # Typing on the page fills the entry without focusing it, and Esc only reaches the entry when focused.
+        self.search_entry.connect("search-started", lambda entry: entry.grab_focus())
+        self.search_entry.connect("stop-search", lambda entry: entry.set_text(""))
+        top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=18)
+        top.append(heading)
+        top.append(self.search_entry)
+        self.append(top)
+        self.search_hint = Gtk.Label(xalign=0, wrap=True, visible=False)
+        self.search_hint.add_css_class("dim-label")
+        self.append(self.search_hint)
+        shortcuts = Gtk.ShortcutController(scope=Gtk.ShortcutScope.MANAGED)
+        shortcuts.add_shortcut(
+            Gtk.Shortcut.new(Gtk.ShortcutTrigger.parse_string("<Control>f"), Gtk.CallbackAction.new(self._focus_search))
+        )
+        self.add_controller(shortcuts)
         self._sections: dict[str, CollapsibleSection] = {}
         self._sections_restored = False
+        self._inner_rows: dict[Adw.ExpanderRow, list[Adw.PreferencesRow]] = {}
 
         appearance = self._section(
             "appearance", "Appearance", "Colors, light or dark style, and the accent color."
@@ -1759,7 +1779,7 @@ class SettingsPage(Gtk.Box):
             )
             link_row.add_suffix(link_switch)
             link_row.set_activatable_widget(link_switch)
-            expander.add_row(link_row)
+            self._add_inner_row(expander, link_row)
             expander.connect("notify::enable-expansion", self._close_preference_changed, app_type)
             link_switch.connect("notify::active", self._close_preference_changed, app_type)
             close_group.add(expander)
@@ -1980,6 +2000,43 @@ class SettingsPage(Gtk.Box):
                 action.set_sensitive(False)
         threading.Thread(target=self._load_sources_worker, daemon=True).start()
 
+        self.search_empty = Adw.StatusPage(
+            icon_name="edit-find-symbolic", title="No Matching Settings", description="Try other words.", visible=False
+        )
+        self.search_empty.add_css_class("compact")
+        self.append(self.search_empty)
+        location_row = self._playing_rows["server_location"][0]
+        in_game_row = self._playing_rows["server_location_in_game"][0]
+        ping_row = self._playing_rows["server_ping"][0]
+        constant_row = self._playing_rows["server_ping_constant"][0]
+        self.search = SettingsSearch(
+            list(self._sections.values()),
+            expander_rows=self._inner_rows,
+            # Rows the page hides until the switch or choice of the row they are listed under shows them.
+            reveals={
+                location_row: [in_game_row],
+                ping_row: [in_game_row, constant_row],
+                constant_row: [self._playing_rows["server_ping_yellow"][0]],
+                self.microphone_mode_row: [self.microphone_inverted_row, self.release_delay_row],
+                self.microphone_sounds_row: [
+                    *(row for row, _reset in self._sound_rows.values()), self.sound_volume_row
+                ],
+                **{row: [self.check_now_row] for row in self.update_rows.values()},
+            },
+            empty=self.search_empty,
+            hint=self.search_hint,
+        )
+
+    def _add_inner_row(self, expander: Adw.ExpanderRow, row: Adw.PreferencesRow) -> None:
+        expander.add_row(row)
+        self._inner_rows.setdefault(expander, []).append(row)
+
+    def _focus_search(self, _widget, _arguments) -> bool:
+        if not self.get_mapped():
+            return False
+        self.search_entry.grab_focus()
+        return True
+
     def _section(self, section_id: str, title: str, description: str, *, expanded: bool = True) -> CollapsibleSection:
         section = CollapsibleSection(
             section_id, title, description, expanded=expanded, on_toggled=self._section_toggled
@@ -1989,6 +2046,7 @@ class SettingsPage(Gtk.Box):
         return section
 
     def _section_toggled(self, section_id: str, expanded: bool) -> None:
+        self.search.remember_expanded(section_id, expanded)
         if self.setup_store is None:
             return
         try:
@@ -2002,7 +2060,7 @@ class SettingsPage(Gtk.Box):
         self._sections_restored = True
         for section_id, expanded in setup_state.expanded_sections.items():
             section = self._sections.get(section_id)
-            if section is not None:
+            if section is not None and not self.search.remember_expanded(section_id, expanded):
                 section.set_expanded(expanded)
 
     def _show_appearance(self, appearance: Appearance) -> None:
@@ -2289,31 +2347,31 @@ class SettingsPage(Gtk.Box):
         self.hotkey_button.set_valign(Gtk.Align.CENTER)
         self.hotkey_button.connect("clicked", lambda *_: self.microphone_hotkey.change())
         self.hotkey_row.add_suffix(self.hotkey_button)
-        self.microphone_row.add_row(self.hotkey_row)
+        self._add_inner_row(self.microphone_row, self.hotkey_row)
         self.microphone_hotkey = MicrophoneHotkey(self._hotkey_changed)
 
         self.microphone_mode_row = Adw.ComboRow.new()
         self.microphone_mode_row.set_title("Mode")
         self.microphone_mode_row.set_model(Gtk.StringList.new([MICROPHONE_MODE_TITLES[mode] for mode in MICROPHONE_MODES]))
         self.microphone_mode_row.connect("notify::selected", self._microphone_changed)
-        self.microphone_row.add_row(self.microphone_mode_row)
+        self._add_inner_row(self.microphone_row, self.microphone_mode_row)
 
         self.microphone_inverted_row = Adw.SwitchRow.new()
         self.microphone_inverted_row.set_title("Inverted")
         self.microphone_inverted_row.set_subtitle("Hold the hotkey to mute instead of to talk (push to mute).")
         self.microphone_inverted_row.connect("notify::active", self._microphone_changed)
-        self.microphone_row.add_row(self.microphone_inverted_row)
+        self._add_inner_row(self.microphone_row, self.microphone_inverted_row)
 
         self.release_delay_row = Adw.SpinRow.new_with_range(0, MAX_RELEASE_DELAY_MS, 50)
         self.release_delay_row.set_title("Release delay")
         self.release_delay_row.connect("notify::value", self._microphone_changed)
-        self.microphone_row.add_row(self.release_delay_row)
+        self._add_inner_row(self.microphone_row, self.release_delay_row)
 
         self.microphone_sounds_row = Adw.SwitchRow.new()
         self.microphone_sounds_row.set_title("Sound effects")
         self.microphone_sounds_row.set_subtitle("Play a short sound when Roblox's microphone turns on or off.")
         self.microphone_sounds_row.connect("notify::active", self._microphone_changed)
-        self.microphone_row.add_row(self.microphone_sounds_row)
+        self._add_inner_row(self.microphone_row, self.microphone_sounds_row)
         self.sound_player = SoundPlayer(log=self._sound_message)
         self._sound_rows: dict[str, tuple[Adw.ActionRow, Gtk.Button]] = {}
         for kind, title in ((ON, "Microphone on sound"), (OFF, "Microphone off sound")):
@@ -2333,13 +2391,13 @@ class SettingsPage(Gtk.Box):
             choose.set_valign(Gtk.Align.CENTER)
             choose.connect("clicked", lambda *_, k=kind: self._choose_sound(k))
             row.add_suffix(choose)
-            self.microphone_row.add_row(row)
+            self._add_inner_row(self.microphone_row, row)
             self._sound_rows[kind] = (row, reset)
         self.sound_volume_row = Adw.SpinRow.new_with_range(0, MAX_VOLUME, 5)
         self.sound_volume_row.set_title("Sound volume")
         self.sound_volume_row.set_subtitle("Percent of your system volume.")
         self.sound_volume_row.connect("notify::value", self._microphone_changed)
-        self.microphone_row.add_row(self.sound_volume_row)
+        self._add_inner_row(self.microphone_row, self.sound_volume_row)
         self.sounds_warning = Gtk.Image.new_from_icon_name("dialog-warning-symbolic")
         self.sounds_warning.set_tooltip_text("Sound effects cannot play")
         self.microphone_sounds_row.add_suffix(self.sounds_warning)

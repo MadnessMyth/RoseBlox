@@ -734,6 +734,107 @@ class RealWindowTests(unittest.TestCase):
         self.assertTrue(reopened.settings_page._sections["advanced"].expanded)
         self.assertFalse(reopened.settings_page._sections["updates"].expanded)
 
+    @staticmethod
+    def _listed(row):
+        """Whether a Settings row shows: neither the page nor the search leaves it, its group or its section out."""
+        from roseblox.pages.sections import CollapsibleSection
+
+        widgets = (row, row.get_ancestor(Adw.PreferencesGroup), row.get_ancestor(CollapsibleSection))
+        return row.get_child_visible() and all(widget.get_visible() for widget in widgets)
+
+    def _search_settings(self, settings, text):
+        settings.search_entry.set_text(text)
+        self.assertTrue(self._wait_until(lambda: settings.search.query == text))
+
+    def test_settings_search_lists_only_what_matches_and_puts_the_page_back(self):
+        from roseblox.backend.setup import SetupStore
+
+        settings = self._loaded_window().settings_page
+        advanced = settings._sections["advanced"]
+        self.assertFalse(advanced.expanded)
+
+        self._search_settings(settings, "discord application")
+        self.assertEqual(["advanced"], [name for name, section in settings._sections.items() if section.get_visible()])
+        self.assertTrue(advanced.expanded)
+        self.assertTrue(self._listed(settings.discord_id_row))
+        self.assertFalse(self._listed(settings.url_row))
+        self.assertFalse(settings.search_empty.get_visible())
+
+        self._search_settings(settings, "xylophone")
+        self.assertTrue(settings.search_empty.get_visible())
+        self.assertFalse(any(section.get_visible() for section in settings._sections.values()))
+
+        self._search_settings(settings, "")
+        self.assertFalse(settings.search_empty.get_visible())
+        self.assertTrue(all(section.get_visible() for section in settings._sections.values()))
+        self.assertTrue(self._listed(settings.url_row))
+        self.assertTrue(self._listed(settings.discord_id_row))
+        self.assertFalse(advanced.expanded)
+        # Opening sections to show results is not saved as the user's layout.
+        self.assertEqual({}, SetupStore(self.config_home / "roseblox" / "setup.json").load().expanded_sections)
+
+    def test_a_section_opened_or_closed_during_a_search_stays_that_way_after_it(self):
+        from roseblox.backend.setup import SetupStore
+
+        settings = self._loaded_window().settings_page
+        advanced = settings._sections["advanced"]
+        self._search_settings(settings, "discord application")
+        advanced.header.emit("clicked")
+        advanced.header.emit("clicked")
+        self.assertTrue(advanced.expanded)
+        self._search_settings(settings, "")
+        self.assertTrue(advanced.expanded)
+        self.assertEqual(
+            {"advanced": True}, SetupStore(self.config_home / "roseblox" / "setup.json").load().expanded_sections
+        )
+
+    def test_settings_search_finds_rows_the_page_hides_until_a_switch_is_on(self):
+        settings = self._loaded_window().settings_page
+        ping_row, ping_switch = settings._playing_rows["server_ping"]
+        constant_row = settings._playing_rows["server_ping_constant"][0]
+        self._search_settings(settings, "yellow")
+        self.assertTrue(self._listed(ping_row))
+        self.assertFalse(constant_row.get_visible())
+        self.assertTrue(settings.search_hint.get_visible())
+        self.assertEqual(
+            "“Constant ping overlay (every 30s)” is under “Server ping”.", settings.search_hint.get_label()
+        )
+
+        ping_switch.set_active(True)
+        self.assertTrue(self._wait_until(lambda: self._listed(constant_row)))
+        self.assertTrue(self._listed(ping_row))
+        self.assertFalse(settings.search_hint.get_visible())
+
+        self._search_settings(settings, "")
+        self.assertFalse(settings.search_hint.get_visible())
+
+    def test_settings_search_opens_an_expander_row_to_show_what_matched_inside_it(self):
+        desktop = patch("roseblox.pages.microphone_hotkey.open_connection", side_effect=GLib.Error("no bus"))
+        desktop.start()
+        self.addCleanup(desktop.stop)
+        settings = self._loaded_window().settings_page
+        microphone = settings.microphone_row
+        self._search_settings(settings, "sound effects")
+        self.assertTrue(self._listed(microphone))
+        self.assertTrue(self._listed(settings.microphone_sounds_row))
+        self.assertFalse(self._listed(settings.hotkey_row))
+        self.assertFalse(microphone.get_expanded())  # Off, so it cannot open.
+
+        self._search_settings(settings, "")
+        microphone.set_enable_expansion(True)
+        microphone.set_expanded(False)
+        self._search_settings(settings, "sound effects")
+        self.assertTrue(microphone.get_expanded())
+        self._search_settings(settings, "")
+        self.assertFalse(microphone.get_expanded())
+        self.assertTrue(self._listed(settings.hotkey_row))
+
+        # One the user had open is left open.
+        microphone.set_expanded(True)
+        self._search_settings(settings, "sound effects")
+        self._search_settings(settings, "")
+        self.assertTrue(microphone.get_expanded())
+
     def test_ctrl_click_switch_is_saved_and_explained(self):
         from roseblox.backend.setup import SetupStore
 
