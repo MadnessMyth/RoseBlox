@@ -34,6 +34,14 @@ _MAX_READ = 4 * 1024 * 1024
 
 
 @dataclass(frozen=True)
+class GameJoining:
+    """The Player started connecting to a server; ``GameJoined`` follows once the connection is up."""
+
+    place_id: int
+    job_id: str
+
+
+@dataclass(frozen=True)
 class GameJoined:
     place_id: int
     job_id: str
@@ -83,7 +91,7 @@ def _log_uptime(line: str) -> float | None:
 
 
 class ActivityTracker:
-    """Turns log lines into ``GameJoined`` and ``GameLeft`` events.
+    """Turns log lines into ``GameJoining``, ``GameJoined`` and ``GameLeft`` events.
 
     A join is reported once the connection is up ("Replicator created:"), so the
     public server address and whether the server is private are known by then.
@@ -95,19 +103,20 @@ class ActivityTracker:
         self.last_join_latency_ms: int | None = None
         self.in_game = False
 
-    def feed(self, line: str) -> list[GameJoined | GameLeft]:
+    def feed(self, line: str) -> list[GameJoining | GameJoined | GameLeft]:
         if "! Joining game '" in line:
             match = _JOIN.search(line)
-            if match:
-                self._pending = {
-                    "place_id": int(match["place"]),
-                    "job_id": match["job"].lower(),
-                    "server_address": public_address(match["address"]),
-                    "private": False,
-                }
-                self._join_uptime = _log_uptime(line)
-                self.last_join_latency_ms = None
-            return []
+            if not match:
+                return []
+            self._pending = {
+                "place_id": int(match["place"]),
+                "job_id": match["job"].lower(),
+                "server_address": public_address(match["address"]),
+                "private": False,
+            }
+            self._join_uptime = _log_uptime(line)
+            self.last_join_latency_ms = None
+            return [GameJoining(self._pending["place_id"], self._pending["job_id"])]
         if "referral_page:" in line and any(marker in line for marker in _PRIVATE_REFERRALS):
             if self._pending is not None:
                 self._pending["private"] = True
@@ -137,13 +146,19 @@ class ActivityTracker:
             return []
         if "returnToLuaApp: (stage:UGCGame)" in line:
             return self._left(to_home=True)
-        if "Time to disconnect replication data:" in line or "leaveUGCGameInternal" in line:
+        if "Time to disconnect replication data:" in line:
+            # The previous server's replicator is torn down on another thread, so on a teleport or a join from
+            # inside a game this line can come after the next "Joining game". No replicator exists yet for that
+            # join, so the line cannot be about it.
+            return self._left(to_home=False, keep_joining=True)
+        if "leaveUGCGameInternal" in line:
             return self._left(to_home=False)
         return []
 
-    def _left(self, *, to_home: bool) -> list[GameLeft]:
-        self._pending = None
-        self._join_uptime = None
+    def _left(self, *, to_home: bool, keep_joining: bool = False) -> list[GameLeft]:
+        if not keep_joining:
+            self._pending = None
+            self._join_uptime = None
         if not self.in_game and not to_home:
             return []
         self.in_game = False

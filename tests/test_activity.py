@@ -12,7 +12,15 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from roseblox.activity_service import ActivityWatcher, watcher_arguments
-from roseblox.backend.activity import ActivityTracker, GameJoined, GameLeft, LogFollower, find_roblox_log, public_address
+from roseblox.backend.activity import (
+    ActivityTracker,
+    GameJoined,
+    GameJoining,
+    GameLeft,
+    LogFollower,
+    find_roblox_log,
+    public_address,
+)
 from roseblox.backend.discord_rpc import DiscordError, DiscordPresence, build_activity, socket_candidates
 from roseblox.backend.game_info import GameDetails, GameInfoError, fetch_game, locate_server, ping_server
 from roseblox.backend.microphone_sounds import MicrophoneSounds
@@ -50,13 +58,17 @@ class TrackerTests(unittest.TestCase):
         tracker = ActivityTracker()
         events = [event for line in lines for event in tracker.feed(line)]
         self.assertEqual(
-            [GameJoined(1234567890, "11111111-2222-4333-8444-555555555555", "128.116.0.10", False), GameLeft(True)],
+            [
+                GameJoining(1234567890, "11111111-2222-4333-8444-555555555555"),
+                GameJoined(1234567890, "11111111-2222-4333-8444-555555555555", "128.116.0.10", False),
+                GameLeft(True),
+            ],
             events,
         )
 
     def test_a_join_is_reported_once_connected_with_the_public_address(self):
         tracker = ActivityTracker()
-        self.assertEqual([], feed(tracker, JOIN, PUBLIC))
+        self.assertEqual([GameJoining(2753915549, JOB)], feed(tracker, JOIN, PUBLIC))
         [joined] = feed(tracker, CONNECTED)
         self.assertEqual(GameJoined(2753915549, JOB, "128.116.44.3", False), joined)
         self.assertEqual(
@@ -66,7 +78,7 @@ class TrackerTests(unittest.TestCase):
         self.assertTrue(tracker.in_game)
 
     def test_private_servers_have_no_join_link(self):
-        [joined] = feed(ActivityTracker(), JOIN, PRIVATE, CONNECTED)
+        [_joining, joined] = feed(ActivityTracker(), JOIN, PRIVATE, CONNECTED)
         self.assertTrue(joined.private)
         self.assertIsNone(joined.join_url)
         self.assertIsNone(joined.server_address)
@@ -78,6 +90,42 @@ class TrackerTests(unittest.TestCase):
         self.assertEqual([GameLeft(True)], feed(tracker, HOME))
         self.assertEqual([], feed(tracker, DISCONNECT))
         self.assertEqual([], feed(ActivityTracker(), "returnToLuaApp: (stage:InitializedLuaApp)."))
+
+    def test_a_late_disconnect_from_the_last_server_does_not_cancel_the_next_join(self):
+        second_job = "22222222-3333-4444-8555-666666666666"
+        teleport = [
+            f"2026-11-11T06:01:10.100Z,50.100000,e9ef0000,6 [FLog::Output] ! Joining game '{second_job}' "
+            "place 920587237 at 10.4.5.6",
+            "2026-11-11T06:01:10.104Z,50.104000,ea990000,7 [FLog::Network] Time to disconnect replication data: 0.0041",
+            "2026-11-11T06:01:10.110Z,50.110000,e9ef0000,7 [FLog::Network] UDMUX Address = 128.116.50.7, Port = 50001 "
+            "| RCC Server Address = 10.4.5.6, Port = 50001",
+            "2026-11-11T06:01:10.190Z,50.190000,e9ef0000,7 [FLog::Network] Replicator created: 0x7f921f78eb71",
+        ]
+        tracker = ActivityTracker()
+        feed(tracker, JOIN, PUBLIC, CONNECTED)
+        self.assertEqual(
+            [
+                GameJoining(920587237, second_job),
+                GameLeft(False),
+                GameJoined(920587237, second_job, "128.116.50.7", False),
+            ],
+            feed(tracker, *teleport),
+        )
+        self.assertTrue(tracker.in_game)
+        self.assertEqual(40, tracker.last_join_latency_ms)
+        feed(tracker, HOME)
+        self.assertEqual(
+            [GameJoining(920587237, second_job), GameJoined(920587237, second_job, "128.116.50.7", False)],
+            feed(tracker, *teleport),
+        )
+
+    def test_leaving_while_joining_still_cancels_the_join(self):
+        tracker = ActivityTracker()
+        self.assertEqual(
+            [GameJoining(2753915549, JOB)],
+            feed(tracker, JOIN, "[FLog::SingleSurfaceApp] leaveUGCGameInternal", CONNECTED),
+        )
+        self.assertFalse(tracker.in_game)
 
     def test_malformed_lines_are_ignored(self):
         tracker = ActivityTracker()
