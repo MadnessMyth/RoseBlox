@@ -540,10 +540,10 @@ class WatcherTests(unittest.TestCase):
         self._write(JOIN, PUBLIC, CONNECTED)
         watcher.poll()
         self.assertEqual([], self.notifications)
-        self.assertIn("custom_text_center=Server: Frankfurt am Main, Hessen, Germany\n", overlay.path.read_text())
+        self.assertIn("time_format=Server: Frankfurt am Main, Hessen, Germany\n", overlay.path.read_text())
         self.now += BANNER_SECONDS - 1
         watcher.poll()
-        self.assertIn("custom_text_center=", overlay.path.read_text())
+        self.assertIn("position=top-center\n", overlay.path.read_text())
         self.now += 1
         watcher.poll()
         self.assertEqual(HIDDEN, overlay.path.read_text())
@@ -562,17 +562,17 @@ class WatcherTests(unittest.TestCase):
         self._write(JOIN, PUBLIC, CONNECTED)
         watcher.poll()
         self.assertIn("position=top-center\n", overlay.path.read_text())
-        self.assertIn("custom_text_center=Server: Frankfurt am Main, Hessen, Germany · 24 ms\n", overlay.path.read_text())
+        self.assertIn("time_format=Server: Frankfurt am Main, Hessen, Germany · 24 ms\n", overlay.path.read_text())
         self.now += BANNER_SECONDS
         watcher.poll()
         self.assertIn("text_color=FDF909\n", overlay.path.read_text())
-        self.assertIn("custom_text=PING 24 ms\n", overlay.path.read_text())
+        self.assertIn("time_format=PING 24 ms\n", overlay.path.read_text())
         self.now += 20
         watcher.poll()
-        self.assertIn("custom_text=PING 31 ms\n", overlay.path.read_text())
+        self.assertIn("time_format=PING 31 ms\n", overlay.path.read_text())
         self.now += 30
         watcher.poll()
-        self.assertIn("custom_text=PING 19 ms\n", overlay.path.read_text())
+        self.assertIn("time_format=PING 19 ms\n", overlay.path.read_text())
         self._write(DISCONNECT)
         watcher.poll()
         self.assertEqual(HIDDEN, overlay.path.read_text())
@@ -591,7 +591,7 @@ class WatcherTests(unittest.TestCase):
         watcher, overlay = self._overlay_watcher(resting=own, ping=lambda _addr: next(pings))
         self._write(JOIN, PUBLIC, CONNECTED)
         watcher.poll()
-        self.assertIn("custom_text_center=Server: Frankfurt am Main, Hessen, Germany · 24 ms\n", overlay.path.read_text())
+        self.assertIn("time_format=Server: Frankfurt am Main, Hessen, Germany · 24 ms\n", overlay.path.read_text())
         self.now += BANNER_SECONDS
         watcher.poll()
         self.assertEqual(f"time\ntime_no_label\ntime_format=PING 24 ms\n{own}", overlay.path.read_text())
@@ -632,7 +632,7 @@ class WatcherTests(unittest.TestCase):
         watcher, overlay, players = self._yellow_watcher(own, server_location=True)
         self._write(JOIN, PUBLIC, CONNECTED)
         watcher.poll()
-        self.assertIn("custom_text_center=Server: Frankfurt am Main, Hessen, Germany · 24 ms\n", overlay.path.read_text())
+        self.assertIn("time_format=Server: Frankfurt am Main, Hessen, Germany · 24 ms\n", overlay.path.read_text())
         self.assertEqual([], players)
         self.now += BANNER_SECONDS
         watcher.poll()
@@ -705,7 +705,7 @@ class WatcherTests(unittest.TestCase):
         player.reads += 1
         self._write(JOIN, PUBLIC, CONNECTED)
         watcher.poll()
-        self.assertIn("custom_text_center=Server: Frankfurt am Main, Hessen, Germany · 31 ms\n", overlay.path.read_text())
+        self.assertIn("time_format=Server: Frankfurt am Main, Hessen, Germany · 31 ms\n", overlay.path.read_text())
         self.assertEqual(1, player.hidden)
         self.now += BANNER_SECONDS
         watcher.poll()
@@ -749,7 +749,8 @@ class WatcherTests(unittest.TestCase):
         from roseblox.backend.game_overlay import HIDDEN
 
         for resting, expected in (
-            (HIDDEN, "legacy_layout=0\ntext_color=FDF909\nfont_size=44\nwidth=160\ncustom_text=PING 24 ms\n"),
+            (HIDDEN, "legacy_layout=0\ntext_color=FDF909\ntable_columns=1\nwidth=136\ntime\ntime_no_label\n"
+                     "time_format=PING 24 ms\n"),
             ("fps\nmedia_player\n", "time\ntime_no_label\ntime_format=PING 24 ms\nfps\nmedia_player\n"),
         ):
             watcher, overlay, players = self._yellow_watcher(resting)

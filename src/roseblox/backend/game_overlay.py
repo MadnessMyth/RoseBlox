@@ -8,8 +8,14 @@ of its own (``MANGOHUD_CONFIGFILE``), which MangoHud watches and re-reads when i
 - banner: only one line of text at the top, for ``BANNER_SECONDS``, then back to resting;
 - ping: resting with a ``PING`` row added, while the constant ping overlay is on.
 
-MangoHud's default ("legacy") layout ignores custom text, so the banner briefly replaces a
-user's HUD instead of being added to it.
+MangoHud draws one HUD in one place, so the banner briefly replaces a user's HUD instead of
+being added to it.
+
+Every config of one launch keeps the font settings of its resting config. A reloaded config with
+other ones makes MangoHud rebuild its font inside the game, which under Rosemary has left
+MangoHud 0.8.4 without a HUD and then aborted the game ("Font Atlas not built!"). So a line of
+text is MangoHud's clock line with the text as its format: that line is drawn in the HUD's stat
+font, where custom text is drawn at about half that size.
 
 An unchanged file is left alone, so MangoHud only re-reads its config when the HUD changes.
 """
@@ -26,11 +32,16 @@ from . import mangohud
 
 CONFIG_VARIABLE = "MANGOHUD_CONFIGFILE"
 BANNER_SECONDS = 10
-BANNER_FONT_SIZE = 36
-MIN_BANNER_WIDTH = 360
 PING_COLOR = "FDF909"
-# MangoHud draws custom text at 0.55 × font_size, so this gives its default stat size of 24.
-PING_FONT_SIZE = 44
+FONT_OPTIONS = (
+    "font_size", "font_size_text", "font_size_secondary", "font_scale", "font_file", "font_file_text",
+    "font_glyph_ranges", "no_small_font",
+)
+DEFAULT_FONT_SIZE = 24
+# MangoHud's own font is monospaced, each character about half as wide as the font size. A HUD does not
+# widen for a long line, so its width is set to fit, with MangoHud's 5 pixel margin on both sides.
+CHARACTER_WIDTH = 0.51
+LINE_MARGINS = 14
 CLOCK_OPTIONS = ("time", "time_format", "time_no_label")
 DEFAULT_TIME_FORMAT = "%T"
 MEDIA_OPTIONS = (
@@ -59,15 +70,29 @@ def clean_text(text: str) -> str:
     return cleaned if len(cleaned) <= MAX_TEXT else cleaned[: MAX_TEXT - 1].rstrip() + "…"
 
 
-def banner_config(text: str) -> str:
-    line = clean_text(text)
-    # MangoHud does not widen the HUD for custom text, so a long line would be cut off. Its custom text
-    # font is about 0.28 × font_size wide per character.
-    width = max(MIN_BANNER_WIDTH, round(len(line) * BANNER_FONT_SIZE * 0.3) + 40)
-    return (
-        f"legacy_layout=0\nposition=top-center\nfont_size={BANNER_FONT_SIZE}\nbackground_alpha=0.7\n"
-        f"round_corners=10\nwidth={width}\ncustom_text_center={line}\n"
-    )
+def banner_config(text: str, resting: str = HIDDEN) -> str:
+    return _line_config(clean_text(text), resting, "position=top-center", "background_alpha=0.7", "round_corners=10")
+
+
+def _line_config(text: str, resting: str, *settings: str) -> str:
+    """A HUD of one line, ``text``, in the stat font of ``resting``."""
+    fonts = [line for line in resting.splitlines() if _option(line)[0] in FONT_OPTIONS]
+    options = dict(_option(line) for line in fonts)
+    size = _size(options.get("font_size"), DEFAULT_FONT_SIZE) * _size(options.get("font_scale"), 1.0)
+    width = round(len(text) * size * CHARACTER_WIDTH) + LINE_MARGINS
+    # The format goes through strftime, where only "%" stands for something.
+    return "\n".join((
+        "legacy_layout=0", *settings, "table_columns=1", f"width={width}", *fonts,
+        "time", "time_no_label", f"time_format={text.replace('%', '%%')}",
+    )) + "\n"
+
+
+def _size(value: str | None, default: float) -> float:
+    try:
+        size = float(value) if value is not None else default
+    except ValueError:
+        return default
+    return size if 0 < size < 10_000 else default
 
 
 def ping_text(ping_ms: int) -> str:
@@ -85,11 +110,10 @@ def media_row_fits(resting: str) -> bool:
 def ping_config(resting: str, ping_ms: int, player: str | None = None) -> str:
     """MangoHud config with a ``PING`` row added to ``resting``.
 
-    MangoHud has one text color for the whole HUD, draws custom text small, and its default layout
-    ignores custom text. So in a user's HUD the row is MangoHud's clock line with the ping as its
-    text: the first row, at stat size, in the HUD's own text color, with every other row as it was.
-    A HUD the user already shows the clock in keeps it, in front of the ping. Only a HUD that holds
-    nothing but the ping is yellow.
+    MangoHud has one text color for the whole HUD and its default layout ignores custom text. So in
+    a user's HUD the row is MangoHud's clock line with the ping as its text: the first row, at stat
+    size, in the HUD's own text color, with every other row as it was. A HUD the user already shows
+    the clock in keeps it, in front of the ping. Only a HUD that holds nothing but the ping is yellow.
 
     The one line MangoHud colors by itself is its media player's. ``player`` names an MPRIS player
     whose track title is the ping (``ping_player``); the row in a user's HUD is then that line, in
@@ -98,11 +122,7 @@ def ping_config(resting: str, ping_ms: int, player: str | None = None) -> str:
     """
     text = ping_text(ping_ms)
     if resting == HIDDEN:
-        # MangoHud does not widen the HUD for custom text; it is about 13 pixels a character at this size.
-        return (
-            f"legacy_layout=0\ntext_color={PING_COLOR}\nfont_size={PING_FONT_SIZE}\n"
-            f"width={len(text) * 13 + 30}\ncustom_text={text}\n"
-        )
+        return _line_config(text, resting, f"text_color={PING_COLOR}")
     lines = [(line, *_option(line)) for line in resting.splitlines()]
     options = {name: value for _line, name, value in lines}
     if player and media_row_fits(resting):
@@ -173,7 +193,7 @@ class GameOverlay:
         return os.fsencode(f"{CONFIG_VARIABLE}={self.path}") in environment.split(b"\0")
 
     def show(self, text: str) -> None:
-        self._write(self.path, banner_config(text))
+        self._write(self.path, banner_config(text, self.resting()))
 
     def media_row_fits(self) -> bool:
         return media_row_fits(self.resting())

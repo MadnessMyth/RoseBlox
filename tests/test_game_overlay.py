@@ -34,28 +34,47 @@ class OverlayTextTests(unittest.TestCase):
         self.assertTrue(long.endswith("…"))
 
     def test_banner_shows_only_the_text_at_the_top_center(self):
-        config = banner_config("Server: Frankfurt, Germany")
-        self.assertIn("legacy_layout=0\n", config)
-        self.assertIn("position=top-center\n", config)
-        self.assertIn("font_size=36\n", config)
-        self.assertIn("background_alpha=0.7\n", config)
-        self.assertTrue(config.endswith("custom_text_center=Server: Frankfurt, Germany\n"))
-        self.assertNotIn("no_display", config)
+        self.assertEqual(
+            "legacy_layout=0\nposition=top-center\nbackground_alpha=0.7\nround_corners=10\ntable_columns=1\n"
+            "width=332\ntime\ntime_no_label\ntime_format=Server: Frankfurt, Germany\n",
+            banner_config("Server: Frankfurt, Germany"),
+        )
 
     def test_a_long_banner_is_wide_enough_for_its_text(self):
         line = "Server: Santa Clara, California, United States of America"
-        config = banner_config(line)
-        width = int(config.split("width=")[1].split("\n")[0])
-        self.assertGreater(width, 600)
-        self.assertLess(width, 900)
+        self.assertIn("width=712\n", banner_config(line))
+        # A HUD's font size and scale make its characters wider.
+        self.assertIn("width=1409\n", banner_config(line, "fps\nfont_size=32\nfont_scale=1.5\n"))
+        for broken in ("font_size=0\n", "font_size=big\n", "font_scale=-1\n", "font_size=inf\n", "font_scale=nan\n"):
+            self.assertIn("width=712\n", banner_config(line, broken), broken)
+
+    def test_banner_text_is_not_a_clock_format(self):
+        self.assertIn("time_format=Server: 100%% sure\n", banner_config("Server: 100% sure"))
 
     def test_ping_on_its_own_is_yellow_at_stat_size(self):
         self.assertEqual(
-            "legacy_layout=0\ntext_color=FDF909\nfont_size=44\nwidth=160\ncustom_text=PING 24 ms\n",
+            "legacy_layout=0\ntext_color=FDF909\ntable_columns=1\nwidth=136\ntime\ntime_no_label\n"
+            "time_format=PING 24 ms\n",
             ping_config(HIDDEN, 24),
         )
-        self.assertIn("width=186\ncustom_text=PING 1234 ms\n", ping_config(HIDDEN, 1234))
-        self.assertIn("custom_text=PING 1 ms\n", ping_config(HIDDEN, 0))
+        self.assertIn("width=161\ntime\ntime_no_label\ntime_format=PING 1234 ms\n", ping_config(HIDDEN, 1234))
+        self.assertIn("time_format=PING 1 ms\n", ping_config(HIDDEN, 0))
+
+    def test_every_hud_of_a_launch_keeps_the_fonts_of_its_resting_config(self):
+        # A reloaded config with other font settings makes MangoHud rebuild its font inside the game.
+        def fonts(config):
+            return [line for line in config.splitlines() if line.split("=")[0].strip() in game_overlay.FONT_OPTIONS]
+
+        for resting in (
+            HIDDEN, "", "fps\ngpu_stats\n",
+            "fps\nfont_size=20\nfont_scale = 1.5  # big\nfont_file=/fonts/a.ttf\nno_small_font\nmedia_player\n",
+            "font_size_text=30\nfont_size_secondary=12\nfont_file_text=/fonts/b.ttf\nfont_glyph_ranges=korean\n",
+        ):
+            for config in (
+                banner_config("Server: Tokyo, Japan", resting), ping_config(resting, 31),
+                ping_config(resting, 31, "roseblox.instance7"),
+            ):
+                self.assertEqual(fonts(resting), fonts(config), (resting, config))
 
     def test_ping_in_the_users_hud_is_a_first_row_that_changes_nothing_else(self):
         self.assertEqual("time\ntime_no_label\ntime_format=PING 31 ms\n", ping_config("", 31))
@@ -129,7 +148,7 @@ class PrepareLaunchTests(unittest.TestCase):
         self.assertEqual(HIDDEN, overlay.path.read_text())
         self.assertEqual(0o600, overlay.path.stat().st_mode & 0o777)
         overlay.show("Server: Tokyo, Japan")
-        self.assertIn("custom_text_center=Server: Tokyo, Japan", overlay.path.read_text())
+        self.assertIn("time_format=Server: Tokyo, Japan\n", overlay.path.read_text())
         GameOverlay(overlay.path).hide()
         self.assertEqual(HIDDEN, overlay.path.read_text())
         overlay.remove()
@@ -146,14 +165,15 @@ class PrepareLaunchTests(unittest.TestCase):
         overlay, _changes, _problem = prepare_launch(env, "rosemary")
         self.assertEqual("fps_only\n", overlay.path.read_text())
         own = self.root / "mine.conf"
-        own.write_text("cpu_stats\n")
+        own.write_text("cpu_stats\nfont_size=30\n")
         overlay, changes, _problem = prepare_launch({**env, CONFIG_VARIABLE: str(own)}, "rosemary")
-        self.assertEqual("cpu_stats\n", overlay.path.read_text())
+        self.assertEqual("cpu_stats\nfont_size=30\n", overlay.path.read_text())
         self.assertEqual(str(overlay.path), changes[CONFIG_VARIABLE])
         overlay.show("Server: Paris, France")
+        self.assertIn("font_size=30\n", overlay.path.read_text())
         overlay.hide()
-        self.assertEqual("cpu_stats\n", overlay.path.read_text())
-        self.assertEqual("cpu_stats\n", own.read_text())
+        self.assertEqual("cpu_stats\nfont_size=30\n", overlay.path.read_text())
+        self.assertEqual("cpu_stats\nfont_size=30\n", own.read_text())
 
     def test_an_empty_user_setup_means_mangohud_defaults(self):
         overlay, _changes, _problem = prepare_launch({**self.env, "MANGOHUD": "1"}, "rosemary")
