@@ -1,6 +1,6 @@
 """A short banner drawn inside the Roblox Player by MangoHud's Vulkan layer.
 
-Desktop notifications are held back while a game is fullscreen; MangoHud draws on the
+Some desktops hold notifications back while a game is fullscreen; MangoHud draws on the
 game's own frames, so the banner shows there too. Roseblox gives the launch a config file
 of its own (``MANGOHUD_CONFIGFILE``), which MangoHud watches and re-reads when it changes:
 

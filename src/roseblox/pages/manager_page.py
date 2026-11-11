@@ -2566,9 +2566,9 @@ class SettingsPage(Gtk.Box):
         self.in_game_warning.set_visible(not installed)
         if installed:
             row.set_subtitle(
-                "Shows the location at the top of the game for 10 seconds, even in fullscreen, where desktop "
-                "notifications are hidden. Drawn by MangoHud. Turn this off to get a desktop notification instead "
-                "if the banner does not work for you. Applies from the next launch."
+                "Shows the location at the top of the game for 10 seconds, fullscreen or not. Drawn by MangoHud. "
+                "Turn this off to get a desktop notification instead if the banner does not work for you. Applies "
+                "from the next launch."
             )
         else:
             row.set_subtitle(

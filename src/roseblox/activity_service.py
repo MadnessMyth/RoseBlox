@@ -40,6 +40,9 @@ PING_INTERVAL_SECONDS = 30.0
 PLAYER_ROW_POLLS = 5
 # MangoHud prints this once per process, to the launch's output, when a Vulkan user in it is on its blacklist.
 MANGOHUD_BLACKLISTED = "is blacklisted in MangoHud"
+# The server location notification is critical, which desktops show over a fullscreen game and in Do Not Disturb
+# mode; KDE and GNOME keep a critical notification until it is closed, so the watcher closes it after this long.
+NOTIFICATION_SECONDS = 8.0
 
 
 def _log(message: str) -> None:
@@ -65,11 +68,11 @@ def process_started_at(start_time: int) -> float | None:
     return None
 
 
-def send_notification(summary: str, body: str) -> None:
+def send_notification(summary: str, body: str, replaces: int = 0) -> int:
     from gi.repository import Gio, GLib
 
     bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
-    bus.call_sync(
+    reply = bus.call_sync(
         "org.freedesktop.Notifications",
         "/org/freedesktop/Notifications",
         "org.freedesktop.Notifications",
@@ -77,11 +80,29 @@ def send_notification(summary: str, body: str) -> None:
         GLib.Variant(
             "(susssasa{sv}i)",
             (
-                "Roseblox", 0, "io.github.roseblox.Roseblox", summary, body, [],
-                {"desktop-entry": GLib.Variant("s", "io.github.roseblox.Roseblox")}, 8000,
+                "Roseblox", replaces, "io.github.roseblox.Roseblox", summary, body, [],
+                {"desktop-entry": GLib.Variant("s", "io.github.roseblox.Roseblox"), "urgency": GLib.Variant("y", 2)},
+                int(NOTIFICATION_SECONDS * 1000),
             ),
         ),
         GLib.VariantType.new("(u)"),
+        Gio.DBusCallFlags.NONE,
+        3000,
+        None,
+    )
+    return reply.unpack()[0]
+
+
+def close_notification(notification_id: int) -> None:
+    from gi.repository import Gio, GLib
+
+    Gio.bus_get_sync(Gio.BusType.SESSION, None).call_sync(
+        "org.freedesktop.Notifications",
+        "/org/freedesktop/Notifications",
+        "org.freedesktop.Notifications",
+        "CloseNotification",
+        GLib.Variant("(u)", (notification_id,)),
+        None,
         Gio.DBusCallFlags.NONE,
         3000,
         None,
@@ -103,6 +124,7 @@ class ActivityWatcher:
         locate=locate_server,
         ping=ping_server,
         notify=send_notification,
+        close_notification=close_notification,
         clock=time.time,
         sleep=time.sleep,
         process_snapshot=read_process_snapshot,
@@ -129,6 +151,9 @@ class ActivityWatcher:
         self.locate = locate
         self.ping = ping
         self.notify = notify
+        self.close_notification = close_notification
+        # The notification on screen, and when the watcher closes it.
+        self._notification: tuple[int, float] | None = None
         self.clock = clock
         self.sleep = sleep
         self.process_snapshot = process_snapshot
@@ -184,6 +209,7 @@ class ActivityWatcher:
             self._stop_microphone()
             self._finish_overlay()
             self._stop_ping_player()
+            self._close_notification()
         return 0
 
     def _guarded(self, step: Callable, *arguments) -> None:
@@ -271,6 +297,8 @@ class ActivityWatcher:
                 self._show_ping_row(self._last_ping_ms, settings)
             else:
                 self._hide_overlay()
+        if self._notification is not None and self.clock() >= self._notification[1]:
+            self._close_notification()
         source = self._source()
         for line in output if source is self.follower else source.read_lines():
             for event in self.tracker.feed(line):
@@ -555,9 +583,24 @@ class ActivityWatcher:
             self._overlay_call(self._frozen_overlay.remove)
 
     def _notify(self, summary: str, body: str) -> None:
+        # A new location replaces the one still on screen.
+        replaces = self._notification[0] if self._notification is not None else 0
         try:
-            self.notify(summary, body)
+            notification_id = self.notify(summary, body, replaces)
         except Exception as error:  # noqa: BLE001 - a missing notification server must not stop the watcher
+            _log(f"notification: {error}")
+            return
+        if notification_id:
+            self._notification = (notification_id, self.clock() + NOTIFICATION_SECONDS)
+
+    def _close_notification(self) -> None:
+        if self._notification is None:
+            return
+        notification_id, _until = self._notification
+        self._notification = None
+        try:
+            self.close_notification(notification_id)
+        except Exception as error:  # noqa: BLE001 - see _notify
             _log(f"notification: {error}")
 
 

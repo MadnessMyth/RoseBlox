@@ -478,7 +478,7 @@ class WatcherTests(unittest.TestCase):
             presence_factory=FakePresence,
             game_lookup=lookup,
             locate=lambda address: "Frankfurt am Main, Hessen, Germany",
-            notify=lambda summary, body: self.notifications.append((summary, body)),
+            notify=lambda summary, body, _replaces: self.notifications.append((summary, body)),
             clock=lambda: 1000.0,
             sleep=lambda _seconds: None,
             process_snapshot=lambda pid: SimpleNamespace(start_time=self.start_time),
@@ -511,6 +511,59 @@ class WatcherTests(unittest.TestCase):
         self._write(DISCONNECT, JOIN, CONNECTED)
         watcher.poll()
         self.assertEqual([2753915549], self.lookups)
+
+    def test_the_location_notification_is_closed_after_its_time_and_when_the_player_ends(self):
+        from roseblox.activity_service import NOTIFICATION_SECONDS
+
+        self.settings = WhilePlaying(server_location=True)
+        sent, closed = [], []
+
+        def notify(_summary, _body, replaces):
+            sent.append(replaces)
+            return replaces or 41 + len(sent)
+
+        self.now = 1000.0
+        watcher = self._watcher(notify=notify, close_notification=closed.append, clock=lambda: self.now)
+        self._write(JOIN, PUBLIC, CONNECTED)
+        watcher.poll()
+        self.now += NOTIFICATION_SECONDS - 1
+        watcher.poll()
+        # Another server's location replaces the one on screen, which then stays for the full time again.
+        self._write(DISCONNECT, JOIN, PUBLIC, CONNECTED)
+        watcher.poll()
+        self.now += NOTIFICATION_SECONDS - 1
+        watcher.poll()
+        self.assertEqual([], closed)
+        self.now += 1
+        watcher.poll()
+        watcher.poll()
+        self.assertEqual([42], closed)
+        self._write(DISCONNECT, JOIN, PUBLIC, CONNECTED)
+        watcher.poll()
+        self.start_time = 999
+        self.assertEqual(0, watcher.run())
+        self.assertEqual([0, 42, 0], sent)
+        self.assertEqual([42, 44], closed)
+
+    def test_the_location_notification_is_critical_so_it_shows_over_a_fullscreen_game(self):
+        from gi.repository import GLib
+
+        from roseblox.activity_service import close_notification, send_notification
+
+        calls = []
+
+        class Bus:
+            def call_sync(self, _name, _path, _interface, method, parameters, *_rest):
+                calls.append((method, parameters.unpack()))
+                return GLib.Variant("(u)", (42,))
+
+        with patch("gi.repository.Gio.bus_get_sync", return_value=Bus()):
+            self.assertEqual(42, send_notification("Connected to a Roblox server", "The server is in Frankfurt.", 41))
+            close_notification(42)
+        (method, (app, replaces, _icon, _summary, _body, actions, hints, timeout)), closing = calls
+        self.assertEqual(("Notify", "Roseblox", 41, [], 8000), (method, app, replaces, actions, timeout))
+        self.assertEqual(2, hints["urgency"])
+        self.assertEqual(("CloseNotification", (42,)), closing)
 
     def test_join_button_can_be_turned_off_and_private_servers_never_get_one(self):
         self.settings = WhilePlaying(True, False, "123456789012345678", False, False)
