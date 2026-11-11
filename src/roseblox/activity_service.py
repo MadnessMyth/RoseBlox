@@ -34,6 +34,7 @@ USAGE = "Usage: roseblox --activity-watch PID START_TIME LOG [ROBLOX_LOG_DIRECTO
 POLL_SECONDS = 1.0
 DISCORD_RETRY_SECONDS = 30.0
 LOG_SEARCH_SECONDS = 5.0
+LOG_MISSING_SECONDS = 60.0
 PING_INTERVAL_SECONDS = 30.0
 # Polls MangoHud has to ask the yellow ping row's media player for its title, which it does when it loads the row.
 PLAYER_ROW_POLLS = 5
@@ -97,6 +98,7 @@ class ActivityWatcher:
         self.find_log = find_log
         self.roblox_follower: LogFollower | None = None
         self._log_search_at = 0.0
+        self._reported_missing_log = False
         self.tracker = ActivityTracker()
         self._settings = settings or (lambda: SetupStore().load().while_playing)
         self.presence_factory = presence_factory
@@ -199,6 +201,13 @@ class ActivityWatcher:
                 how = "the Player has it open" if held else "the newest Player log since the launch"
                 _log(f"following Roblox's log {name} ({how})")
                 self.roblox_follower = LogFollower(found)
+            elif not self._reported_missing_log and self.clock() - self._started_at >= LOG_MISSING_SECONDS:
+                self._reported_missing_log = True
+                where = "" if self.roblox_logs is None else f" or in {self.roblox_logs}"
+                _log(
+                    f"no Roblox log found yet among the Player's open files{where}; "
+                    "reading Rosemary's output until one appears"
+                )
         return self.roblox_follower or self.follower
 
     def poll(self) -> None:

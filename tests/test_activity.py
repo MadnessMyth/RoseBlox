@@ -960,6 +960,20 @@ class WatcherTests(unittest.TestCase):
         watcher.poll()
         self.assertEqual(2, len(searches))
 
+    def test_a_roblox_log_that_is_not_found_is_reported_once(self):
+        now = [1000.0]
+        watcher = self._watcher(find_log=lambda *_: None, roblox_logs=Path("/logs"), clock=lambda: now[0])
+        with redirect_stderr(io.StringIO()) as errors:
+            watcher.poll()
+            now[0] += 55
+            watcher.poll()
+            self.assertEqual("", errors.getvalue())
+            for _ in range(3):
+                now[0] += 6
+                watcher.poll()
+        self.assertEqual(1, errors.getvalue().count("no Roblox log found yet"))
+        self.assertIn("among the Player's open files or in /logs;", errors.getvalue())
+
     def test_an_unexpected_error_in_one_join_does_not_lose_the_next(self):
         located = []
 
