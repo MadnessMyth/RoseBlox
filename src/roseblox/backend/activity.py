@@ -13,6 +13,7 @@ import ipaddress
 import os
 import re
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
@@ -28,6 +29,8 @@ _SERVER_ADDRESS = re.compile(
 )
 _PRIVATE_REFERRALS = ("RequestPrivateGame", "GameDetailPageJSHybridEvent")
 _ROBLOX_LOG = re.compile(r"/Logs/Roblox/[^/]+\.log$")
+# The UTC time Roblox started a log, in its name: "0.747.0.7471481_20261111T093736Z_Player_9f731_last.log".
+_LOG_STARTED = re.compile(r"_(?P<time>\d{8}T\d{6}Z)_")
 _LOG_UPTIME = re.compile(r"^\d{4}-\d{2}-\d{2}T[^,]+,(?P<uptime>\d+(?:\.\d+)?),")
 _MAX_LINE = 16 * 1024
 _MAX_READ = 4 * 1024 * 1024
@@ -173,7 +176,7 @@ def find_roblox_log(
     proc: Path = Path("/proc"),
     tree: Callable[..., list[int]] = process_tree,
 ) -> Path | None:
-    """The log file this Player has open, or failing that the newest one written since it started.
+    """The log file this Player has open, or failing that the newest one Roblox started since ``since``.
 
     The open file is reached through ``/proc/<pid>/fd`` so each of several Players
     finds its own log, whatever the guest calls the path.
@@ -206,9 +209,21 @@ def find_roblox_log(
             modified = candidate.stat().st_mtime
         except OSError:
             continue
-        if modified >= since and (newest is None or modified > newest[0]):
+        # A Player that quit just before this one started wrote to its log after ``since`` too.
+        started = _log_started(candidate.name)
+        if (modified if started is None else started) >= since and (newest is None or modified > newest[0]):
             newest = (modified, candidate)
     return None if newest is None else newest[1]
+
+
+def _log_started(name: str) -> float | None:
+    match = _LOG_STARTED.search(name)
+    if match is None:
+        return None
+    try:
+        return datetime.strptime(match["time"], "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc).timestamp()
+    except ValueError:
+        return None
 
 
 class LogFollower:

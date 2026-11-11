@@ -8,6 +8,7 @@ import tempfile
 import threading
 import unittest
 from contextlib import redirect_stderr
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -483,6 +484,7 @@ class WatcherTests(unittest.TestCase):
             process_snapshot=lambda pid: SimpleNamespace(start_time=self.start_time),
             kill=lambda pid, sig: self.kills.append((pid, sig)),
             find_log=lambda *_args: None,
+            started_at=lambda _start_time: None,
         )
         options.update(overrides)
         return ActivityWatcher(4242, 777, self.log, **options)
@@ -960,6 +962,51 @@ class WatcherTests(unittest.TestCase):
         watcher.poll()
         self.assertEqual(2, len(searches))
 
+    def test_logs_are_looked_for_from_when_the_player_process_started(self):
+        searches = []
+        watcher = self._watcher(
+            find_log=lambda pid, directory, since: searches.append(since),
+            roblox_logs=Path("/logs"),
+            started_at=lambda start_time: 990.0 + start_time / 100,
+        )
+        watcher.poll()
+        self.assertEqual([995.77], [round(since, 2) for since in searches])
+
+    def test_a_log_picked_by_its_age_gives_way_to_the_one_the_player_has_open(self):
+        # A Player that quit just before this one started had written to its log moments earlier, and this
+        # Player had not opened its own yet when the watcher first looked.
+        directory = Path(self.directory.name)
+        previous = directory / "previous_Player_last.log"
+        previous.write_text("\n".join((JOIN, PUBLIC, CONNECTED)) + "\n")
+        own = directory / "own_Player_last.log"
+        own.write_text("")
+        held = directory / "fd-7"
+        held.symlink_to(own)
+        searches = []
+        now = [1000.0]
+
+        def find(pid, logs, since):
+            searches.append(logs)
+            if logs is not None:
+                return previous
+            return held if len(searches) > 2 else None
+
+        watcher = self._watcher(find_log=find, roblox_logs=Path("/logs"), clock=lambda: now[0])
+        with redirect_stderr(io.StringIO()) as errors:
+            watcher.poll()
+            now[0] += 6
+            watcher.poll()
+            with own.open("a") as stream:
+                stream.write("\n".join((JOIN.replace("2753915549", "606849621"), PUBLIC, CONNECTED)) + "\n")
+            now[0] += 6
+            watcher.poll()
+            now[0] += 6
+            watcher.poll()
+        self.assertEqual([Path("/logs"), None, None], searches)
+        self.assertIn(f"switching to Roblox's log {own}, which the Player has open", errors.getvalue())
+        self.assertIn("left the game", errors.getvalue())
+        self.assertEqual([2753915549, 606849621], self.lookups)
+
     def test_a_roblox_log_that_is_not_found_is_reported_once(self):
         now = [1000.0]
         watcher = self._watcher(find_log=lambda *_: None, roblox_logs=Path("/logs"), clock=lambda: now[0])
@@ -1013,6 +1060,7 @@ class WatcherTests(unittest.TestCase):
             self.assertEqual(0, watcher.run())
         self.assertEqual(4, len(polls))
         self.assertEqual(1, errors.getvalue().count("unexpected error, still watching"))
+        self.assertIn("Roblox Player process 4242 has ended; stopped watching", errors.getvalue())
 
     def test_log_lines_carry_the_local_time(self):
         with redirect_stderr(io.StringIO()) as errors:
@@ -1056,6 +1104,20 @@ class FindRobloxLogTests(unittest.TestCase):
         self.assertEqual(logs / "b_Player_new.log", find_roblox_log(10, logs, 200, proc=self.proc, tree=tree))
         self.assertIsNone(find_roblox_log(10, logs, 350, proc=self.proc, tree=tree))
         self.assertIsNone(find_roblox_log(10, self.root / "missing", 0, proc=self.proc, tree=tree))
+
+    def test_a_log_roblox_started_before_the_launch_is_not_taken_for_this_players(self):
+        logs = self.root / "Logs" / "Roblox"
+        logs.mkdir(parents=True)
+        launched = datetime(2026, 11, 11, 9, 37, 34, tzinfo=timezone.utc).timestamp()
+        quit_just_before = logs / "0.747.0.7471481_20261111T093730Z_Player_d4f06_last.log"
+        quit_just_before.write_text("")
+        os.utime(quit_just_before, (launched + 3, launched + 3))
+        tree = lambda pid, proc: [10]
+        self.assertIsNone(find_roblox_log(10, logs, launched, proc=self.proc, tree=tree))
+        own = logs / "0.747.0.7471481_20261111T093736Z_Player_9f731_last.log"
+        own.write_text("")
+        os.utime(own, (launched + 2, launched + 2))
+        self.assertEqual(own, find_roblox_log(10, logs, launched, proc=self.proc, tree=tree))
 
 
 if __name__ == "__main__":

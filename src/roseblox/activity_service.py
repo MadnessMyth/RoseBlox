@@ -45,6 +45,24 @@ def _log(message: str) -> None:
     print(f"{stamp} roseblox activity: {message}", file=sys.stderr, flush=True)
 
 
+def _same_file(first: Path, second: Path) -> bool:
+    try:
+        return os.path.samefile(first, second)
+    except OSError:
+        return False
+
+
+def process_started_at(start_time: int) -> float | None:
+    """When a process started, in seconds since the epoch, from its start time in clock ticks after boot."""
+    try:
+        for line in Path("/proc/stat").read_text(encoding="ascii").splitlines():
+            if line.startswith("btime "):
+                return int(line.split()[1]) + start_time / os.sysconf("SC_CLK_TCK")
+    except (OSError, ValueError):
+        pass
+    return None
+
+
 def send_notification(summary: str, body: str) -> None:
     from gi.repository import Gio, GLib
 
@@ -90,6 +108,7 @@ class ActivityWatcher:
         microphone_factory=None,
         overlay: GameOverlay | None = None,
         ping_player_factory=None,
+        started_at=process_started_at,
     ) -> None:
         self.pid = pid
         self.start_time = start_time
@@ -97,6 +116,8 @@ class ActivityWatcher:
         self.roblox_logs = roblox_logs
         self.find_log = find_log
         self.roblox_follower: LogFollower | None = None
+        # Only a log the Player has open is certainly its own; one picked by its age may be another Player's.
+        self._roblox_log_held = False
         self._log_search_at = 0.0
         self._reported_missing_log = False
         self.tracker = ActivityTracker()
@@ -115,6 +136,10 @@ class ActivityWatcher:
         self._discord_retry_at = 0.0
         self._games: dict[int, object] = {}
         self._started_at = self.clock()
+        launched = started_at(start_time)
+        # Logs Roblox started before this Player cannot be its own. Without the process's start time, the watcher's
+        # own start stands in for it; that comes a few seconds later, once the launch is verified.
+        self._logs_since = self._started_at - 5 if launched is None else launched - 2
         self.microphone_factory = microphone_factory or _microphone_service
         self.microphone = None
         self._microphone_settings: tuple | None = None
@@ -149,6 +174,7 @@ class ActivityWatcher:
                 self._guarded(self.poll)
                 self.sleep(POLL_SECONDS)
             self._guarded(self.poll)
+            _log(f"Roblox Player process {self.pid} has ended; stopped watching")
         finally:
             self._clear_presence()
             self._stop_microphone()
@@ -189,26 +215,43 @@ class ActivityWatcher:
             self._microphone_settings = None
 
     def _source(self) -> LogFollower:
-        if self.roblox_follower is None and self.clock() >= self._log_search_at:
-            self._log_search_at = self.clock() + LOG_SEARCH_SECONDS
-            found = self.find_log(self.pid, self.roblox_logs, self._started_at - 5)
-            if found is not None:
-                held = found.is_symlink()
-                try:
-                    name = os.readlink(found) if held else str(found)
-                except OSError:
-                    name = str(found)
-                how = "the Player has it open" if held else "the newest Player log since the launch"
-                _log(f"following Roblox's log {name} ({how})")
-                self.roblox_follower = LogFollower(found)
-            elif not self._reported_missing_log and self.clock() - self._started_at >= LOG_MISSING_SECONDS:
+        if self._roblox_log_held or self.clock() < self._log_search_at:
+            return self.roblox_follower or self.follower
+        self._log_search_at = self.clock() + LOG_SEARCH_SECONDS
+        # Once a log is followed, only the one the Player has open replaces it.
+        directory = self.roblox_logs if self.roblox_follower is None else None
+        found = self.find_log(self.pid, directory, self._logs_since)
+        if found is None:
+            if (
+                self.roblox_follower is None
+                and not self._reported_missing_log
+                and self.clock() - self._started_at >= LOG_MISSING_SECONDS
+            ):
                 self._reported_missing_log = True
                 where = "" if self.roblox_logs is None else f" or in {self.roblox_logs}"
                 _log(
                     f"no Roblox log found yet among the Player's open files{where}; "
                     "reading Rosemary's output until one appears"
                 )
-        return self.roblox_follower or self.follower
+            return self.roblox_follower or self.follower
+        held = found.is_symlink()
+        self._roblox_log_held = held
+        if self.roblox_follower is not None and _same_file(found, self.roblox_follower.path):
+            return self.roblox_follower
+        try:
+            name = os.readlink(found) if held else str(found)
+        except OSError:
+            name = str(found)
+        if self.roblox_follower is None:
+            how = "the Player has it open" if held else "the newest Player log since the launch"
+            _log(f"following Roblox's log {name} ({how})")
+        else:
+            _log(f"switching to Roblox's log {name}, which the Player has open")
+            if self.tracker.in_game:
+                self._guarded(self._handle, GameLeft(False))
+            self.tracker = ActivityTracker()
+        self.roblox_follower = LogFollower(found)
+        return self.roblox_follower
 
     def poll(self) -> None:
         self._guarded(self.update_microphone)
