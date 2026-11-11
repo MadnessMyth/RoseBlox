@@ -816,6 +816,75 @@ class WatcherTests(unittest.TestCase):
         self.assertFalse(overlay.path.exists())
         self.assertFalse(overlay.resting_path.exists())
 
+    def _roblox_log(self, *lines):
+        path = Path(self.directory.name) / "0.747.0.7471481_20261111T152214Z_Player_1cfb7_last.log"
+        with path.open("a") as stream:
+            stream.write("".join(f"{line}\n" for line in lines))
+        return path
+
+    def test_once_mangohud_blacklists_the_player_its_config_is_never_changed_again(self):
+        from roseblox.backend.game_overlay import BANNER_SECONDS
+
+        own = "fps\ngpu_stats\n"
+        self.settings = WhilePlaying(
+            server_location=True, server_location_in_game=True, server_ping=True, server_ping_constant=True,
+        )
+        roblox_log = self._roblox_log()
+        watcher, overlay = self._overlay_watcher(
+            resting=own, ping=lambda _addr: 24, find_log=lambda *_args: roblox_log,
+        )
+        with redirect_stderr(io.StringIO()) as stderr:
+            self._roblox_log(JOIN, PUBLIC, CONNECTED)
+            watcher.poll()
+            self.now += BANNER_SECONDS
+            watcher.poll()
+            self.assertEqual(f"time\ntime_no_label\ntime_format=PING 24 ms\n{own}", overlay.path.read_text())
+            self._roblox_log(HOME)
+            watcher.poll()
+            self.assertEqual(own, overlay.path.read_text())
+            # Rosemary opened the server list, a GTK window inside the Player.
+            self._write("[2026-11-11 18:23:44.460] [MANGOHUD] [info] [blacklist.cpp:86] "
+                        "process 'rosemary' is blacklisted in MangoHud")
+            watcher.poll()
+            self._roblox_log(JOIN, PUBLIC, CONNECTED)
+            watcher.poll()
+            self.now += BANNER_SECONDS + 30
+            watcher.poll()
+            self._roblox_log(HOME)
+            watcher.poll()
+            watcher._finish_overlay()
+        self.assertEqual(1, stderr.getvalue().count("MangoHud stopped taking config changes in this Player"))
+        self.assertNotIn("unexpected error", stderr.getvalue())
+        self.assertEqual(
+            [("Connected to a Roblox server", "The server is in Frankfurt am Main, Hessen, Germany (24 ms).")],
+            self.notifications,
+        )
+        self.assertEqual(own, overlay.path.read_text())
+        # A process whose environment cannot be read still counts as the game for the yellow row's player.
+        self.assertTrue(watcher._is_game(0))
+        self.start_time = 1
+        watcher._finish_overlay()
+        self.assertFalse(overlay.path.exists())
+        self.assertFalse(overlay.resting_path.exists())
+
+    def test_a_banner_on_screen_when_mangohud_blacklists_the_player_stays_as_it_is(self):
+        from roseblox.backend.game_overlay import BANNER_SECONDS
+
+        self.settings = WhilePlaying(server_location=True, server_location_in_game=True)
+        roblox_log = self._roblox_log()
+        watcher, overlay = self._overlay_watcher(resting="", find_log=lambda *_args: roblox_log)
+        self._roblox_log(JOIN, PUBLIC, CONNECTED)
+        watcher.poll()
+        banner = overlay.path.read_text()
+        self.assertIn("time_format=Server: Frankfurt am Main, Hessen, Germany\n", banner)
+        self._write("process 'rosemary' is blacklisted in MangoHud")
+        with redirect_stderr(io.StringIO()) as stderr:
+            watcher.poll()
+            self.now += BANNER_SECONDS
+            watcher.poll()
+        self.assertEqual(banner, overlay.path.read_text())
+        self.assertNotIn("unexpected error", stderr.getvalue())
+
     def test_overlay_path_is_passed_to_the_watcher(self):
         from roseblox.activity_service import main, watcher_arguments
 

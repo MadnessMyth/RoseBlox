@@ -11,11 +11,10 @@ of its own (``MANGOHUD_CONFIGFILE``), which MangoHud watches and re-reads when i
 MangoHud draws one HUD in one place, so the banner briefly replaces a user's HUD instead of
 being added to it.
 
-Every config of one launch keeps the font settings of its resting config. A reloaded config with
-other ones makes MangoHud rebuild its font inside the game, which under Rosemary has left
-MangoHud 0.8.4 without a HUD and then aborted the game ("Font Atlas not built!"). So a line of
-text is MangoHud's clock line with the text as its format: that line is drawn in the HUD's stat
-font, where custom text is drawn at about half that size.
+Every config of one launch keeps the font settings of its resting config: a reloaded config with
+other ones makes MangoHud wait for the GPU and build a new font texture in the middle of the game.
+So a line of text is MangoHud's clock line with the text as its format: that line is drawn in the
+HUD's stat font, where custom text is drawn at about half that size.
 
 An unchanged file is left alone, so MangoHud only re-reads its config when the HUD changes.
 """

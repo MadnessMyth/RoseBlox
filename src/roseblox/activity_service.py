@@ -38,6 +38,8 @@ LOG_MISSING_SECONDS = 60.0
 PING_INTERVAL_SECONDS = 30.0
 # Polls MangoHud has to ask the yellow ping row's media player for its title, which it does when it loads the row.
 PLAYER_ROW_POLLS = 5
+# MangoHud prints this once per process, to the launch's output, when a Vulkan user in it is on its blacklist.
+MANGOHUD_BLACKLISTED = "is blacklisted in MangoHud"
 
 
 def _log(message: str) -> None:
@@ -144,6 +146,8 @@ class ActivityWatcher:
         self.microphone = None
         self._microphone_settings: tuple | None = None
         self.overlay = overlay
+        # The overlay once MangoHud stopped taking new configs; it is only removed when the Player has ended.
+        self._frozen_overlay: GameOverlay | None = None
         self._banner_until: float | None = None
         self._server_address: str | None = None
         self._server_location: str | None = None
@@ -254,6 +258,11 @@ class ActivityWatcher:
         return self.roblox_follower
 
     def poll(self) -> None:
+        # Rosemary's output is read before anything is written to MangoHud, so a config is not written after
+        # MangoHud said it stopped taking them.
+        output = self.follower.read_lines()
+        if self.overlay is not None and any(MANGOHUD_BLACKLISTED in line for line in output):
+            self._freeze_overlay()
         self._guarded(self.update_microphone)
         if self._banner_until is not None and self.clock() >= self._banner_until:
             self._banner_until = None
@@ -263,9 +272,7 @@ class ActivityWatcher:
             else:
                 self._hide_overlay()
         source = self._source()
-        if source is not self.follower:
-            self.follower.read_lines()
-        for line in source.read_lines():
+        for line in output if source is self.follower else source.read_lines():
             for event in self.tracker.feed(line):
                 # The rest of the lines read in this poll would be lost if one event stopped the loop.
                 self._guarded(self._handle, event)
@@ -357,7 +364,9 @@ class ActivityWatcher:
     def _is_game(self, pid: int) -> bool:
         """Whether a process belongs to this launch: MangoHud runs inside the game, and only its
         request for the title says that the row was loaded."""
-        return self.overlay.configures(pid) or _descends_from(pid, self.pid)
+        # Called on the ping player's thread, which can run while the overlay is being frozen.
+        overlay = self.overlay or self._frozen_overlay
+        return (overlay is not None and overlay.configures(pid)) or _descends_from(pid, self.pid)
 
     def _leave_player_row(self) -> None:
         self._player_row_on = False
@@ -523,12 +532,27 @@ class ActivityWatcher:
             return False
         return True
 
+    def _freeze_overlay(self) -> None:
+        """MangoHud's blacklist holds for its whole process. Rosemary opens Roblox's web pages, such as the server
+        list, in a GTK window inside the Player, and MangoHud blacklists GTK's Vulkan renderer. MangoHud keeps
+        drawing the HUD it has, but each config it re-reads from then on (0.8.4 at least) clears the HUD's rows
+        without building them again and leaves its font settings unset. So the config stays as it is."""
+        _log(
+            "MangoHud stopped taking config changes in this Player when a GTK window (such as the server list) "
+            "opened in it; its HUD is left as it is, and the server location and ping are desktop notifications "
+            "until the Player restarts"
+        )
+        self._frozen_overlay, self.overlay = self.overlay, None
+        self._banner_until = None
+        self._leave_player_row()
+
     def _finish_overlay(self) -> None:
         # MangoHud falls back to its full default HUD if its config file disappears mid-game.
-        if self.overlay is None:
-            return
         self._banner_until = None
-        self._overlay_call(self.overlay.hide if self.alive() else self.overlay.remove)
+        if self.overlay is not None:
+            self._overlay_call(self.overlay.hide if self.alive() else self.overlay.remove)
+        elif self._frozen_overlay is not None and not self.alive():
+            self._overlay_call(self._frozen_overlay.remove)
 
     def _notify(self, summary: str, body: str) -> None:
         try:
