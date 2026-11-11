@@ -374,6 +374,21 @@ class WhilePlayingSettingsTests(unittest.TestCase):
             store.path.write_text(json.dumps(document))
             self.assertFalse(store.load().while_playing.server_ping_yellow)
 
+    def test_toast_switch_round_trips_and_is_off_until_turned_on(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = SetupStore(Path(directory) / "setup.json")
+            self.assertFalse(store.load().while_playing.server_location_toast)
+            saved = WhilePlaying(server_location=True, server_location_toast=True)
+            self.assertEqual(saved, store.save_while_playing(saved).while_playing)
+            self.assertEqual(saved, store.load().while_playing)
+            with self.assertRaises(ValueError):
+                store.save_while_playing(WhilePlaying(server_location_toast=1))
+            # Settings saved before the toast existed.
+            document = json.loads(store.path.read_text())
+            del document["while_playing"]["server_location_toast"]
+            store.path.write_text(json.dumps(document))
+            self.assertFalse(store.load().while_playing.server_location_toast)
+
     def test_microphone_settings_round_trip_and_reject_bad_values(self):
         with tempfile.TemporaryDirectory() as directory:
             store = SetupStore(Path(directory) / "setup.json")
@@ -407,6 +422,20 @@ class WhilePlayingSettingsTests(unittest.TestCase):
             store.path.write_text(json.dumps(document))
             with self.assertRaises(SetupSettingsError):
                 store.load()
+
+
+class FakeToast:
+    def __init__(self, text):
+        self.text = text
+        self.status = None
+        self.terminated = False
+
+    def poll(self):
+        return self.status
+
+    def terminate(self):
+        self.terminated = True
+        self.status = -signal.SIGTERM
 
 
 class FakePresence:
@@ -564,6 +593,82 @@ class WatcherTests(unittest.TestCase):
         self.assertEqual(("Notify", "Roseblox", 41, [], 8000), (method, app, replaces, actions, timeout))
         self.assertEqual(2, hints["urgency"])
         self.assertEqual(("CloseNotification", (42,)), closing)
+
+    def _toasts(self):
+        toasts = []
+
+        def start(text):
+            toasts.append(FakeToast(text))
+            return toasts[-1]
+
+        return toasts, start
+
+    def test_with_the_toast_on_the_location_is_a_toast_instead_of_a_notification(self):
+        self.settings = WhilePlaying(
+            server_location=True, server_location_in_game=False, server_ping=True, server_location_toast=True
+        )
+        toasts, start = self._toasts()
+        watcher = self._watcher(toast_factory=start, ping=lambda _address: 24)
+        self._write(JOIN, PUBLIC, CONNECTED)
+        watcher.poll()
+        [toast] = toasts
+        self.assertEqual("Server: Frankfurt am Main, Hessen, Germany · 24 ms", toast.text)
+        toast.status = 0
+        watcher.poll()
+        # A newer location replaces the toast still on screen.
+        self._write(DISCONNECT, JOIN, PUBLIC, CONNECTED)
+        watcher.poll()
+        self._write(DISCONNECT, JOIN, PUBLIC, CONNECTED)
+        watcher.poll()
+        self.assertEqual([False, True, False], [toast.terminated for toast in toasts])
+        self.start_time = 999
+        self.assertEqual(0, watcher.run())
+        self.assertTrue(toasts[2].terminated)
+        self.assertEqual([], self.notifications)
+
+    def test_a_toast_this_desktop_cannot_show_is_sent_as_a_notification(self):
+        from roseblox.toast_service import UNSUPPORTED
+
+        self.settings = WhilePlaying(server_location=True, server_location_toast=True)
+        toasts, start = self._toasts()
+        watcher = self._watcher(toast_factory=start)
+        location = ("Connected to a Roblox server", "The server is in Frankfurt am Main, Hessen, Germany.")
+        with redirect_stderr(io.StringIO()) as stderr:
+            self._write(JOIN, PUBLIC, CONNECTED)
+            watcher.poll()
+            self.assertEqual([], self.notifications)
+            toasts[0].status = UNSUPPORTED
+            watcher.poll()
+            watcher.poll()
+            self.assertEqual([location], self.notifications)
+
+            def missing(_text):
+                raise FileNotFoundError("No such file or directory: 'python3'")
+
+            watcher.toast_factory = missing
+            self._write(DISCONNECT, JOIN, PUBLIC, CONNECTED)
+            watcher.poll()
+        self.assertEqual([location, location], self.notifications)
+        self.assertIn("this desktop cannot show it; sending a desktop notification instead", stderr.getvalue())
+        self.assertIn("toast: No such file or directory", stderr.getvalue())
+
+    def test_the_in_game_banner_comes_first_and_the_toast_takes_over_when_mangohud_stops_taking_configs(self):
+        self.settings = WhilePlaying(server_location=True, server_location_in_game=True, server_location_toast=True)
+        toasts, start = self._toasts()
+        roblox_log = self._roblox_log()
+        watcher, overlay = self._overlay_watcher(
+            resting="", find_log=lambda *_args: roblox_log, toast_factory=start
+        )
+        with redirect_stderr(io.StringIO()):
+            self._roblox_log(JOIN, PUBLIC, CONNECTED)
+            watcher.poll()
+            self.assertIn("time_format=Server: Frankfurt am Main, Hessen, Germany\n", overlay.path.read_text())
+            self.assertEqual([], toasts)
+            self._write("process 'rosemary' is blacklisted in MangoHud")
+            self._roblox_log(HOME, JOIN, PUBLIC, CONNECTED)
+            watcher.poll()
+        self.assertEqual(["Server: Frankfurt am Main, Hessen, Germany"], [toast.text for toast in toasts])
+        self.assertEqual([], self.notifications)
 
     def test_join_button_can_be_turned_off_and_private_servers_never_get_one(self):
         self.settings = WhilePlaying(True, False, "123456789012345678", False, False)

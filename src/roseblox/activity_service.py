@@ -29,6 +29,7 @@ from .backend.game_info import GameInfoError, fetch_game, locate_server, ping_se
 from .backend.game_overlay import BANNER_SECONDS, GameOverlay, ping_text
 from .backend.rosemary import read_process_snapshot
 from .backend.setup import SetupSettingsError, SetupStore, WhilePlaying
+from .toast_service import UNSUPPORTED, toast_arguments
 
 USAGE = "Usage: roseblox --activity-watch PID START_TIME LOG [ROBLOX_LOG_DIRECTORY] [--overlay CONFIG]"
 POLL_SECONDS = 1.0
@@ -133,6 +134,7 @@ class ActivityWatcher:
         overlay: GameOverlay | None = None,
         ping_player_factory=None,
         started_at=process_started_at,
+        toast_factory=None,
     ) -> None:
         self.pid = pid
         self.start_time = start_time
@@ -154,6 +156,9 @@ class ActivityWatcher:
         self.close_notification = close_notification
         # The notification on screen, and when the watcher closes it.
         self._notification: tuple[int, float] | None = None
+        self.toast_factory = toast_factory or _toast_process
+        # The toast's process, and the notification body sent instead if the toast cannot be shown.
+        self._toast: tuple[object, str] | None = None
         self.clock = clock
         self.sleep = sleep
         self.process_snapshot = process_snapshot
@@ -210,6 +215,7 @@ class ActivityWatcher:
             self._finish_overlay()
             self._stop_ping_player()
             self._close_notification()
+            self._end_toast()
         return 0
 
     def _guarded(self, step: Callable, *arguments) -> None:
@@ -299,6 +305,8 @@ class ActivityWatcher:
                 self._hide_overlay()
         if self._notification is not None and self.clock() >= self._notification[1]:
             self._close_notification()
+        if self._toast is not None:
+            self._check_toast()
         source = self._source()
         for line in output if source is self.follower else source.read_lines():
             for event in self.tracker.feed(line):
@@ -550,7 +558,41 @@ class ActivityWatcher:
                 self._leave_player_row()
                 self._banner_until = self.clock() + BANNER_SECONDS
                 return
+        if settings.server_location_toast and self._show_toast(banner_text, notify_body):
+            return
         self._notify("Connected to a Roblox server", notify_body)
+
+    def _show_toast(self, text: str, body: str) -> bool:
+        self._end_toast()
+        try:
+            process = self.toast_factory(text)
+        except OSError as error:
+            _log(f"toast: {error}")
+            return False
+        self._toast = (process, body)
+        return True
+
+    def _check_toast(self) -> None:
+        """A toast that cannot be shown on this desktop says why and exits at once."""
+        process, body = self._toast
+        status = process.poll()
+        if status is None:
+            return
+        self._toast = None
+        if status == UNSUPPORTED:
+            _log("toast: this desktop cannot show it; sending a desktop notification instead")
+        elif status != 0:
+            _log(f"toast: it exited with status {status}; sending a desktop notification instead")
+        if status != 0:
+            self._notify("Connected to a Roblox server", body)
+
+    def _end_toast(self) -> None:
+        if self._toast is None:
+            return
+        process, _body = self._toast
+        self._toast = None
+        if process.poll() is None:
+            process.terminate()
 
     def _overlay_call(self, method, *arguments) -> bool:
         try:
@@ -567,8 +609,8 @@ class ActivityWatcher:
         without building them again and leaves its font settings unset. So the config stays as it is."""
         _log(
             "MangoHud stopped taking config changes in this Player when a GTK window (such as the server list) "
-            "opened in it; its HUD is left as it is, and the server location and ping are desktop notifications "
-            "until the Player restarts"
+            "opened in it; its HUD is left as it is, and the server location and ping come as a desktop "
+            "notification or toast until the Player restarts"
         )
         self._frozen_overlay, self.overlay = self.overlay, None
         self._banner_until = None
@@ -624,6 +666,13 @@ def _descends_from(pid: int, ancestor: int) -> bool:
         except (OSError, ValueError, IndexError):
             return False
     return False
+
+
+def _toast_process(text: str):
+    import subprocess
+
+    # Its output goes to the watcher's log.
+    return subprocess.Popen(toast_arguments(text), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
 
 
 def _ping_player(is_game):

@@ -31,6 +31,8 @@ _PACKAGES = {
     "xdg-mime": {"pacman": "xdg-utils", "apt": "xdg-utils", "dnf": "xdg-utils", "zypper": "xdg-utils"},
     "gamemoded": {"pacman": "gamemode", "apt": "gamemode", "dnf": "gamemode", "zypper": "gamemode"},
     "mangohud": {"pacman": "mangohud", "apt": "mangohud", "dnf": "mangohud", "zypper": "mangohud"},
+    # The GObject bindings, which bring the library; Debian 13 has them, Ubuntu 24.04 does not.
+    "gtk4-layer-shell": {"pacman": "gtk4-layer-shell", "apt": "gir1.2-gtk4layershell-1.0", "dnf": "gtk4-layer-shell"},
 }
 
 

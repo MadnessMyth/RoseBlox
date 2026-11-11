@@ -62,7 +62,8 @@ class Appearance:
 class WhilePlaying:
     """Roblox Player activity features; all off until the user turns them on.
 
-    ``server_location_in_game`` only chooses how the server location is shown once it is on.
+    ``server_location_in_game`` and ``server_location_toast`` only choose how the server location is shown once
+    it is on.
     """
 
     discord_presence: bool = False
@@ -82,6 +83,7 @@ class WhilePlaying:
     server_ping: bool = False
     server_ping_constant: bool = False
     server_ping_yellow: bool = False
+    server_location_toast: bool = False
 
     @property
     def any_enabled(self) -> bool:
@@ -102,7 +104,7 @@ class WhilePlaying:
     def validate(self) -> "WhilePlaying":
         for value in (
             self.discord_presence, self.discord_join_button, self.server_location, self.server_location_in_game,
-            self.server_ping, self.server_ping_constant, self.server_ping_yellow,
+            self.server_ping, self.server_ping_constant, self.server_ping_yellow, self.server_location_toast,
             self.close_on_leave, self.microphone_toggle, self.microphone_inverted, self.microphone_sounds,
         ):
             if not isinstance(value, bool):
@@ -300,6 +302,7 @@ class SetupStore:
             "server_ping": settings.server_ping,
             "server_ping_constant": settings.server_ping_constant,
             "server_ping_yellow": settings.server_ping_yellow,
+            "server_location_toast": settings.server_location_toast,
             "close_on_leave": settings.close_on_leave,
             "microphone_toggle": settings.microphone_toggle,
             "microphone_mode": settings.microphone_mode,
@@ -349,7 +352,7 @@ class SetupStore:
                 for name in (
                     "discord_presence", "discord_join_button", "discord_application_id",
                     "server_location", "server_location_in_game", "server_ping", "server_ping_constant",
-                    "server_ping_yellow", "close_on_leave", "microphone_toggle",
+                    "server_ping_yellow", "server_location_toast", "close_on_leave", "microphone_toggle",
                     "microphone_mode",
                     "microphone_release_delay_ms", "microphone_inverted", "microphone_sounds",
                     "microphone_sound_volume", "microphone_sound_on", "microphone_sound_off",

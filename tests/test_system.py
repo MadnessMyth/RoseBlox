@@ -53,6 +53,11 @@ class SystemTests(unittest.TestCase):
         self.assertEqual("sudo zypper install xdg-utils", install_command("xdg-mime", SystemInfo("opensuse-leap", ("suse",))))
         self.assertIsNone(install_command("bsdtar", SystemInfo("nixos")))
         self.assertIsNone(install_command("unknown", SystemInfo("arch")))
+        self.assertEqual("sudo pacman -S --needed gtk4-layer-shell", install_command("gtk4-layer-shell", SystemInfo("arch")))
+        self.assertEqual(
+            "sudo apt install gir1.2-gtk4layershell-1.0", install_command("gtk4-layer-shell", SystemInfo("debian"))
+        )
+        self.assertIsNone(install_command("gtk4-layer-shell", SystemInfo("opensuse-leap", ("suse",))))
 
     def test_install_hint_falls_back_when_the_command_is_unknown(self):
         self.assertEqual("Install it with “sudo dnf install gamemode”.", install_hint("gamemoded", "x", SystemInfo("fedora")))

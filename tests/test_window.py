@@ -490,6 +490,34 @@ class RealWindowTests(unittest.TestCase):
         self.assertFalse(in_game_row.get_visible())
         self.assertFalse(_wants_in_game_banner(window.setup_state))
 
+    def test_toast_switch_is_greyed_out_where_it_cannot_work_and_says_why_on_hover(self):
+        from roseblox.backend.setup import SetupStore
+
+        with patch("roseblox.pages.manager_page.display_reason", return_value="Needs a Wayland session."):
+            window = self._loaded_window()
+        settings = window.settings_page
+        _location_row, location = settings._playing_rows["server_location"]
+        toast_row, toast = settings._playing_rows["server_location_toast"]
+        self.assertEqual("Show as a toast above the game", toast_row.get_title())
+        self.assertFalse(toast_row.get_visible())
+        location.set_active(True)
+        self.assertTrue(toast_row.get_visible())
+        self.assertFalse(toast_row.get_sensitive())
+        self.assertEqual("Needs a Wayland session.", toast_row.get_tooltip_text())
+        settings._toast_reason = None
+        settings._show_while_playing(window.setup_state.while_playing)
+        self.assertTrue(toast_row.get_sensitive())
+        self.assertIsNone(toast_row.get_tooltip_text())
+        self.assertIn("above fullscreen games", toast_row.get_subtitle())
+        toast.set_active(True)
+        state = SetupStore(self.config_home / "roseblox" / "setup.json").load()
+        self.assertTrue(state.while_playing.server_location_toast)
+        # Once on, it stays switchable where it cannot work, so it can be turned off.
+        settings._toast_reason = "Needs a Wayland session."
+        settings._show_while_playing(state.while_playing)
+        self.assertTrue(toast_row.get_sensitive())
+        self.assertEqual("Needs a Wayland session.", toast_row.get_tooltip_text())
+
     def test_yellow_ping_row_switch_shows_under_the_constant_ping_overlay_and_is_off_until_turned_on(self):
         from roseblox.backend.setup import SetupStore
 

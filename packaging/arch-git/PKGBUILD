@@ -14,6 +14,7 @@ optdepends=(
   'gamemode: Performance → GameMode'
   'mangohud: Performance → MangoHud overlay'
   'libpulse: While Playing → Microphone toggle (pactl)'
+  'gtk4-layer-shell: While Playing → Show as a toast above the game'
 )
 provides=("$_pkgname")
 conflicts=("$_pkgname")

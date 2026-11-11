@@ -50,6 +50,7 @@ from ..backend.updates import APP_TITLES, NotificationLog, UpdateCheckerError, _
 from ..activity_service import watcher_arguments
 from ..backend.playtime import PlaytimeError, PlaytimeStore, describe as describe_playtime
 from ..playtime_service import tracker_arguments
+from ..toast_service import display_reason
 from .rosemary_text import (
     ABOUT_ROW_SUBTITLES,
     INSTALL_BUTTON_LABELS,
@@ -1807,6 +1808,8 @@ class SettingsPage(Gtk.Box):
         )
         playing_group = Adw.PreferencesGroup.new()
         self._playing_block = False
+        # Why this desktop cannot show the toast, or None when it can.
+        self._toast_reason = _NOT_CHECKED
         self.discord_id_row = None
         self._playing_rows: dict[str, tuple[Adw.ActionRow, Gtk.Switch]] = {}
         for field_name, title in (
@@ -1814,6 +1817,7 @@ class SettingsPage(Gtk.Box):
             ("discord_join_button", "Join Server button"),
             ("server_location", "Server location notification"),
             ("server_location_in_game", "Show inside the game"),
+            ("server_location_toast", "Show as a toast above the game"),
             ("server_ping", "Server ping"),
             ("server_ping_constant", "Constant ping overlay (every 30s)"),
             ("server_ping_yellow", "Yellow ping row"),
@@ -2007,6 +2011,7 @@ class SettingsPage(Gtk.Box):
         self.append(self.search_empty)
         location_row = self._playing_rows["server_location"][0]
         in_game_row = self._playing_rows["server_location_in_game"][0]
+        toast_row = self._playing_rows["server_location_toast"][0]
         ping_row = self._playing_rows["server_ping"][0]
         constant_row = self._playing_rows["server_ping_constant"][0]
         self.search = SettingsSearch(
@@ -2014,8 +2019,8 @@ class SettingsPage(Gtk.Box):
             expander_rows=self._inner_rows,
             # Rows the page hides until the switch or choice of the row they are listed under shows them.
             reveals={
-                location_row: [in_game_row],
-                ping_row: [in_game_row, constant_row],
+                location_row: [in_game_row, toast_row],
+                ping_row: [in_game_row, toast_row, constant_row],
                 constant_row: [self._playing_rows["server_ping_yellow"][0]],
                 self.microphone_mode_row: [self.microphone_inverted_row, self.release_delay_row],
                 self.microphone_sounds_row: [
@@ -2555,6 +2560,7 @@ class SettingsPage(Gtk.Box):
             "player that cannot be played or controlled. Programs that list every player may show the ping as a track."
         )
         self._show_in_game_banner(settings)
+        self._show_toast_row(settings)
         self._playing_rows["close_on_leave"][0].set_subtitle(
             "Closes Roblox when you leave a game, instead of going back to the Roblox home screen."
         )
@@ -2575,6 +2581,20 @@ class SettingsPage(Gtk.Box):
                 "Needs MangoHud, which is not installed. " + install_hint("mangohud", "Install MangoHud first.")
                 + " Until then you get a desktop notification."
             )
+
+    def _show_toast_row(self, settings: WhilePlaying) -> None:
+        row, _switch = self._playing_rows["server_location_toast"]
+        row.set_visible(settings.server_location or settings.server_ping)
+        if self._toast_reason is _NOT_CHECKED:
+            self._toast_reason = display_reason(self.get_display())
+        row.set_subtitle(
+            "Shows the location in a small banner at the top of the screen for 8 seconds instead of a desktop "
+            "notification, above fullscreen games too, and clicks go through it. With Show inside the game on, "
+            "it is used when the in-game banner cannot be."
+        )
+        # Greyed out where it cannot work; one that is on stays switchable, so it can be turned off.
+        row.set_sensitive(self._toast_reason is None or settings.server_location_toast)
+        row.set_tooltip_text(self._toast_reason)
 
     def _current_while_playing(self) -> WhilePlaying:
         return getattr(getattr(self.window, "setup_state", None), "while_playing", None) or WhilePlaying()

@@ -26,6 +26,10 @@ def main() -> int:
         from .microphone_service import command_main
 
         return command_main(sys.argv)
+    if sys.argv[1:2] == ["--toast"]:
+        from .toast_service import main as run_toast
+
+        return run_toast(sys.argv)
     from .application import RosebloxApplication
 
     application = RosebloxApplication()
