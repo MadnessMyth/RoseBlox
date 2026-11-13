@@ -1,5 +1,47 @@
 # Roseblox release preparation
 
+## Release checklist — v0.7.0
+
+- [x] Bump the version in `pyproject.toml`, `src/roseblox/__init__.py`, and `packaging/arch-git/PKGBUILD`.
+- [x] Run the full unittest suite, Python compilation, and `git diff --check` on Ubuntu 24.04 (GTK 4.14, libadwaita 1.5).
+- [x] Regenerate `packaging/arch-git/.SRCINFO`, which was missing `gtk4-layer-shell`, and test that both `.SRCINFO` files match their `PKGBUILD`.
+- [ ] Run the unittest suite, build `packaging/arch-git` and `packaging/arch` with `makepkg` on Arch Linux, and check both with `namcap`.
+- [x] Create the annotated `v0.7.0` Git tag on the release commit.
+- [ ] Point `packaging/arch/PKGBUILD` at the `v0.7.0` tag, record the archive checksum, add the `libpulse` and `gtk4-layer-shell` optional dependencies, and update `.SRCINFO`.
+- [ ] The release workflow builds the `.deb` and the AppImage, and creates the GitHub release for `v0.7.0` from these notes with both attached, when the tag is pushed.
+- [ ] Start the released AppImage under Xvfb, and install the released `.deb` on Ubuntu 24.04 and start it.
+- [ ] Try the microphone toggle, the in-game banner, the ping row and the toast with the current Rosemary on KDE Plasma.
+
+## Release notes — v0.7.0
+
+### New
+
+- **Microphone toggle** (Settings → While Playing, off by default). Roblox's microphone stays silent until you use a hotkey, like push to talk in other games. Roblox stays connected to voice chat and just receives silence; Discord and other apps keep your microphone as usual.
+  - **Set Hotkey** lets you choose the key in the dialog your desktop shows (KDE Plasma does this). On desktops without global shortcuts, bind a key to `roseblox --mic toggle` in the keyboard settings instead.
+  - **Toggle** or **Hold** mode. **Inverted** turns Hold into push to mute, and **Release delay** keeps the microphone on for a moment after you let go.
+  - **Sound effects** when the microphone turns on and off, with your own WAV, Ogg or FLAC file if you like, and a volume.
+  - `roseblox --mic status`, `toggle`, `on` and `off` work while a Player runs with the toggle on.
+  - It works with PipeWire and PulseAudio and needs `pactl` (from `libpulse`), or PipeWire's `pw-dump` and `wpctl`. Settings shows a warning when they are missing.
+- **Import from Another App** (Settings → Rosemary, and an optional fifth step in first-time setup). It brings FastFlags and settings over from Roséline, Quadra, Sober, Vinegar, Bloxstrap, Roblox FastFlag Manager and Roblox Manager, or from any `ClientAppSettings.json`-style file. A preview shows what carries over and what is invalid, unsupported or skipped, and nothing is saved until you click **Import**. The other app's files are only read, and sign-in data is never read.
+- **The server location inside the game.** With **Show inside the game** (on by default), the location appears as "Server: Frankfurt am Main, Hessen, Germany" at the top of the Roblox window for 10 seconds, fullscreen or not, instead of a notification. MangoHud draws it, so it needs the `mangohud` package; without it you get the notification as before. Once a Player opens one of Roblox's web pages, such as a game's server list, MangoHud takes no more changes in that Player, so the location comes as a notification or toast until the Player restarts.
+- **Server ping** adds the round trip to the server to the message: "The server is in Frankfurt am Main, Hessen, Germany (24 ms)".
+  - **Constant ping overlay (every 30s)** keeps a `PING 24 ms` row on screen while you are in a game. It is the first row of your MangoHud overlay, or on its own at the top left when the **MangoHud overlay** switch in Performance is off.
+  - **Yellow ping row** makes that row yellow inside your MangoHud overlay too.
+- **Show as a toast above the game** (off by default) shows the server location in a small banner at the top of the screen for 8 seconds, above fullscreen games, on KDE Plasma and on wlroots desktops such as Hyprland and sway. Clicks go through it. It needs a Wayland session and `gtk4-layer-shell`, and is not available in the AppImage. Where it cannot work, the switch is greyed out and hovering over it says why.
+- **Roblox updates for each app.** Settings → Updates has a **Notify me about … updates** switch for Roblox Player and one for Roblox Studio. Under each is **Automatically update … in the background**, which installs new versions without asking and tells you when it is done.
+- **Playtime**: the Player and Studio pages show how long you have played that app from Roseblox, in how many sessions and when you last played, with **Reset**.
+- **Search settings** at the top of Settings (Ctrl+F) lists the settings whose name, description or section match what you type, including ones that only appear once another setting is on.
+
+### Fixed
+
+- The server location notification was often hidden during fullscreen games. It is now a critical notification, so KDE Plasma and GNOME show it over a fullscreen game and in Do Not Disturb mode. Roseblox closes it after 8 seconds, and a newer location replaces it instead of adding another.
+- Some joins got no Discord presence or server location: after a teleport or a join from inside a game, when a Player was started right after another one closed, and for the rest of a launch after an unexpected error. `~/.local/state/roseblox/logs/activity.log` now has the time on each line and says which Roblox log it follows, when each join starts and finishes, and when no log was found.
+
+### Not changed
+
+- Settings, installations and Roblox links carry over from 0.6.0.
+- Nothing new needs installing. The new optional packages are `libpulse` for the microphone toggle and `gtk4-layer-shell` for the toast; on Debian and Ubuntu they are `pulseaudio-utils` and `gir1.2-gtk4layershell-1.0`.
+
 ## Release checklist — v0.6.0
 
 - [x] Bump the version in `pyproject.toml`, `src/roseblox/__init__.py`, and `packaging/arch-git/PKGBUILD`.
