@@ -6,11 +6,11 @@
 - [x] Run the full unittest suite, Python compilation, and `git diff --check` on Ubuntu 24.04 (GTK 4.14, libadwaita 1.5).
 - [x] Regenerate `packaging/arch-git/.SRCINFO`, which was missing `gtk4-layer-shell`, and test that both `.SRCINFO` files match their `PKGBUILD`.
 - [x] Grey out the toast without the Python cairo bindings, which Arch's `python-gobject` and `gtk4-layer-shell` do not pull in, and list `python-cairo` in `packaging/arch-git`.
-- [ ] Run the unittest suite, build `packaging/arch-git` and `packaging/arch` with `makepkg` on Arch Linux, and check both with `namcap`.
+- [x] Run the unittest suite, build `packaging/arch-git` and `packaging/arch` with `makepkg` on Arch Linux (Python 3.14, GTK 4.24, libadwaita 1.10), check both with `namcap`, and install each package.
 - [x] Create the annotated `v0.7.0` Git tag on the release commit.
-- [ ] Point `packaging/arch/PKGBUILD` at the `v0.7.0` tag, record the archive checksum, add the `libpulse`, `gtk4-layer-shell` and `python-cairo` optional dependencies, and update `.SRCINFO`.
-- [ ] The release workflow builds the `.deb` and the AppImage, and creates the GitHub release for `v0.7.0` from these notes with both attached, when the tag is pushed.
-- [ ] Start the released AppImage under Xvfb, and install the released `.deb` on Ubuntu 24.04 and start it.
+- [x] Point `packaging/arch/PKGBUILD` at the `v0.7.0` tag, record the archive checksum, add the `libpulse`, `gtk4-layer-shell` and `python-cairo` optional dependencies, and update `.SRCINFO`.
+- [x] The release workflow builds the `.deb` and the AppImage, and creates the GitHub release for `v0.7.0` from these notes with both attached, when the tag is pushed.
+- [x] Start the released AppImage under Xvfb, and install the released `.deb` on Ubuntu 24.04 and start it.
 - [ ] Try the microphone toggle, the in-game banner, the ping row and the toast with the current Rosemary on KDE Plasma.
 
 ## Release notes — v0.7.0

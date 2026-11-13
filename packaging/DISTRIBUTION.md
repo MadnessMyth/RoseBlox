@@ -45,11 +45,11 @@ Butter, Rosemary's own manager, ships as a Flatpak and runs its own copy of Rose
    makepkg -f && namcap PKGBUILD
    ```
 
-4. Commit and push. The AUR only accepts a push whose `.SRCINFO` matches the `PKGBUILD`:
+4. Commit and push. The AUR reads only `.SRCINFO`, so it must match the `PKGBUILD` (a test in this repository checks that):
 
    ```sh
    git add PKGBUILD .SRCINFO io.github.roseblox.Roseblox.desktop io.github.roseblox.Roseblox.svg
-   git commit -m "Initial upload: roseblox 0.4.1"
+   git commit -m "Initial upload: roseblox 0.7.0"
    git push origin master
    ```
 

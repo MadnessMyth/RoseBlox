@@ -1,6 +1,6 @@
 pkgbase = roseblox
 	pkgdesc = Native GTK launcher and installation manager for Roblox through Rosemary
-	pkgver = 0.6.0
+	pkgver = 0.7.0
 	pkgrel = 1
 	url = https://github.com/MadnessMyth/RoseBlox
 	arch = any
@@ -17,10 +17,13 @@ pkgbase = roseblox
 	optdepends = libarchive: required for importing or extracting Roblox ZIP archives (bsdtar)
 	optdepends = gamemode: Performance → GameMode
 	optdepends = mangohud: Performance → MangoHud overlay
-	source = roseblox-0.6.0.tar.gz::https://github.com/MadnessMyth/RoseBlox/archive/refs/tags/v0.6.0.tar.gz
+	optdepends = libpulse: While Playing → Microphone toggle (pactl)
+	optdepends = gtk4-layer-shell: While Playing → Show as a toast above the game
+	optdepends = python-cairo: While Playing → Show as a toast above the game
+	source = roseblox-0.7.0.tar.gz::https://github.com/MadnessMyth/RoseBlox/archive/refs/tags/v0.7.0.tar.gz
 	source = io.github.roseblox.Roseblox.desktop
 	source = io.github.roseblox.Roseblox.svg
-	sha256sums = 83e7447c8018d04da43febc12190242bae4287dd6df647e31324440d692a1193
+	sha256sums = 79bfcd2403d3b19340ba618de08c99968fcd4f5d7a6855840ea75238d429deac
 	sha256sums = 6c7eb73dbed0dd17ca56a28998921622185f8325d59b7e9f636b3a522f548a7b
 	sha256sums = d95259e28df1478d01c8555180e83dc2d8064b8fc95110a03104152d3278a863
 
