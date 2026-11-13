@@ -58,6 +58,9 @@ class SystemTests(unittest.TestCase):
             "sudo apt install gir1.2-gtk4layershell-1.0", install_command("gtk4-layer-shell", SystemInfo("debian"))
         )
         self.assertIsNone(install_command("gtk4-layer-shell", SystemInfo("opensuse-leap", ("suse",))))
+        self.assertEqual("sudo pacman -S --needed python-cairo", install_command("python-cairo", SystemInfo("arch")))
+        self.assertEqual("sudo apt install python3-gi-cairo", install_command("python-cairo", SystemInfo("ubuntu", ("debian",))))
+        self.assertEqual("sudo dnf install python3-gobject", install_command("python-cairo", SystemInfo("fedora")))
 
     def test_install_hint_falls_back_when_the_command_is_unknown(self):
         self.assertEqual("Install it with “sudo dnf install gamemode”.", install_hint("gamemoded", "x", SystemInfo("fedora")))

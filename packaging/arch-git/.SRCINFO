@@ -20,6 +20,7 @@ pkgbase = roseblox-git
 	optdepends = mangohud: Performance → MangoHud overlay
 	optdepends = libpulse: While Playing → Microphone toggle (pactl)
 	optdepends = gtk4-layer-shell: While Playing → Show as a toast above the game
+	optdepends = python-cairo: While Playing → Show as a toast above the game
 	provides = roseblox
 	conflicts = roseblox
 	source = RoseBlox::git+https://github.com/MadnessMyth/RoseBlox.git#branch=master

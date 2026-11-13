@@ -5,9 +5,10 @@
 - [x] Bump the version in `pyproject.toml`, `src/roseblox/__init__.py`, and `packaging/arch-git/PKGBUILD`.
 - [x] Run the full unittest suite, Python compilation, and `git diff --check` on Ubuntu 24.04 (GTK 4.14, libadwaita 1.5).
 - [x] Regenerate `packaging/arch-git/.SRCINFO`, which was missing `gtk4-layer-shell`, and test that both `.SRCINFO` files match their `PKGBUILD`.
+- [x] Grey out the toast without the Python cairo bindings, which Arch's `python-gobject` and `gtk4-layer-shell` do not pull in, and list `python-cairo` in `packaging/arch-git`.
 - [ ] Run the unittest suite, build `packaging/arch-git` and `packaging/arch` with `makepkg` on Arch Linux, and check both with `namcap`.
 - [x] Create the annotated `v0.7.0` Git tag on the release commit.
-- [ ] Point `packaging/arch/PKGBUILD` at the `v0.7.0` tag, record the archive checksum, add the `libpulse` and `gtk4-layer-shell` optional dependencies, and update `.SRCINFO`.
+- [ ] Point `packaging/arch/PKGBUILD` at the `v0.7.0` tag, record the archive checksum, add the `libpulse`, `gtk4-layer-shell` and `python-cairo` optional dependencies, and update `.SRCINFO`.
 - [ ] The release workflow builds the `.deb` and the AppImage, and creates the GitHub release for `v0.7.0` from these notes with both attached, when the tag is pushed.
 - [ ] Start the released AppImage under Xvfb, and install the released `.deb` on Ubuntu 24.04 and start it.
 - [ ] Try the microphone toggle, the in-game banner, the ping row and the toast with the current Rosemary on KDE Plasma.
@@ -27,7 +28,7 @@
 - **Server ping** adds the round trip to the server to the message: "The server is in Frankfurt am Main, Hessen, Germany (24 ms)".
   - **Constant ping overlay (every 30s)** keeps a `PING 24 ms` row on screen while you are in a game. It is the first row of your MangoHud overlay, or on its own at the top left when the **MangoHud overlay** switch in Performance is off.
   - **Yellow ping row** makes that row yellow inside your MangoHud overlay too.
-- **Show as a toast above the game** (off by default) shows the server location in a small banner at the top of the screen for 8 seconds, above fullscreen games, on KDE Plasma and on wlroots desktops such as Hyprland and sway. Clicks go through it. It needs a Wayland session and `gtk4-layer-shell`, and is not available in the AppImage. Where it cannot work, the switch is greyed out and hovering over it says why.
+- **Show as a toast above the game** (off by default) shows the server location in a small banner at the top of the screen for 8 seconds, above fullscreen games, on KDE Plasma and on wlroots desktops such as Hyprland and sway. Clicks go through it. It needs a Wayland session, `gtk4-layer-shell` and the Python cairo bindings, and is not available in the AppImage. Where it cannot work, the switch is greyed out and hovering over it says why.
 - **Roblox updates for each app.** Settings → Updates has a **Notify me about … updates** switch for Roblox Player and one for Roblox Studio. Under each is **Automatically update … in the background**, which installs new versions without asking and tells you when it is done.
 - **Playtime**: the Player and Studio pages show how long you have played that app from Roseblox, in how many sessions and when you last played, with **Reset**.
 - **Search settings** at the top of Settings (Ctrl+F) lists the settings whose name, description or section match what you type, including ones that only appear once another setting is on.
@@ -40,7 +41,7 @@
 ### Not changed
 
 - Settings, installations and Roblox links carry over from 0.6.0.
-- Nothing new needs installing. The new optional packages are `libpulse` for the microphone toggle and `gtk4-layer-shell` for the toast; on Debian and Ubuntu they are `pulseaudio-utils` and `gir1.2-gtk4layershell-1.0`.
+- Nothing new needs installing. The new optional packages are `libpulse` for the microphone toggle, and `gtk4-layer-shell` and `python-cairo` for the toast; on Debian and Ubuntu they are `pulseaudio-utils`, `gir1.2-gtk4layershell-1.0` and `python3-gi-cairo`.
 
 ## Release checklist — v0.6.0
 

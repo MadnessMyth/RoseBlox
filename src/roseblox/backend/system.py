@@ -33,6 +33,10 @@ _PACKAGES = {
     "mangohud": {"pacman": "mangohud", "apt": "mangohud", "dnf": "mangohud", "zypper": "mangohud"},
     # The GObject bindings, which bring the library; Debian 13 has them, Ubuntu 24.04 does not.
     "gtk4-layer-shell": {"pacman": "gtk4-layer-shell", "apt": "gir1.2-gtk4layershell-1.0", "dnf": "gtk4-layer-shell"},
+    # PyGObject's cairo module; Fedora's python3-gobject has it, python3-gobject-base does not.
+    "python-cairo": {
+        "pacman": "python-cairo", "apt": "python3-gi-cairo", "dnf": "python3-gobject", "zypper": "python3-gobject-cairo",
+    },
 }
 
 

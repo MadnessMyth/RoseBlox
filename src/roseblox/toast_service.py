@@ -38,7 +38,7 @@ def _log(message: str) -> None:
 
 
 def unsupported_reason(
-    *, appimage: bool, wayland: bool, layer_shell: bool, installed: bool, desktop: str = ""
+    *, appimage: bool, wayland: bool, layer_shell: bool, installed: bool, pass_through: bool = True, desktop: str = ""
 ) -> str | None:
     """Why the toast cannot be shown here, or None when it can."""
     if appimage:
@@ -53,6 +53,10 @@ def unsupported_reason(
     if not installed:
         return "Needs gtk4-layer-shell, which is not installed. " + install_hint(
             "gtk4-layer-shell", "Install gtk4-layer-shell first."
+        )
+    if not pass_through:
+        return "Needs the Python cairo bindings, so that clicks go through the toast. " + install_hint(
+            "python-cairo", "Install python-cairo first."
         )
     return None
 
@@ -69,6 +73,18 @@ def layer_shell_installed() -> bool:
     except ValueError:
         return False
     return layer_shell_library() is not None
+
+
+def pass_through_supported() -> bool:
+    """Whether PyGObject can hand GTK the cairo region that lets clicks through the toast."""
+    import gi
+
+    try:
+        gi.require_foreign("cairo")
+        import cairo  # noqa: F401
+    except ImportError:
+        return False
+    return True
 
 
 def _has_global(display, name: str) -> bool:
@@ -107,6 +123,7 @@ def display_reason(display) -> str | None:
         wayland=wayland,
         layer_shell=layer_shell,
         installed=layer_shell_installed(),
+        pass_through=pass_through_supported(),
         desktop=os.environ.get("XDG_CURRENT_DESKTOP", "").split(":")[-1],
     )
 

@@ -3,9 +3,16 @@ import sys
 import unittest
 from unittest.mock import patch
 
-from roseblox.toast_service import UNSUPPORTED, display_reason, main, toast_arguments, unsupported_reason
+from roseblox.toast_service import (
+    UNSUPPORTED,
+    display_reason,
+    main,
+    pass_through_supported,
+    toast_arguments,
+    unsupported_reason,
+)
 
-SUPPORTED = {"appimage": False, "wayland": True, "layer_shell": True, "installed": True}
+SUPPORTED = {"appimage": False, "wayland": True, "layer_shell": True, "installed": True, "pass_through": True}
 
 
 class ReasonTests(unittest.TestCase):
@@ -25,6 +32,18 @@ class ReasonTests(unittest.TestCase):
             )
         # Installing gtk4-layer-shell would not help where the desktop has no layer-shell.
         self.assertIn("no layer-shell", unsupported_reason(**{**SUPPORTED, "layer_shell": False, "installed": False}))
+
+    def test_without_the_cairo_bindings_it_would_take_the_clicks(self):
+        hint = "Install it with “sudo pacman -S --needed python-cairo”."
+        with patch("roseblox.toast_service.install_hint", return_value=hint) as install_hint:
+            self.assertEqual(
+                f"Needs the Python cairo bindings, so that clicks go through the toast. {hint}",
+                unsupported_reason(**{**SUPPORTED, "pass_through": False}),
+            )
+        install_hint.assert_called_once_with("python-cairo", "Install python-cairo first.")
+        self.assertIn("gtk4-layer-shell", unsupported_reason(**{**SUPPORTED, "installed": False, "pass_through": False}))
+        with patch("gi.require_foreign", side_effect=ImportError("No module named 'cairo'")):
+            self.assertFalse(pass_through_supported())
 
     def test_a_display_that_is_not_wayland_cannot_show_it(self):
         with patch("roseblox.toast_service.appimage_path", return_value=None):
