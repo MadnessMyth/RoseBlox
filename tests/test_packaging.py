@@ -141,6 +141,17 @@ class ArchPackagingTests(unittest.TestCase):
             self.assertIn(f"packaging/arch/{asset}", recipe)
             self.assertTrue((ROOT / "packaging" / "arch" / asset).is_file())
 
+    def test_srcinfo_lists_what_each_recipe_declares(self):
+        # The AUR reads only .SRCINFO, so a PKGBUILD change without `makepkg --printsrcinfo` goes unseen there.
+        for directory in ("arch", "arch-git"):
+            recipe = (ROOT / "packaging" / directory / "PKGBUILD").read_text(encoding="utf-8")
+            srcinfo = (ROOT / "packaging" / directory / ".SRCINFO").read_text(encoding="utf-8")
+            for field in ("depends", "makedepends", "optdepends", "sha256sums"):
+                declared = re.findall(r"'([^']*)'", re.search(rf"(?ms)^{field}=\((.*?)\)$", recipe).group(1))
+                self.assertEqual(declared, re.findall(rf"(?m)^\t{field} = (.*)$", srcinfo), f"{directory}: {field}")
+            pkgver = re.search(r"(?m)^pkgver=(.*)$", recipe).group(1)
+            self.assertEqual([pkgver], re.findall(r"(?m)^\tpkgver = (.*)$", srcinfo), directory)
+
     def test_desktop_entry_references_the_packaged_hicolor_icon(self):
         desktop = (ROOT / "packaging" / "arch" / "io.github.roseblox.Roseblox.desktop").read_text(
             encoding="utf-8"
