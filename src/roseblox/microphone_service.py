@@ -113,7 +113,10 @@ class MicrophoneService:
             function()
             return GLib.SOURCE_REMOVE
 
+        # GDBus dispatches method calls at PRIORITY_DEFAULT, and sources of one priority run in the
+        # order they were attached, so a `roseblox --mic` call made after this sees its effect.
         source = GLib.idle_source_new()
+        source.set_priority(GLib.PRIORITY_DEFAULT)
         source.set_callback(call)
         source.attach(self.context)
 
