@@ -21,7 +21,9 @@ from ..backend.installer import InstallProgress, InstallResult, InstallerService
 from ..backend.library import (
     APP_BUNDLE_NAMES,
     InstallationRecord,
+    LAUNCH_VARIANT_LABELS,
     LibraryDataError,
+    discover_launch_variants,
 )
 from ..backend.launch_config import LaunchConfigStore, effective_environment
 from ..backend.rosemary_paths import guest_path
@@ -1176,13 +1178,75 @@ class InstallationPage(Gtk.Box):
         if record.id in self._launching_ids or record.id in self._stopping_ids:
             return
 
+        # A macOS Roblox install may hold both the direct RobloxPlayer.app
+        # (runs the game without checking for updates) and the Roblox.app
+        # updater (rebuilds the latest packages before booting). When both are
+        # present, ask which one to start; with a single variant, launch it
+        # directly without a prompt.
+        variants = discover_launch_variants(record.bundle_path, record.app_type)
+        if len(variants) > 1:
+            self._prompt_launch_variant(record, variants)
+            return
+        bundle_path_override = self._single_variant_override(record, variants)
+        self._begin_launch(record, bundle_path_override=bundle_path_override)
+
+    def _single_variant_override(self, record: InstallationRecord, variants: list) -> str | None:
+        """The bundle path to launch when no choice prompt is needed.
+
+        With one discovered variant, launch that variant directly; with none,
+        fall back to the registered bundle. Returns ``None`` when the chosen
+        path already matches the registered bundle, so the existing strict
+        validation path is used unchanged.
+        """
+        if len(variants) == 1:
+            chosen = str(variants[0].bundle_path)
+            return chosen if chosen != record.bundle_path else None
+        return None
+
+    def _begin_launch(
+        self, record: InstallationRecord, *, bundle_path_override: str | None = None
+    ) -> None:
         self._launching_ids.add(record.id)
         self._refresh_all(reload_library=False)
         threading.Thread(
             target=self._launch_worker,
-            args=(record.id, record),
+            args=(record.id, record, (), None, bundle_path_override),
             daemon=True,
         ).start()
+
+    def _prompt_launch_variant(self, record: InstallationRecord, variants: list) -> None:
+        """Ask whether to start Roblox Player or the Roblox Updater."""
+        title = "Launch Roblox Player or Roblox Updater?"
+        body = (
+            "Two Roblox applications are installed in the same folder. "
+            "Roblox Player runs the game without checking for updates; "
+            "the Roblox Updater rebuilds the latest packages before booting."
+        )
+        dialog = Adw.MessageDialog.new(self.window, title, body)
+        dialog.set_close_response("cancel")
+        for variant in variants:
+            dialog.add_response(variant.role, LAUNCH_VARIANT_LABELS[variant.role])
+        # Prefer the direct player (no update check) as the default choice.
+        default_role = next(
+            (variant.role for variant in variants if variant.role == "player"),
+            variants[0].role,
+        )
+        dialog.set_default_response(default_role)
+        dialog.connect("response", self._on_launch_variant_response, record, variants)
+        dialog.present()
+
+    def _on_launch_variant_response(
+        self, _dialog: Adw.MessageDialog, response: str, record: InstallationRecord, variants: list
+    ) -> None:
+        if response == "cancel":
+            return
+        chosen = next((variant for variant in variants if variant.role == response), None)
+        if chosen is None:
+            return
+        bundle_path_override = (
+            str(chosen.bundle_path) if str(chosen.bundle_path) != record.bundle_path else None
+        )
+        self._begin_launch(record, bundle_path_override=bundle_path_override)
 
     def request_launch_url(self, record: InstallationRecord, uri: str) -> None:
         """Route a validated deep link through the existing Rosemary session flow."""
@@ -1323,7 +1387,12 @@ class InstallationPage(Gtk.Box):
         self._launch_worker(record.id, record, arguments, from_link=False)
 
     def _launch_worker(
-        self, installation_id: str, record: InstallationRecord, guest_arguments=(), from_link: bool | None = None
+        self,
+        installation_id: str,
+        record: InstallationRecord,
+        guest_arguments=(),
+        from_link: bool | None = None,
+        bundle_path_override: str | None = None,
     ) -> None:
         try:
             setup_state = getattr(self.window, "setup_state", None)
@@ -1337,6 +1406,7 @@ class InstallationPage(Gtk.Box):
                 launch_config=launch_config,
                 direct=self._multiple_allowed(record),
                 in_game_banner=_wants_in_game_banner(setup_state) or bool(getattr(launch_config, "mangohud", False)),
+                bundle_path_override=bundle_path_override,
             )
             session.mods_message = mods_message
             wait_for_running(session)

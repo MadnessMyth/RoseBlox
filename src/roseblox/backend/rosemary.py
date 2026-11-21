@@ -454,6 +454,7 @@ def launch_application(
     flag_backup_directory: Path | None = None,
     direct: bool = False,
     in_game_banner: bool = False,
+    bundle_path_override: str | Path | None = None,
 ) -> LaunchSession:
     """Start Rosemary asynchronously and return a bundle-bound process session.
 
@@ -461,10 +462,18 @@ def launch_application(
     keeps running (and logging) after Roseblox exits. With ``launch_config`` the
     bundle's FastFlags are written first, and its environment and arguments apply.
     ``in_game_banner`` prepares MangoHud to show the server location inside the Player.
+    ``bundle_path_override`` starts a sibling bundle chosen from the launch variant
+    prompt (e.g. the ``Roblox.app`` updater) instead of the registered bundle; it is
+    validated with the updater bundle name permitted, since registration rejects it.
     """
     app_type = installation.app_type if isinstance(installation, InstallationRecord) else str(installation["app_type"])
-    bundle_path = installation.bundle_path if isinstance(installation, InstallationRecord) else str(installation["bundle_path"])
-    validate_bundle(bundle_path, app_type)
+    record_bundle_path = installation.bundle_path if isinstance(installation, InstallationRecord) else str(installation["bundle_path"])
+    if bundle_path_override is not None:
+        bundle_path = os.fspath(bundle_path_override)
+        validate_bundle(bundle_path, app_type, allow_updater=True)
+    else:
+        bundle_path = record_bundle_path
+        validate_bundle(bundle_path, app_type)
 
     status = rosemary_status or detect_rosemary()
     if not status.available or status.executable is None:

@@ -19,6 +19,80 @@ APP_BUNDLE_NAMES = {
     "studio": "RobloxStudio.app",
 }
 
+# Updater bundles that sit beside the primary bundle in a macOS Roblox install.
+# Launching the updater runs the Roblox installer, which rebuilds the latest
+# packages before booting; the primary RobloxPlayer.app instead runs the game
+# directly without checking for updates. Studio ships no separate updater bundle.
+APP_UPDATER_BUNDLE_NAMES = {
+    "player": "Roblox.app",
+}
+
+# Human-readable labels for the launch variants offered to the user when more
+# than one Roblox bundle is installed in the same folder.
+LAUNCH_VARIANT_LABELS = {
+    "player": "Roblox Player",
+    "updater": "Roblox Updater",
+}
+
+
+def allowed_bundle_names(app_type: str) -> list[str]:
+    """Bundle directory names accepted for an application type.
+
+    The primary bundle is always returned; the updater bundle is included so
+    callers can describe what is allowed, but ``validate_bundle`` only accepts
+    it when the caller explicitly opts in via ``allow_updater``. Registration
+    and management therefore stay strict, while the launch path can start the
+    updater variant the user picks from the variant prompt.
+    """
+    names: list[str] = []
+    primary = APP_BUNDLE_NAMES.get(app_type)
+    if primary:
+        names.append(primary)
+    updater = APP_UPDATER_BUNDLE_NAMES.get(app_type)
+    if updater and updater not in names:
+        names.append(updater)
+    return names
+
+
+@dataclass(frozen=True)
+class LaunchVariant:
+    """A launchable Roblox bundle discovered beside a registered installation."""
+
+    role: str
+    bundle_path: Path
+
+
+def discover_launch_variants(bundle_path: str | Path, app_type: str) -> list[LaunchVariant]:
+    """Return the launch variants present beside a registered bundle.
+
+    For the player application type, an installation directory may hold both the
+    direct ``RobloxPlayer.app`` (runs the game without checking for updates) and
+    the ``Roblox.app`` updater (rebuilds the latest packages before booting).
+    Each present, ``Contents``-valid bundle becomes a launch variant, ordered
+    with the direct player first so callers can default to it. A single variant
+    means no choice prompt is needed; the caller may launch it directly.
+    """
+    bundle = Path(bundle_path).expanduser().absolute()
+    parent = bundle.parent
+    primary = APP_BUNDLE_NAMES.get(app_type)
+    updater = APP_UPDATER_BUNDLE_NAMES.get(app_type)
+    candidates: list[tuple[str, str]] = []
+    if primary:
+        candidates.append(("player", primary))
+    if updater and updater != primary:
+        candidates.append(("updater", updater))
+    variants: list[LaunchVariant] = []
+    seen: set[Path] = set()
+    for role, name in candidates:
+        candidate = (parent / name).absolute()
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        if candidate.is_dir() and (candidate / "Contents").is_dir():
+            variants.append(LaunchVariant(role=role, bundle_path=candidate))
+    return variants
+
+
 _MUTATION_LOCKS: dict[Path, threading.RLock] = {}
 _MUTATION_LOCKS_GUARD = threading.Lock()
 
@@ -68,16 +142,28 @@ def default_library_path() -> Path:
     return default_data_directory() / "library.json"
 
 
-def validate_bundle(bundle_path: str | Path, app_type: str) -> Path:
-    """Validate the expected .app directory with a practical Contents check."""
+def validate_bundle(bundle_path: str | Path, app_type: str, *, allow_updater: bool = False) -> Path:
+    """Validate the expected .app directory with a practical Contents check.
+
+    By default only the primary bundle (``RobloxPlayer.app`` / ``RobloxStudio.app``)
+    is accepted, which keeps registration and management strict. When
+    ``allow_updater`` is set, the updater bundle (``Roblox.app`` for the player)
+    is also accepted, so the launch path can start the updater variant chosen by
+    the user from the variant prompt.
+    """
     expected_name = APP_BUNDLE_NAMES.get(app_type)
     if expected_name is None:
         raise BundleValidationError(f"Unsupported application type: {app_type}")
+    allowed = [expected_name]
+    if allow_updater:
+        updater_name = APP_UPDATER_BUNDLE_NAMES.get(app_type)
+        if updater_name and updater_name not in allowed:
+            allowed.append(updater_name)
     path = Path(bundle_path).expanduser()
     if not path.exists() or not path.is_dir():
         raise BundleValidationError(f"Application bundle directory does not exist: {path}")
     path = path.absolute()
-    if path.name != expected_name:
+    if path.name not in allowed:
         raise BundleValidationError(f"Select a {expected_name} directory.")
     if not (path / "Contents").is_dir():
         raise BundleValidationError(f"The selected bundle is missing its Contents directory: {path}")
