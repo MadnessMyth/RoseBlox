@@ -26,6 +26,12 @@ PAGE_DEFINITIONS = (
         "color-select-symbolic",
         "Replacement fonts, cursors, sounds and textures for Player and Studio.",
     ),
+    (
+        "networking",
+        "Networking",
+        "network-wireless-symbolic",
+        "Roblox servers you have connected to, their regions and ping.",
+    ),
     ("settings", "Settings", "emblem-system-symbolic", "Configure Roseblox and its Rosemary integration."),
 )
 
@@ -75,6 +81,15 @@ def create_page(
         scroller = Gtk.ScrolledWindow()
         scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         scroller.set_child(ModsPage(window))
+        scroller.set_hexpand(True)
+        scroller.set_vexpand(True)
+        return scroller
+    if page_id == "networking":
+        from .networking_page import NetworkingPage
+
+        scroller = Gtk.ScrolledWindow()
+        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroller.set_child(NetworkingPage(window))
         scroller.set_hexpand(True)
         scroller.set_vexpand(True)
         return scroller

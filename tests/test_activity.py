@@ -26,6 +26,7 @@ from roseblox.backend.activity import (
 from roseblox.backend.discord_rpc import DiscordError, DiscordPresence, build_activity, socket_candidates
 from roseblox.backend.game_info import GameDetails, GameInfoError, fetch_game, locate_server, ping_server
 from roseblox.backend.microphone_sounds import MicrophoneSounds
+from roseblox.backend.network_history import NetworkHistoryStore
 from roseblox.backend.setup import SetupSettingsError, SetupStore, WhilePlaying
 
 JOB = "e42cc7b0-9b0a-4b7e-8f35-1c2d3e4f5a6b"
@@ -493,6 +494,7 @@ class WatcherTests(unittest.TestCase):
         self.kills = []
         self.notifications = []
         self.lookups = []
+        self.network_history_path = Path(self.directory.name) / "network_history.json"
 
     def tearDown(self):
         self.directory.cleanup()
@@ -514,6 +516,7 @@ class WatcherTests(unittest.TestCase):
             kill=lambda pid, sig: self.kills.append((pid, sig)),
             find_log=lambda *_args: None,
             started_at=lambda _start_time: None,
+            network_history_factory=lambda: NetworkHistoryStore(self.network_history_path),
         )
         options.update(overrides)
         return ActivityWatcher(4242, 777, self.log, **options)
@@ -521,6 +524,17 @@ class WatcherTests(unittest.TestCase):
     def _write(self, *lines):
         with self.log.open("a") as stream:
             stream.write("\n".join(lines) + "\n")
+
+    def test_a_join_is_recorded_into_the_network_history(self):
+        watcher = self._watcher()
+        self._write(JOIN, PUBLIC, CONNECTED)
+        watcher.poll()
+        records = NetworkHistoryStore(self.network_history_path).load()
+        self.assertEqual([record.address for record in records], ["128.116.44.3"])
+        record = records[0]
+        self.assertEqual(record.region, "Frankfurt am Main, Hessen, Germany")
+        self.assertEqual(record.place_id, 2753915549)
+        self.assertEqual(record.connections, 1)
 
     def test_joining_sets_presence_and_notifies_the_location(self):
         watcher = self._watcher()

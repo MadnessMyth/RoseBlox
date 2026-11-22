@@ -27,6 +27,7 @@ from .backend.discord_rpc import (
 )
 from .backend.game_info import GameInfoError, fetch_game, locate_server, ping_server
 from .backend.game_overlay import BANNER_SECONDS, GameOverlay, ping_text
+from .backend.network_history import NetworkHistoryStore
 from .backend.rosemary import read_process_snapshot
 from .backend.setup import SetupSettingsError, SetupStore, WhilePlaying
 from .toast_service import UNSUPPORTED, toast_arguments
@@ -124,6 +125,7 @@ class ActivityWatcher:
         game_lookup=fetch_game,
         locate=locate_server,
         ping=ping_server,
+        network_history_factory=NetworkHistoryStore,
         notify=send_notification,
         close_notification=close_notification,
         clock=time.time,
@@ -152,6 +154,7 @@ class ActivityWatcher:
         self.game_lookup = game_lookup
         self.locate = locate
         self.ping = ping
+        self.network_history = network_history_factory()
         self.notify = notify
         self.close_notification = close_notification
         # The notification on screen, and when the watcher closes it.
@@ -461,6 +464,7 @@ class ActivityWatcher:
                 self._next_ping_at = self.clock() + PING_INTERVAL_SECONDS
         if location is not None or ping_ms is not None:
             self.show_location(location, settings, ping_ms=ping_ms)
+        self._record_connection(event, location, ping_ms)
         application_id = effective_application_id(settings.discord_application_id)
         if not settings.discord_presence or not valid_application_id(application_id):
             return
@@ -484,6 +488,24 @@ class ActivityWatcher:
             buttons=buttons,
         )
         self._publish(self.activity, application_id)
+
+    def _record_connection(self, event: GameJoined, location: str | None, ping_ms: int | None) -> None:
+        # The watcher is what knows a server was connected to, so it keeps the history the Networking
+        # tab reads. The join-handshake latency stands in for a ping when none was measured this join.
+        if not event.server_address:
+            return
+        measured = ping_ms if ping_ms is not None else self.tracker.last_join_latency_ms
+        try:
+            self.network_history.record(
+                event.server_address,
+                place_id=event.place_id,
+                job_id=event.job_id,
+                region=location,
+                ping_ms=measured,
+                timestamp=self.clock(),
+            )
+        except Exception as error:  # noqa: BLE001 - a store error must not stop Discord presence or the watcher
+            _log(f"network history: {error}")
 
     def left(self, event: GameLeft) -> None:
         self.activity = None
