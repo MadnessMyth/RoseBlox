@@ -2707,7 +2707,7 @@ class SettingsPage(Gtk.Box):
     def _show_network_settings(self, settings: NetworkSettings) -> None:
         self._network_block = True
         try:
-            self.record_connections_switch.set_active(settings.record_connections)
+            self.record_connections_row.set_active(settings.record_connections)
             self.retention_row.set_value(settings.retention_days)
             self.max_servers_row.set_value(settings.max_servers)
         finally:
@@ -2715,7 +2715,7 @@ class SettingsPage(Gtk.Box):
 
     def _current_network_settings(self) -> NetworkSettings:
         return NetworkSettings(
-            record_connections=self.record_connections_switch.get_active(),
+            record_connections=self.record_connections_row.get_active(),
             retention_days=int(self.retention_row.get_value()),
             max_servers=int(self.max_servers_row.get_value()),
         )
