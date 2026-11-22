@@ -120,6 +120,63 @@ class NetworkHistoryTests(unittest.TestCase):
         store.record("1.2.3.4", ping_ms=24)
         self.assertEqual(store.load()[0].last_seen, 4242.0)
 
+    def test_delete_removes_one_server_and_returns_true(self):
+        self.store.record("1.2.3.4", ping_ms=24, timestamp=1000.0)
+        self.store.record("5.6.7.8", ping_ms=30, timestamp=2000.0)
+        self.assertTrue(self.store.delete("1.2.3.4"))
+        self.assertEqual([r.address for r in self.store.load()], ["5.6.7.8"])
+
+    def test_delete_unknown_address_returns_false(self):
+        self.store.record("1.2.3.4", ping_ms=24, timestamp=1000.0)
+        self.assertFalse(self.store.delete("9.9.9.9"))
+        self.assertEqual(len(self.store.load()), 1)
+
+    def test_delete_ignores_private_address(self):
+        self.store.record("1.2.3.4", ping_ms=24, timestamp=1000.0)
+        self.assertFalse(self.store.delete("127.0.0.1"))
+        self.assertEqual(len(self.store.load()), 1)
+
+    def test_clear_removes_every_server(self):
+        self.store.record("1.2.3.4", ping_ms=24, timestamp=1000.0)
+        self.store.record("5.6.7.8", ping_ms=30, timestamp=2000.0)
+        self.store.clear()
+        self.assertEqual(self.store.load(), [])
+
+    def test_clear_on_empty_store_is_a_noop(self):
+        self.store.clear()
+        self.assertEqual(self.store.load(), [])
+
+    def test_load_hides_stale_servers_when_retention_set(self):
+        self.store.record("1.2.3.4", ping_ms=24, timestamp=1000.0)
+        self.assertEqual(len(self.store.load(retention_days=30)), 1)
+        self.store.record("5.6.7.8", ping_ms=30, timestamp=1000.0 - 31 * 86_400)
+        visible = [r.address for r in self.store.load(retention_days=30)]
+        self.assertEqual(visible, ["1.2.3.4"])
+        # The stale record stays on disk until a record() prunes it.
+        self.assertEqual(len(self.store.load()), 2)
+
+    def test_load_with_zero_retention_keeps_everything(self):
+        self.store.record("1.2.3.4", ping_ms=24, timestamp=1000.0 - 10_000 * 86_400)
+        self.assertEqual(len(self.store.load(retention_days=0)), 1)
+
+    def test_record_prunes_servers_older_than_retention(self):
+        self.store.record("1.2.3.4", ping_ms=24, timestamp=1000.0 - 31 * 86_400)
+        self.store.record("5.6.7.8", ping_ms=30, timestamp=1000.0, retention_days=30)
+        self.assertEqual([r.address for r in self.store.load()], ["5.6.7.8"])
+
+    def test_record_respects_max_servers_cap(self):
+        for index in range(5):
+            self.store.record(f"8.8.8.{index + 1}", ping_ms=24, timestamp=1000.0 + index, max_servers=3)
+        kept = [r.address for r in self.store.load()]
+        self.assertEqual(len(kept), 3)
+        self.assertEqual(kept, ["8.8.8.5", "8.8.8.4", "8.8.8.3"])
+
+    def test_best_regions_honors_retention(self):
+        self.store.record("1.1.1.1", region="Frankfurt, Germany", ping_ms=24, timestamp=1000.0 - 31 * 86_400)
+        self.store.record("2.2.2.2", region="Singapore", ping_ms=180, timestamp=1000.0)
+        regions = self.store.best_regions(retention_days=30)
+        self.assertEqual([r.region for r in regions], ["Singapore"])
+
 
 if __name__ == "__main__":
     unittest.main()

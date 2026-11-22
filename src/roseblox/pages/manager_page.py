@@ -37,6 +37,7 @@ from ..backend.setup import (
     COLOR_THEMES,
     Appearance,
     ClosePreference,
+    NetworkSettings,
     SetupSettingsError,
     WhilePlaying,
 )
@@ -1914,6 +1915,39 @@ class SettingsPage(Gtk.Box):
         playing.add(self.playing_message)
         self._show_while_playing(WhilePlaying())
 
+        networking = self._section(
+            "networking",
+            "Networking",
+            "Control what the Networking tab remembers about servers you join.",
+        )
+        self._network_block = False
+        network_group = Adw.PreferencesGroup.new()
+
+        self.record_connections_row = Adw.SwitchRow.new()
+        self.record_connections_row.set_title("Record connections")
+        self.record_connections_row.set_subtitle("Remember servers you join in the Networking tab.")
+        self.record_connections_row.connect("notify::active", self._network_changed)
+        network_group.add(self.record_connections_row)
+
+        self.retention_row = Adw.SpinRow.new_with_range(0, 365, 1)
+        self.retention_row.set_title("Keep servers for")
+        self.retention_row.set_subtitle("Days a server stays after you last joined it. 0 keeps them until the cap below.")
+        self.retention_row.connect("notify::value", self._network_changed)
+        network_group.add(self.retention_row)
+
+        self.max_servers_row = Adw.SpinRow.new_with_range(1, 1000, 1)
+        self.max_servers_row.set_title("Maximum servers")
+        self.max_servers_row.set_subtitle("Oldest servers are dropped once this many are stored.")
+        self.max_servers_row.connect("notify::value", self._network_changed)
+        network_group.add(self.max_servers_row)
+
+        self.network_message = Gtk.Label(xalign=0, wrap=True)
+        self.network_message.add_css_class("dim-label")
+        self.network_message.set_visible(False)
+        networking.add(network_group)
+        networking.add(self.network_message)
+        self._show_network_settings(NetworkSettings())
+
         links = self._section(
             "links",
             "Roblox Links",
@@ -2233,6 +2267,7 @@ class SettingsPage(Gtk.Box):
             self._show_close_preferences(setup_state)
             self._show_multiple(setup_state.multiple_players)
             self._show_while_playing(setup_state.while_playing)
+            self._show_network_settings(setup_state.network_settings)
             if setup_state.while_playing.microphone_toggle:
                 self.microphone_hotkey.start()
             self._show_skipped_versions(setup_state.skipped_versions)
@@ -2668,6 +2703,44 @@ class SettingsPage(Gtk.Box):
 
     def _current_while_playing(self) -> WhilePlaying:
         return getattr(getattr(self.window, "setup_state", None), "while_playing", None) or WhilePlaying()
+
+    def _show_network_settings(self, settings: NetworkSettings) -> None:
+        self._network_block = True
+        try:
+            self.record_connections_switch.set_active(settings.record_connections)
+            self.retention_row.set_value(settings.retention_days)
+            self.max_servers_row.set_value(settings.max_servers)
+        finally:
+            self._network_block = False
+
+    def _current_network_settings(self) -> NetworkSettings:
+        return NetworkSettings(
+            record_connections=self.record_connections_switch.get_active(),
+            retention_days=int(self.retention_row.get_value()),
+            max_servers=int(self.max_servers_row.get_value()),
+        )
+
+    def _network_changed(self, *_args) -> None:
+        if self._network_block:
+            return
+        self._save_network_settings(self._current_network_settings())
+
+    def _save_network_settings(self, settings: NetworkSettings) -> None:
+        if self.setup_store is None:
+            return
+        try:
+            state = self.setup_store.save_network_settings(settings)
+        except (SetupSettingsError, ValueError) as error:
+            self.network_message.set_text(f"Not saved: {str(error)[:300]}")
+            self.network_message.set_visible(True)
+            self._show_network_settings(self._current_network_settings())
+            return
+        self.window.setup_state = state
+        self.network_message.set_visible(False)
+        self._show_network_settings(state.network_settings)
+        networking_page = getattr(self.window, "networking_page", None)
+        if networking_page is not None and hasattr(networking_page, "refresh_view"):
+            networking_page.refresh_view()
 
     def _save_while_playing(self, settings: WhilePlaying) -> None:
         if self.setup_store is None:

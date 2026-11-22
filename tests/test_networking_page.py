@@ -21,15 +21,27 @@ class FakeStore:
         self._records = list(records or [])
         self._regions = list(regions or [])
         self.updates = []
+        self.deleted = []
+        self.cleared = False
 
-    def load(self):
+    def load(self, *, retention_days=None):
         return list(self._records)
 
-    def best_regions(self):
+    def best_regions(self, *, retention_days=None):
         return list(self._regions)
 
     def update_ping(self, address, *, region=None, ping_ms=None):
         self.updates.append((address, region, ping_ms))
+
+    def delete(self, address):
+        self.deleted.append(address)
+        self._records = [r for r in self._records if r.address != address]
+        return True
+
+    def clear(self):
+        self.cleared = True
+        self._records = []
+        self._regions = []
 
 
 class NetworkingPageTests(unittest.TestCase):
@@ -76,6 +88,39 @@ class NetworkingPageTests(unittest.TestCase):
         self.assertEqual(len(page._server_rows), 2)
         self.assertEqual(page._server_rows[0].get_title(), "1.2.3.4")
         self.assertIn("place 123", page._server_rows[0].get_subtitle())
+
+    def test_each_server_row_has_a_delete_button(self):
+        records = [self._record("1.2.3.4"), self._record("5.6.7.8")]
+        page = self._page(records=records, regions=[])
+        self.assertEqual(len(page._server_rows), 2)
+        self.assertEqual(len(page._server_delete_buttons), 2)
+
+    def test_delete_button_removes_the_server_and_refreshes(self):
+        records = [self._record("1.2.3.4"), self._record("5.6.7.8")]
+        page = self._page(records=records, regions=[])
+        page._on_delete_clicked(None, "1.2.3.4")
+        self.assertIn("1.2.3.4", page.store.deleted)
+        self.assertEqual([r.get_title() for r in page._server_rows], ["5.6.7.8"])
+
+    def test_clear_with_empty_store_skips_the_dialog(self):
+        page = self._page(records=[], regions=[])
+        # No exception, no clear called: the page bails out before building a dialog.
+        page._on_clear_clicked(None)
+        self.assertFalse(page.store.cleared)
+
+    def test_clear_response_clears_the_store_and_refreshes(self):
+        records = [self._record("1.2.3.4"), self._record("5.6.7.8")]
+        page = self._page(records=records, regions=[])
+        page._on_clear_response(mock.Mock(), "clear")
+        self.assertTrue(page.store.cleared)
+        self.assertEqual(page._server_rows, [])
+
+    def test_clear_response_cancel_does_not_clear(self):
+        records = [self._record("1.2.3.4")]
+        page = self._page(records=records, regions=[])
+        page._on_clear_response(mock.Mock(), "cancel")
+        self.assertFalse(page.store.cleared)
+        self.assertEqual(len(page._server_rows), 1)
 
     def test_refresh_re_pings_every_server_and_fills_missing_regions(self):
         records = [self._record("1.2.3.4", region=None), self._record("5.6.7.8", region=None)]

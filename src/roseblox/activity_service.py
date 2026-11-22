@@ -29,7 +29,7 @@ from .backend.game_info import GameInfoError, fetch_game, locate_server, ping_se
 from .backend.game_overlay import BANNER_SECONDS, GameOverlay, ping_text
 from .backend.network_history import NetworkHistoryStore
 from .backend.rosemary import read_process_snapshot
-from .backend.setup import SetupSettingsError, SetupStore, WhilePlaying
+from .backend.setup import NetworkSettings, SetupSettingsError, SetupStore, WhilePlaying
 from .toast_service import UNSUPPORTED, toast_arguments
 
 USAGE = "Usage: roseblox --activity-watch PID START_TIME LOG [ROBLOX_LOG_DIRECTORY] [--overlay CONFIG]"
@@ -120,6 +120,7 @@ class ActivityWatcher:
         roblox_logs: Path | None = None,
         *,
         settings: Callable[[], WhilePlaying] | None = None,
+        network_settings: Callable[[], NetworkSettings] | None = None,
         find_log=find_roblox_log,
         presence_factory=DiscordPresence,
         game_lookup=fetch_game,
@@ -150,6 +151,7 @@ class ActivityWatcher:
         self._reported_missing_log = False
         self.tracker = ActivityTracker()
         self._settings = settings or (lambda: SetupStore().load().while_playing)
+        self._network_settings_callable = network_settings or (lambda: SetupStore().load().network_settings)
         self.presence_factory = presence_factory
         self.game_lookup = game_lookup
         self.locate = locate
@@ -199,6 +201,13 @@ class ActivityWatcher:
         except SetupSettingsError as error:
             _log(str(error))
             return WhilePlaying()
+
+    def network_settings(self) -> NetworkSettings:
+        try:
+            return self._network_settings_callable()
+        except SetupSettingsError as error:
+            _log(str(error))
+            return NetworkSettings()
 
     def alive(self) -> bool:
         snapshot = self.process_snapshot(self.pid)
@@ -490,9 +499,12 @@ class ActivityWatcher:
         self._publish(self.activity, application_id)
 
     def _record_connection(self, event: GameJoined, location: str | None, ping_ms: int | None) -> None:
-        # The watcher is what knows a server was connected to, so it keeps the history the Networking
-        # tab reads. The join-handshake latency stands in for a ping when none was measured this join.
+        # The watcher owns the history the Networking tab reads; the join-handshake latency stands
+        # in for a ping when none was measured this join.
         if not event.server_address:
+            return
+        ns = self.network_settings()
+        if not ns.record_connections:
             return
         measured = ping_ms if ping_ms is not None else self.tracker.last_join_latency_ms
         try:
@@ -503,6 +515,8 @@ class ActivityWatcher:
                 region=location,
                 ping_ms=measured,
                 timestamp=self.clock(),
+                retention_days=ns.retention_days,
+                max_servers=ns.max_servers,
             )
         except Exception as error:  # noqa: BLE001 - a store error must not stop Discord presence or the watcher
             _log(f"network history: {error}")

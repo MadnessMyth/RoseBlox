@@ -122,6 +122,29 @@ class WhilePlaying:
 
 
 @dataclass(frozen=True)
+class NetworkSettings:
+    """How much the Networking tab remembers about servers you join.
+
+    ``record_connections`` turns logging off without removing what is already stored.
+    ``retention_days`` drops servers not seen in that many days; 0 keeps them until the
+    ``max_servers`` cap pushes the oldest out.
+    """
+
+    record_connections: bool = True
+    retention_days: int = 30
+    max_servers: int = 200
+
+    def validate(self) -> "NetworkSettings":
+        if not isinstance(self.record_connections, bool):
+            raise ValueError("The record-connections setting must be on or off.")
+        if isinstance(self.retention_days, bool) or not isinstance(self.retention_days, int) or self.retention_days < 0:
+            raise ValueError("Retention days must be a whole number of 0 or more.")
+        if isinstance(self.max_servers, bool) or not isinstance(self.max_servers, int) or self.max_servers < 1:
+            raise ValueError("The server cap must be a whole number of 1 or more.")
+        return self
+
+
+@dataclass(frozen=True)
 class SetupState:
     onboarding_completed: bool = False
     url_handlers_enabled: bool = False
@@ -137,6 +160,7 @@ class SetupState:
     multiple_players: bool = False
     expanded_sections: dict[str, bool] = field(default_factory=dict)
     while_playing: WhilePlaying = field(default_factory=WhilePlaying)
+    network_settings: NetworkSettings = field(default_factory=NetworkSettings)
 
     def close_preference(self, app_type: str) -> ClosePreference:
         return self.close_after_launch.get(app_type, ClosePreference())
@@ -196,6 +220,7 @@ class SetupStore:
             multiple_players=self._boolean(document, "multiple_players"),
             expanded_sections=self._expanded_sections(document.get("expanded_sections", {})),
             while_playing=self._while_playing(document.get("while_playing", {})),
+            network_settings=self._network_settings(document.get("network_settings", {})),
         )
 
     def complete_onboarding(self) -> SetupState:
@@ -314,6 +339,14 @@ class SetupStore:
             "microphone_sound_off": settings.microphone_sound_off,
         })
 
+    def save_network_settings(self, settings: NetworkSettings) -> SetupState:
+        settings.validate()
+        return self._update(network_settings={
+            "record_connections": settings.record_connections,
+            "retention_days": settings.retention_days,
+            "max_servers": settings.max_servers,
+        })
+
     def save_section_expanded(self, section: str, expanded: bool) -> SetupState:
         if not isinstance(section, str) or not section or not isinstance(expanded, bool):
             raise ValueError("Invalid Settings section state.")
@@ -358,6 +391,24 @@ class SetupStore:
                     "microphone_sound_volume", "microphone_sound_on", "microphone_sound_off",
                 )
             }).validate()
+        except ValueError as error:
+            raise invalid from error
+
+    @staticmethod
+    def _network_settings(value: object) -> NetworkSettings:
+        invalid = SetupSettingsError("Saved Networking settings are invalid; the file was not changed.")
+        if not isinstance(value, dict):
+            raise invalid
+        defaults = NetworkSettings()
+        record = value.get("record_connections", defaults.record_connections)
+        retention = value.get("retention_days", defaults.retention_days)
+        max_servers = value.get("max_servers", defaults.max_servers)
+        try:
+            return NetworkSettings(
+                record_connections=record if isinstance(record, bool) else defaults.record_connections,
+                retention_days=retention if isinstance(retention, int) and not isinstance(retention, bool) else defaults.retention_days,
+                max_servers=max_servers if isinstance(max_servers, int) and not isinstance(max_servers, bool) else defaults.max_servers,
+            ).validate()
         except ValueError as error:
             raise invalid from error
 

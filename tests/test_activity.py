@@ -27,7 +27,7 @@ from roseblox.backend.discord_rpc import DiscordError, DiscordPresence, build_ac
 from roseblox.backend.game_info import GameDetails, GameInfoError, fetch_game, locate_server, ping_server
 from roseblox.backend.microphone_sounds import MicrophoneSounds
 from roseblox.backend.network_history import NetworkHistoryStore
-from roseblox.backend.setup import SetupSettingsError, SetupStore, WhilePlaying
+from roseblox.backend.setup import NetworkSettings, SetupSettingsError, SetupStore, WhilePlaying
 
 JOB = "e42cc7b0-9b0a-4b7e-8f35-1c2d3e4f5a6b"
 JOIN = f"2026-10-18T13:49:33.349Z,1.2,abc,6 [FLog::Output] ! Joining game '{JOB}' place 2753915549 at 10.9.7.196"
@@ -495,6 +495,7 @@ class WatcherTests(unittest.TestCase):
         self.notifications = []
         self.lookups = []
         self.network_history_path = Path(self.directory.name) / "network_history.json"
+        self.network_settings_value = NetworkSettings()
 
     def tearDown(self):
         self.directory.cleanup()
@@ -506,6 +507,7 @@ class WatcherTests(unittest.TestCase):
 
         options = dict(
             settings=lambda: self.settings,
+            network_settings=lambda: self.network_settings_value,
             presence_factory=FakePresence,
             game_lookup=lookup,
             locate=lambda address: "Frankfurt am Main, Hessen, Germany",
@@ -535,6 +537,28 @@ class WatcherTests(unittest.TestCase):
         self.assertEqual(record.region, "Frankfurt am Main, Hessen, Germany")
         self.assertEqual(record.place_id, 2753915549)
         self.assertEqual(record.connections, 1)
+
+    def test_record_connections_off_skips_the_network_history(self):
+        self.network_settings_value = NetworkSettings(record_connections=False)
+        watcher = self._watcher()
+        self._write(JOIN, PUBLIC, CONNECTED)
+        watcher.poll()
+        self.assertEqual(NetworkHistoryStore(self.network_history_path).load(), [])
+
+    def test_retention_and_max_settings_reach_the_store_on_record(self):
+        captured = {}
+
+        class SpyStore(NetworkHistoryStore):
+            def record(self, address, **kwargs):
+                captured.update(kwargs)
+                return super().record(address, **kwargs)
+
+        self.network_settings_value = NetworkSettings(retention_days=14, max_servers=50)
+        watcher = self._watcher(network_history_factory=lambda: SpyStore(self.network_history_path))
+        self._write(JOIN, PUBLIC, CONNECTED)
+        watcher.poll()
+        self.assertEqual(captured.get("retention_days"), 14)
+        self.assertEqual(captured.get("max_servers"), 50)
 
     def test_joining_sets_presence_and_notifies_the_location(self):
         watcher = self._watcher()
